@@ -1,5 +1,5 @@
 #include <MD_MAX72XX.h>
-
+#include <SPI.h>
 //Bluetooth LE Libraries
 #include <NimBLEDevice.h>
 #include <NimBLEServer.h>
@@ -8,6 +8,7 @@
 // BLE UUIDs
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define TEMPERATURE_CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a9"  // Unique UUID for temperature data
 
 // Turn on debug statements to the serial output
 #define  DEBUG  1
@@ -38,15 +39,17 @@ MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 
 #define  DELAYTIME  60
 
-//Button Pins
-//#define PULS1 9
-//#define PULS2 8
-//#define PULS3 7
-//#define PULS4 6
-//#define PULS5 5
-//#define PULS6 4
-//#define PULS7 3
-//#define PULS8 2
+/*
+// Uncomment if you want to use Button Pins
+#define PULS1 9
+#define PULS2 8
+#define PULS3 7
+#define PULS4 6
+#define PULS5 5
+#define PULS6 4
+#define PULS7 3
+#define PULS8 2
+*/
 
 uint8_t face=1;    // Current face display state
 short tempo;    //Time delay for blinking
@@ -57,6 +60,7 @@ bool oldDeviceConnected = false;
 // BLE Server pointers
 NimBLEServer* pServer = NULL;
 NimBLECharacteristic* pCharacteristic = NULL;
+NimBLECharacteristic* pTemperatureCharacteristic = NULL;
 
 // Class to handle BLE server callbacks
 class ServerCallbacks : public NimBLEServerCallbacks {
@@ -114,8 +118,10 @@ void setup() {
 #if  DEBUG
   Serial.begin(115200);
 #endif
-  PRINTS("\n[Test Protogen os]");
-
+  PRINTS("\n[Test Protogen OS]");
+  
+  OSBoot(); //Play boot animation on startup
+  
     // Initialize NimBLE
     NimBLEDevice::init("LumiFur_BLE");
     NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Set maximum power level
@@ -126,12 +132,20 @@ void setup() {
 
     // Create the BLE Service and Characteristic
     NimBLEService* pService = pServer->createService(SERVICE_UUID);
+    
+    // Face characteristic
     pCharacteristic = pService->createCharacteristic(
                         CHARACTERISTIC_UUID,
                         NIMBLE_PROPERTY::READ |
                         NIMBLE_PROPERTY::WRITE |
                         NIMBLE_PROPERTY::NOTIFY);
-
+    
+    // Temperature Characteristic
+    pTemperatureCharacteristic = pService->createCharacteristic(
+                                    TEMPERATURE_CHARACTERISTIC_UUID,
+                                    NIMBLE_PROPERTY::READ |
+                                    NIMBLE_PROPERTY::NOTIFY);
+    
     pCharacteristic->setCallbacks(new CharacteristicCallbacks());
     pService->start();
 
@@ -157,6 +171,23 @@ void loop() {
 
     if (deviceConnected && !oldDeviceConnected) {
         oldDeviceConnected = deviceConnected;
+    }
+
+if (deviceConnected) {
+        // Read the ESP32's internal temperature
+        float temperature = temperatureRead();  // Temperature in Celsius
+
+        // Convert temperature to string and send over BLE
+        char tempStr[8];
+        dtostrf(temperature, 1, 2, tempStr);  // Convert float to string
+        pTemperatureCharacteristic->setValue(tempStr);  // Update BLE characteristic
+        pTemperatureCharacteristic->notify();  // Notify the connected device
+
+        // Optional: Debug output to serial
+        Serial.print("Internal Temperature: ");
+        Serial.println(tempStr);
+
+        delay(2000);  // Adjust the update frequency as needed
     }
 
 // Original face control logic
@@ -277,9 +308,9 @@ void loopBlink(byte x) {
   }
 }
 
-void OSBoot(){//aestetic funcions for the protoggen booting animation
+void OSBoot() { //asthetic funcions for the protogen booting animation
 //mx.control(MD_MAX72XX::setFont());
-  scrollText("PROTOGEN OS 2.5 BOOTING..");
+  scrollText("LUMIFUR OS 1.0 BOOTING..");
   delay(500);//delay for reading
   mx.clear();//i clear the matrix for not exploding the previous pixels
   uint8_t sys1[COL_SIZE]{
