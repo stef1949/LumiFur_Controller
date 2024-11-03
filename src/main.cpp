@@ -1,5 +1,7 @@
+//General Libraries
 #include <MD_MAX72XX.h>
 #include <SPI.h>
+
 //Bluetooth LE Libraries
 #include <NimBLEDevice.h>
 #include <NimBLEServer.h>
@@ -40,7 +42,7 @@ MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 #define  DELAYTIME  60
 
 /*
-// Uncomment if you want to use Button Pins
+/////////////// Uncomment if you want to use Button Pins ///////////////
 #define PULS1 9
 #define PULS2 8
 #define PULS3 7
