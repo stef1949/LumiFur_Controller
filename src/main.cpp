@@ -1,5 +1,6 @@
 //General Libraries
 #include <MD_MAX72XX.h>
+#include <fastLED.h> //FastLED library for controlling built in LED for BLE connection status
 #include <SPI.h>
 
 //Bluetooth LE Libraries
@@ -11,6 +12,12 @@
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 #define TEMPERATURE_CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a9"  // Unique UUID for temperature data
+
+// Built-in RGB LED pin
+const int RGB_PIN = 48;                // Data pin for the built-in RGB LED (use GPIO 45 if 48 doesn’t work)
+#define NUM_LEDS 1                     // Number of RGB LEDs (1 if it’s built-in)
+
+CRGB leds[NUM_LEDS];                   // Array to control RGB LED
 
 // Turn on debug statements to the serial output
 #define  DEBUG  1
@@ -68,10 +75,14 @@ NimBLECharacteristic* pTemperatureCharacteristic = NULL;
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* pServer) {
         deviceConnected = true;
+        Serial.println("Client connected, LED solid blue.");
+        leds[0] = CRGB::Blue;          // Set RGB LED to solid blue when connected
+        FastLED.show();
     }
 
     void onDisconnect(NimBLEServer* pServer) {
         deviceConnected = false;
+        Serial.println("Client disconnected, LED will blink blue.");
     }
 };
 
@@ -89,6 +100,10 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
+// Function Declarations
+void fadeBlueLED();
+void fadeInAndOutLED(CRGB color, uint8_t step, uint8_t delayTime);
+void handleBLEConnection();
 void OSBoot();
 void idleFace();
 void loopBlink(byte x);
@@ -160,20 +175,107 @@ void setup() {
     NimBLEDevice::startAdvertising();
 
     PRINTS("\nBLE Active, waiting for connections...");
+    
+     // Initialize the FastLED library
+    FastLED.addLeds<NEOPIXEL, RGB_PIN>(leds, NUM_LEDS);
+    FastLED.clear();  // Ensure LED is off at startup
+    FastLED.show();
 }
 
-void loop() {
+void handleBLEConnection() {
     // BLE connection status handling
     if (!deviceConnected && oldDeviceConnected) {
         delay(500); // Give Bluetooth stack time to settle
-        pServer->startAdvertising();
+        pServer->startAdvertising(); //start advertising to reconnect
         PRINTS("\nStarting advertising");
-        oldDeviceConnected = deviceConnected;
+        oldDeviceConnected = deviceConnected; //Update the old connection status
+    }
+
+     // Fade blue LED in and out when waiting for a connection
+    if (!deviceConnected) {
+        fadeBlueLED(); // Indicate waiting for connection by fading blue LED
     }
 
     if (deviceConnected && !oldDeviceConnected) {
-        oldDeviceConnected = deviceConnected;
+        Serial.println("Device connected");
+        // Solid blue LED when connected
+        leds[0] = CRGB::Green;
+        FastLED.show();
+        oldDeviceConnected = deviceConnected; // Update the old connection status
     }
+}
+
+void fadeBlueLED() { // Continue fading while no device is connected
+    while (!deviceConnected) {
+        fadeInAndOutLED(CRGB::Blue, 5, 5); // Fade the blue LED with specific step and delay
+    }
+}
+
+void fadeInAndOutLED(CRGB color, uint8_t step, uint8_t delayTime) {
+    // Fade in
+    for (int brightness = 0; brightness <= 255; brightness += step) {
+        leds[0] = color;
+        leds[0].fadeLightBy(255 - brightness);   // Increase brightness
+        FastLED.show();
+        delay(delayTime);                        // Adjust delay for speed of fade
+    }
+    // Fade out
+    for (int brightness = 255; brightness >= 0; brightness -= step) {
+        leds[0] = color;
+        leds[0].fadeLightBy(255 - brightness);   // Decrease brightness
+        FastLED.show();
+        delay(delayTime);                        // Adjust delay for speed of fade
+    }
+}
+
+void loop() {
+  // Handle BLE connection status & LED indicator
+  handleBLEConnection(); 
+
+if (deviceConnected) {
+        // Read the ESP32's internal temperature
+        float temperature = temperatureRead();  // Temperature in Celsius
+
+        // Convert temperature to string and send over BLE
+        char tempStr[8];
+        dtostrf(temperature, 1, 2, tempStr);  // Convert float to string
+        pTemperatureCharacteristic->setValue(tempStr);  // Update BLE characteristic
+        pTemperatureCharacteristic->notify();  // Notify the connected device
+
+        // Optional: Debug output to serial
+        Serial.print("Internal Temperature: ");
+        Serial.println(tempStr);
+
+        delay(2000);  // Adjust the update frequency as needed
+    }
+}
+
+void fadeBlueLED() { // Continue fading while no device is connected
+    while (!deviceConnected) {
+        fadeInAndOutLED(CRGB::Blue, 5, 5); // Fade the blue LED with specific step and delay
+    }
+}
+
+void fadeInAndOutLED(CRGB color, uint8_t step, uint8_t delayTime) {
+    // Fade in
+    for (int brightness = 0; brightness <= 255; brightness += step) {
+        leds[0] = color;
+        leds[0].fadeLightBy(255 - brightness);   // Increase brightness
+        FastLED.show();
+        delay(delayTime);                        // Adjust delay for speed of fade
+    }
+    // Fade out
+    for (int brightness = 255; brightness >= 0; brightness -= step) {
+        leds[0] = color;
+        leds[0].fadeLightBy(255 - brightness);   // Decrease brightness
+        FastLED.show();
+        delay(delayTime);                        // Adjust delay for speed of fade
+    }
+}
+
+void loop() {
+  // Handle BLE connection status & LED indicator
+  handleBLEConnection(); 
 
 if (deviceConnected) {
         // Read the ESP32's internal temperature
@@ -193,9 +295,9 @@ if (deviceConnected) {
     }
 
 // Original face control logic
-  if(DEBUG) Serial.println(face);
+  if(DEBUG) Serial.println(face); // Print the face value if debugging is enabled
 
-  tempo=0;
+  tempo=0; // Reset tempo for each loop iteration
 
   // Display face based on `face` value
   switch(face) {
