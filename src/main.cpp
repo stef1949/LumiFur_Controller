@@ -26,13 +26,12 @@ CRGB leds[NUM_LEDS];                   // Array to control RGB LED
 #define PRINT(s, x) { Serial.print(F(s)); Serial.print(x); }
 #define PRINTS(x) Serial.print(F(x))
 #define PRINTD(x) Serial.println(x, DEC)
-
 #else
 #define PRINT(s, x)
 #define PRINTS(x)
 #define PRINTD(x)
-
 #endif
+
 #define HARDWARE_TYPE MD_MAX72XX::FC16_HW/*PAROLA_HW/FC16_HW*/
 #define MAX_DEVICES  14
 
@@ -248,54 +247,9 @@ if (deviceConnected) {
 
         delay(2000);  // Adjust the update frequency as needed
     }
-}
-
-void fadeBlueLED() { // Continue fading while no device is connected
-    while (!deviceConnected) {
-        fadeInAndOutLED(CRGB::Blue, 5, 5); // Fade the blue LED with specific step and delay
-    }
-}
-
-void fadeInAndOutLED(CRGB color, uint8_t step, uint8_t delayTime) {
-    // Fade in
-    for (int brightness = 0; brightness <= 255; brightness += step) {
-        leds[0] = color;
-        leds[0].fadeLightBy(255 - brightness);   // Increase brightness
-        FastLED.show();
-        delay(delayTime);                        // Adjust delay for speed of fade
-    }
-    // Fade out
-    for (int brightness = 255; brightness >= 0; brightness -= step) {
-        leds[0] = color;
-        leds[0].fadeLightBy(255 - brightness);   // Decrease brightness
-        FastLED.show();
-        delay(delayTime);                        // Adjust delay for speed of fade
-    }
-}
-
-void loop() {
-  // Handle BLE connection status & LED indicator
-  handleBLEConnection(); 
-
-if (deviceConnected) {
-        // Read the ESP32's internal temperature
-        float temperature = temperatureRead();  // Temperature in Celsius
-
-        // Convert temperature to string and send over BLE
-        char tempStr[8];
-        dtostrf(temperature, 1, 2, tempStr);  // Convert float to string
-        pTemperatureCharacteristic->setValue(tempStr);  // Update BLE characteristic
-        pTemperatureCharacteristic->notify();  // Notify the connected device
-
-        // Optional: Debug output to serial
-        Serial.print("Internal Temperature: ");
-        Serial.println(tempStr);
-
-        delay(2000);  // Adjust the update frequency as needed
-    }
 
 // Original face control logic
-  if(DEBUG) Serial.println(face); // Print the face value if debugging is enabled
+  if (DEBUG) Serial.println(face); // Print the face value if debugging is enabled
 
   tempo=0; // Reset tempo for each loop iteration
 
