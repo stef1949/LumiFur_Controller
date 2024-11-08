@@ -19,7 +19,7 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 
 1. Clone the repository:
     ```sh
-    git clone <repository-url>
+    git clone https://github.com/stef1949/LumiFur_Controller.git
     ```
 
 2. Install the required libraries in Arduino IDE:
