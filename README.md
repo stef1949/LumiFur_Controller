@@ -3,30 +3,32 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 
 ## Table of Contents
 
-- [Features](#features)
-- [Hardware Requirements](#hardware-requirements)
-- [Software Requirements](#software-requirements)
-- [Installation](#installation)
-- [Usage](#usage)
-- [Facial Expressions](#facial-expressions)
-- [Contributing](#contributing)
-- [License](#license)
+- [Features](#features) ✨
+- [Hardware Requirements](#hardware-requirements) 🛠️
+- [Software Requirements](#software-requirements) 💻
+- [Installation](#installation) ⚙️
+- [Usage](#usage) 📖
+- [Facial Expressions](#facial-expressions) 😃
+- [Contributing](#contributing) 🤝
+- [License](#license) 📜
 
-## Features
+## Features ✨
 - Multiple facial expressions (idle, happy, angry, playful, silly, kinky, and more)
 - Smooth blinking animations
 - Bluetooth Low Energy (BLE) connectivity to switch expressions remotely
 - Boot-up animation with scrolling text
-## Hardware Requirements
+  
+## Hardware Requirements 🛠️
 - ESP32 development board
 - 14 x MAX7219 8x8 LED matrix modules
 - Connecting wires and power supply
-## Software Requirements
+  
+## Software Requirements 💻
 - VSCode with PlatformIO Extension 
 - MD_MAX72XX library
 - NimBLE-Arduino library
 
-## Installation
+## Installation ⚙️
 
 1. Clone the repository:
     ```sh
@@ -52,7 +54,7 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 
 - Check the pin definitions (CLK_PIN, DATA_PIN, CS_PIN) and adjust them to match your setup.
 
-## Usage
+## Usage 📖
 
 1. Connect your ESP32 to the computer via USB.
 2. Select the correct board and port in the Arduino IDE.
@@ -69,7 +71,7 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 3. Use a BLE-compatible app to connect to 'LumiFur_BLE'.
 4. Send values between 1 and 8 to change facial expressions.
 
-### Facial Expressions
+### Facial Expressions 😃
 
 - 1 - Idle Face
 - 2 - Happy Face
@@ -80,8 +82,8 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 - 7 - Death Face
 - 8 - Edgy Face
 
-## Contributing
+## Contributing 🤝
 Contributions are welcome! Please fork the repository and submit a pull request with your improvements.
 
-## License
+## License 📜
 This project is licensed under the BSD 3-Clause License - see the LICENSE file for details.
