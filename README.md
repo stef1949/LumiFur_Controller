@@ -68,7 +68,7 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 
 1. Power on the device.
 2. The mask will display the default idle face with animations.
-3. Use a BLE-compatible app to connect to 'LumiFur_BLE'.
+3. Use the LumiFur app to connect to 'LumiFur_BLE'.
 4. Send values between 1 and 8 to change facial expressions.
 
 ### Facial Expressions 😃
