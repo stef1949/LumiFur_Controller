@@ -15,9 +15,10 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 - MD_MAX72XX library
 - NimBLE-Arduino library
 
-Installation
+## Installation
+
 1. Clone the repository:
-```sh
+    ```sh
     git clone <repository-url>
     ```
 
