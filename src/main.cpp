@@ -39,6 +39,94 @@ CRGB leds[NUM_LEDS];                   // Array to control RGB LED
 #define DATA_PIN  23  // or MOSI
 #define CS_PIN    5  // or SS
 
+// Ultrasonic Sensor Pins
+#define TRIG_PIN 6  // ESP32 GPIO pin for HC-SR04 Trigger
+#define ECHO_PIN 18  // ESP32 GPIO pin for HC-SR04 Echo
+//#define READINGS_COUNT 3  // Number of readings to average
+
+// Ultrasonic Sensor Variables
+long duration; // Time taken for the ultrasonic wave to return
+int distance; // Distance in centimeters
+int currentDistance; // Distance in centimeters
+const int READINGS_COUNT = 10; // Number of readings to average
+
+int readings[READINGS_COUNT]; // the readings from the analog input
+int readIndex = 0; // the index of the current reading
+unsigned long lastDistanceCheck = 0; // Last time distance was checked
+
+const unsigned long DISTANCE_CHECK_INTERVAL = 200; // Check distance every 100ms
+
+// Ultrasonnic Sensor Function Declaration
+void setupHCSR04() {
+    pinMode(TRIG_PIN, OUTPUT);
+    pinMode(ECHO_PIN, INPUT);
+    digitalWrite(TRIG_PIN, LOW);
+
+    // Initialize the readings array
+    for (int i = 0; i < READINGS_COUNT; i++) {
+        readings[i] = 0;
+    }
+}
+
+// Get a single distance reading
+int getSingleReading() {
+    digitalWrite(TRIG_PIN, LOW);
+    delayMicroseconds(2); // Delay to ensure a clean pulse
+
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10); // Generate a 10us pulse
+    digitalWrite(TRIG_PIN, LOW);
+
+    duration = pulseIn(ECHO_PIN, HIGH, 30000);
+    if (duration == 0) {
+        #if DEBUG
+            Serial.println("No pulse received");
+        #endif
+        return 400;  // Return max range if no pulse received
+    }
+
+    distance = duration * 0.0344 / 2;  // Calculate distance in cm
+    
+    Serial.print("Calculated distance: ");
+    Serial.print(distance);
+    Serial.println(" cm");
+
+    // Limit the range to 2-400cm (HC-SR04 specs)
+    if (distance > 400 || distance < 2) {
+        #if DEBUG
+            Serial.println("Distance out of range");
+        #endif
+        return 400;  // Return max range if out of bounds
+    }
+
+    return distance;
+}
+
+// Get averaged distance reading
+int getDistance() {
+    #if DEBUG
+        Serial.println("Reading HC-SR04 sensor...");
+    #endif
+
+    readings[readIndex] = getSingleReading();
+    readIndex = (readIndex + 1) % READINGS_COUNT;
+
+    long sum = 0;
+    for (int i = 0; i < READINGS_COUNT; i++) {
+        sum += readings[i];
+    }
+
+    int avgDistance = (READINGS_COUNT > 0) ? (sum / READINGS_COUNT) : 0;
+
+    #if DEBUG
+        Serial.print("Average Distance: ");
+        Serial.print(avgDistance);
+        Serial.println(" cm");
+    #endif
+
+    return avgDistance;
+}
+
 MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 // Specific SPI hardware interface
 //MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, SPI1, CS_PIN, MAX_DEVICES);
@@ -99,7 +187,10 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
-// Function Declarations
+//Face function declarations
+void setupHCSR04();
+int getSingleReading();
+int getDistance();
 void fadeBlueLED();
 void fadeInAndOutLED(CRGB color, uint8_t step, uint8_t delayTime);
 void handleBLEConnection();
@@ -128,15 +219,27 @@ void deathEyes();
 void scrollText(const char *p);
 void angyEyesBlink();
 
+// Setup function
 void setup() {
+
   mx.begin();
 
 #if  DEBUG
   Serial.begin(115200);
 #endif
-  PRINTS("\n[Test Protogen OS]");
-  
+  Serial.println("\n=== Booting LumiFur OS ===");
+
   OSBoot(); //Play boot animation on startup
+    
+    // Initialize HC-SR04
+    setupHCSR04(); // Setup the ultrasonic sensor
+    Serial.println("HC-SR04 initialized");
+
+    //Test the ultrasonic sensor
+    int initialDistance = getDistance();
+    Serial.print("Initial distance: ");
+    Serial.print(initialDistance);
+    Serial.println(" cm");
   
     // Initialize NimBLE
     NimBLEDevice::init("LumiFur_BLE");
@@ -204,6 +307,43 @@ void handleBLEConnection() {
     }
 }
 
+// Handle distance measurements and face changes
+void handleDistance() {
+    if (millis() - lastDistanceCheck >= DISTANCE_CHECK_INTERVAL) {
+        lastDistanceCheck = millis();
+        currentDistance = getDistance();
+        
+        /*
+        // Change face based on distance
+        if (currentDistance < 10) {
+            face = 6;  // Very close - show surprised/kinky face
+        } else if (currentDistance < 30) {
+            face = 2;  // Close - show happy face
+        } else if (currentDistance < 50) {
+            face = 4;  // Medium distance - show playful face
+        } else if (currentDistance < 100) {
+            face = 1;  // Far - show idle face
+        } else {
+            face = 1;  // Very far or no detection - show idle face
+        }
+        */
+
+        // Send distance data over BLE if connected
+        if (deviceConnected) {
+            char distStr[8];
+            snprintf(distStr, sizeof(distStr), "%d", currentDistance);
+            pTemperatureCharacteristic->setValue(distStr);
+            pTemperatureCharacteristic->notify();
+        }
+
+        // Print distance to Serial Monitor
+        Serial.print("Distance: ");
+        Serial.print(currentDistance);
+        Serial.println(" cm");
+        delay(100);  // Delay to prevent spamming the Serial Monitor
+    }
+}
+
 void fadeBlueLED() { // Continue fading while no device is connected
     while (!deviceConnected) {
         fadeInAndOutLED(CRGB::Blue, 5, 5); // Fade the blue LED with specific step and delay
@@ -229,8 +369,12 @@ void fadeInAndOutLED(CRGB color, uint8_t step, uint8_t delayTime) {
 
 void loop() {
   // Handle BLE connection status & LED indicator
-  handleBLEConnection(); 
+  handleBLEConnection();
 
+  // Handle distance measurements and face changes
+  handleDistance();
+
+    // Check if a device is connected
 if (deviceConnected) {
         // Read the ESP32's internal temperature
         float temperature = temperatureRead();  // Temperature in Celsius
