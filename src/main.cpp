@@ -342,6 +342,7 @@ void handleDistance() {
         Serial.println(" cm");
         delay(100);  // Delay to prevent spamming the Serial Monitor
     }
+    int READINGS_COUNT = 0;
 }
 
 void fadeBlueLED() { // Continue fading while no device is connected
