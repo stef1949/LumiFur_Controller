@@ -12,6 +12,7 @@
 #define SERVICE_UUID        "01931c44-3867-7740-9867-c822cb7df308"
 #define CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09fe"
 #define TEMPERATURE_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9774-18350e3e27db"  // Unique UUID for temperature data
+#define ULTRASOUND_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9732-12460e3a35db"  // Unique UUID for temperature data
 
 // Built-in RGB LED pin
 const int RGB_PIN = 48;                // Data pin for the built-in RGB LED (use GPIO 45 if 48 doesn’t work)
@@ -44,87 +45,123 @@ CRGB leds[NUM_LEDS];                   // Array to control RGB LED
 #define ECHO_PIN 18  // ESP32 GPIO pin for HC-SR04 Echo
 //#define READINGS_COUNT 3  // Number of readings to average
 
-// Ultrasonic Sensor Variables
-long duration; // Time taken for the ultrasonic wave to return
-int distance; // Distance in centimeters
-int currentDistance; // Distance in centimeters
-const int READINGS_COUNT = 10; // Number of readings to average
+// Constants for distance measurement
+const float SOUND_SPEED = 0.034;    // Speed of sound in cm/microsecond
+const int MAX_DISTANCE = 400;       // Maximum distance in cm
+const int MIN_DISTANCE = 2;         // Minimum distance in cm
+const int INVALID_DISTANCE = 9999;  // Invalid distance value
+const int READINGS_COUNT = 5;       // Take 5 readings to average
+const unsigned long READING_INTERVAL = 200; // 200ms between readings (5 times per second)
 
-int readings[READINGS_COUNT]; // the readings from the analog input
-int readIndex = 0; // the index of the current reading
-unsigned long lastDistanceCheck = 0; // Last time distance was checked
+// Variables for averaging
+int readings[READINGS_COUNT];      // Array to store distance readings
+int readIndex = 0;                // Index for current reading
+unsigned long lastReadingTime = 0; // Time of last reading
+int currentDistance = 100;           // Current distance reading
 
-const unsigned long DISTANCE_CHECK_INTERVAL = 200; // Check distance every 100ms
+// Blinking Variables
+unsigned long previousMillis = 0; // Store last update time
+const unsigned long interval = 1; // 1 ms interval for checking
+const unsigned long maxTempo = 7000;
 
-// Ultrasonnic Sensor Function Declaration
-void setupHCSR04() {
-    pinMode(TRIG_PIN, OUTPUT);
-    pinMode(ECHO_PIN, INPUT);
-    digitalWrite(TRIG_PIN, LOW);
-
-    // Initialize the readings array
-    for (int i = 0; i < READINGS_COUNT; i++) {
-        readings[i] = 0;
-    }
-}
+//Temp Non-Blocking Variables
+unsigned long temperatureMillis = 0;
+const unsigned long temperatureInterval = 1000; // 1 second interval for temperature update
 
 // Get a single distance reading
 int getSingleReading() {
+    unsigned long duration;
     digitalWrite(TRIG_PIN, LOW);
-    delayMicroseconds(2); // Delay to ensure a clean pulse
-
-    digitalWrite(TRIG_PIN, HIGH);
-    delayMicroseconds(10); // Generate a 10us pulse
-    digitalWrite(TRIG_PIN, LOW);
-
-    duration = pulseIn(ECHO_PIN, HIGH, 30000);
-    if (duration == 0) {
-        #if DEBUG
-            Serial.println("No pulse received");
-        #endif
-        return 400;  // Return max range if no pulse received
-    }
-
-    distance = duration * 0.0344 / 2;  // Calculate distance in cm
+    delayMicroseconds(2);
     
-    Serial.print("Calculated distance: ");
-    Serial.print(distance);
-    Serial.println(" cm");
-
-    // Limit the range to 2-400cm (HC-SR04 specs)
-    if (distance > 400 || distance < 2) {
-        #if DEBUG
-            Serial.println("Distance out of range");
-        #endif
-        return 400;  // Return max range if out of bounds
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
+    
+    duration = pulseIn(ECHO_PIN, HIGH, 30000); // 30ms timeout
+    
+    if (duration == 0) {
+        Serial.println("No echo received");
+        return INVALID_DISTANCE;
     }
-
-    return distance;
+    
+    int distanceCm = (duration / 2.0) * SOUND_SPEED;
+    
+    if (distanceCm > MAX_DISTANCE || distanceCm < MIN_DISTANCE) {
+        Serial.println("Distance out of range");
+        return INVALID_DISTANCE;
+    }
+    
+    return distanceCm;
 }
 
 // Get averaged distance reading
 int getDistance() {
-    #if DEBUG
-        Serial.println("Reading HC-SR04 sensor...");
-    #endif
+    unsigned long currentTime = millis();
 
-    readings[readIndex] = getSingleReading();
-    readIndex = (readIndex + 1) % READINGS_COUNT;
+    // Only take a new reading every READING_INTERVAL ms
+     if (currentTime - lastReadingTime >= READING_INTERVAL) {
+        lastReadingTime = currentTime;
 
-    long sum = 0;
-    for (int i = 0; i < READINGS_COUNT; i++) {
-        sum += readings[i];
+        // Get new reading
+        int newReading = getSingleReading();
+
+        if (newReading != INVALID_DISTANCE) {
+            readings[readIndex] = newReading;
+            Serial.print("Reading ");
+            Serial.print(readIndex + 1);
+            Serial.print(": ");
+            Serial.print(newReading);
+            Serial.println(" cm");
+            readIndex++;
+        }
+
+        if (readIndex >= READINGS_COUNT) {
+            long sum = 0;
+            int validReadings = 0;
+
+            for (int i = 0; i < READINGS_COUNT; i++) {
+                if (readings[i] != INVALID_DISTANCE) {
+                    sum += readings[i];
+                    validReadings++;
+                }
+            }
+
+            if (validReadings == READINGS_COUNT) {
+                int avgDistance = sum / validReadings;
+                Serial.print("Average of 5 readings: ");
+                Serial.print(avgDistance);
+                Serial.println(" cm");
+                currentDistance = avgDistance;
+            }
+
+            readIndex = 0; // Reset for next 5 readings
+        }
+    }
+    
+
+    // Calculate average of all 5 readings once per second
+    if (readIndex == 0) {
+        long sum = 0;
+        int validReadings = 0;
+
+        for (int i = 0; i < READINGS_COUNT; i++) {
+            if (readings[i] != INVALID_DISTANCE) {
+                sum += readings[i];
+                validReadings++;
+            }
+        }
+
+        if (validReadings == READINGS_COUNT) {
+            int avgDistance = sum / validReadings;
+            Serial.print("Average of 5 readings: ");
+            Serial.print(avgDistance);
+            Serial.println(" cm");
+            return avgDistance;
+        }
     }
 
-    int avgDistance = (READINGS_COUNT > 0) ? (sum / READINGS_COUNT) : 0;
-
-    #if DEBUG
-        Serial.print("Average Distance: ");
-        Serial.print(avgDistance);
-        Serial.println(" cm");
-    #endif
-
-    return avgDistance;
+    return currentDistance; // Return last valid distance if no valid readings
 }
 
 MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
@@ -218,10 +255,11 @@ void uwuEyes();
 void deathEyes();
 void scrollText(const char *p);
 void angyEyesBlink();
+void handleDistance();
+void handleDistanceMeasurements();
 
 // Setup function
 void setup() {
-
   mx.begin();
 
 #if  DEBUG
@@ -229,59 +267,58 @@ void setup() {
 #endif
   Serial.println("\n=== Booting LumiFur OS ===");
 
-  OSBoot(); //Play boot animation on startup
-    
-    // Initialize HC-SR04
-    setupHCSR04(); // Setup the ultrasonic sensor
-    Serial.println("HC-SR04 initialized");
-
-    //Test the ultrasonic sensor
-    int initialDistance = getDistance();
-    Serial.print("Initial distance: ");
-    Serial.print(initialDistance);
-    Serial.println(" cm");
+  //OSBoot(); //Play boot animation on startup
   
-    // Initialize NimBLE
-    NimBLEDevice::init("LumiFur_BLE");
-    NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Set maximum power level
+  // Initialize HC-SR04
+  setupHCSR04(); // Setup the ultrasonic sensor
 
-    // Create the BLE Server
-    pServer = NimBLEDevice::createServer();
-    pServer->setCallbacks(new ServerCallbacks());
+  //Test the ultrasonic sensor
+  int initialDistance = getDistance();
+  Serial.print("Initial distance: ");
+  Serial.print(initialDistance);
+  Serial.println(" cm");
+  
+  // Initialize NimBLE
+  NimBLEDevice::init("LumiFur_BLE");
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Set maximum power level
 
-    // Create the BLE Service and Characteristic
-    NimBLEService* pService = pServer->createService(SERVICE_UUID);
-    
-    // Face characteristic
+  // Create the BLE Server
+  pServer = NimBLEDevice::createServer();
+  pServer->setCallbacks(new ServerCallbacks());
+
+  // Create the BLE Service and Characteristic
+  NimBLEService* pService = pServer->createService(SERVICE_UUID);
+  
+  // Face characteristic
     pCharacteristic = pService->createCharacteristic(
-                        CHARACTERISTIC_UUID,
-                        NIMBLE_PROPERTY::READ |
-                        NIMBLE_PROPERTY::WRITE |
-                        NIMBLE_PROPERTY::NOTIFY);
+                      CHARACTERISTIC_UUID,
+                      NIMBLE_PROPERTY::READ |
+                      NIMBLE_PROPERTY::WRITE |
+                      NIMBLE_PROPERTY::NOTIFY);
     
-    // Temperature Characteristic
-    pTemperatureCharacteristic = pService->createCharacteristic(
-                                    TEMPERATURE_CHARACTERISTIC_UUID,
-                                    NIMBLE_PROPERTY::READ |
-                                    NIMBLE_PROPERTY::NOTIFY);
+  // Temperature Characteristic
+  pTemperatureCharacteristic = pService->createCharacteristic(
+                                  TEMPERATURE_CHARACTERISTIC_UUID,
+                                   NIMBLE_PROPERTY::READ |
+                                   NIMBLE_PROPERTY::NOTIFY);
     
-    pCharacteristic->setCallbacks(new CharacteristicCallbacks());
-    pService->start();
+  pCharacteristic->setCallbacks(new CharacteristicCallbacks());
+  pService->start();
 
-    // Start advertising
-    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
-    pAdvertising->addServiceUUID(SERVICE_UUID);
-    pAdvertising->setScanResponse(true);
-    pAdvertising->setMinPreferred(0x06);  // iPhone connection optimization
-    pAdvertising->setMaxPreferred(0x12);
-    NimBLEDevice::startAdvertising();
+  // Start advertising
+  NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x06);  // iPhone connection optimization
+  pAdvertising->setMaxPreferred(0x12);
+  NimBLEDevice::startAdvertising();
 
-    PRINTS("\nBLE Active, waiting for connections...");
+  PRINTS("\nBLE Active, waiting for connections...");
     
-     // Initialize the FastLED library
-    FastLED.addLeds<NEOPIXEL, RGB_PIN>(leds, NUM_LEDS);
-    FastLED.clear();  // Ensure LED is off at startup
-    FastLED.show();
+   // Initialize the FastLED library
+  FastLED.addLeds<NEOPIXEL, RGB_PIN>(leds, NUM_LEDS);
+  FastLED.clear();  // Ensure LED is off at startup
+  FastLED.show();
 }
 
 void handleBLEConnection() {
@@ -307,14 +344,34 @@ void handleBLEConnection() {
     }
 }
 
+void setupHCSR04() {
+    pinMode(TRIG_PIN, OUTPUT);
+    pinMode(ECHO_PIN, INPUT);
+    digitalWrite(TRIG_PIN, LOW);
+    
+    // Initialize readings array
+    for (int i = 0; i < READINGS_COUNT; i++) {
+        readings[i] = INVALID_DISTANCE;
+    }
+    
+    currentDistance = 100;  // Initialize to a safe default
+    lastReadingTime = millis();
+}
+
 // Handle distance measurements and face changes
 void handleDistance() {
-    if (millis() - lastDistanceCheck >= DISTANCE_CHECK_INTERVAL) {
-        lastDistanceCheck = millis();
-        currentDistance = getDistance();
+    int newDistance = getDistance();
+    
+    // Only update if we got a valid reading
+    if (newDistance != INVALID_DISTANCE) {
+        // Apply smoothing filter (70% old value, 30% new value)
+        currentDistance = (currentDistance * 0.7) + (newDistance * 0.3);
         
-        /*
-        // Change face based on distance
+        Serial.print("Filtered distance: ");
+        Serial.print(currentDistance);
+        Serial.println(" cm");
+        
+        // Change face based on filtered distance
         if (currentDistance < 10) {
             face = 6;  // Very close - show surprised/kinky face
         } else if (currentDistance < 30) {
@@ -326,23 +383,15 @@ void handleDistance() {
         } else {
             face = 1;  // Very far or no detection - show idle face
         }
-        */
-
+        
         // Send distance data over BLE if connected
         if (deviceConnected) {
             char distStr[8];
-            snprintf(distStr, sizeof(distStr), "%d", currentDistance);
+            sprintf(distStr, "%d", (int)currentDistance);
             pTemperatureCharacteristic->setValue(distStr);
             pTemperatureCharacteristic->notify();
         }
-
-        // Print distance to Serial Monitor
-        Serial.print("Distance: ");
-        Serial.print(currentDistance);
-        Serial.println(" cm");
-        delay(100);  // Delay to prevent spamming the Serial Monitor
     }
-    int READINGS_COUNT = 0;
 }
 
 void fadeBlueLED() { // Continue fading while no device is connected
@@ -368,30 +417,87 @@ void fadeInAndOutLED(CRGB color, uint8_t step, uint8_t delayTime) {
     }
 }
 
+void handleDistanceMeasurements() {
+    unsigned long currentTime = millis();
+
+    // Only take a new reading every READING_INTERVAL ms
+    if (currentTime - lastReadingTime >= READING_INTERVAL) {
+        lastReadingTime = currentTime;
+
+        // Get new reading
+        int newReading = getSingleReading();
+
+        if (newReading != INVALID_DISTANCE) {
+            readings[readIndex] = newReading;
+            Serial.print("Reading ");
+            Serial.print(readIndex + 1);
+            Serial.print(": ");
+            Serial.print(newReading);
+            Serial.println(" cm");
+            readIndex++;
+        }
+
+        if (readIndex >= READINGS_COUNT) {
+            long sum = 0;
+            int validReadings = 0;
+
+            for (int i = 0; i < READINGS_COUNT; i++) {
+                if (readings[i] != INVALID_DISTANCE) {
+                    sum += readings[i];
+                    validReadings++;
+                }
+            }
+
+            if (validReadings == READINGS_COUNT) {
+                int avgDistance = sum / validReadings;
+                Serial.print("Average of 5 readings: ");
+                Serial.print(avgDistance);
+                Serial.println(" cm");
+                currentDistance = avgDistance;
+            }
+
+            readIndex = 0; // Reset for next 5 readings
+        }
+    }
+}
+
+void updateTemperature() {
+  unsigned long currentMillis = millis();
+
+  // Check if enough time has passed to update temperature
+  if (currentMillis - temperatureMillis >= temperatureInterval) {
+    temperatureMillis = currentMillis;
+
+    if (deviceConnected) {
+      // Read the ESP32's internal temperature
+      float temperature = temperatureRead();  // Temperature in Celsius
+
+      // Convert temperature to string and send over BLE
+      char tempStr[8];
+      dtostrf(temperature, 1, 2, tempStr);  // Convert float to string
+      pTemperatureCharacteristic->setValue(tempStr);  // Update BLE characteristic
+      pTemperatureCharacteristic->notify();  // Notify the connected device
+
+      // Optional: Debug output to serial
+      Serial.print("Internal Temperature: ");
+      Serial.println(tempStr);
+    }
+  }
+}
+
 void loop() {
+
   // Handle BLE connection status & LED indicator
   handleBLEConnection();
 
   // Handle distance measurements and face changes
-  handleDistance();
+  //handleDistance();
 
-    // Check if a device is connected
-if (deviceConnected) {
-        // Read the ESP32's internal temperature
-        float temperature = temperatureRead();  // Temperature in Celsius
+  // Handle distance measurements in a faster loop
+  handleDistanceMeasurements();
 
-        // Convert temperature to string and send over BLE
-        char tempStr[8];
-        dtostrf(temperature, 1, 2, tempStr);  // Convert float to string
-        pTemperatureCharacteristic->setValue(tempStr);  // Update BLE characteristic
-        pTemperatureCharacteristic->notify();  // Notify the connected device
-
-        // Optional: Debug output to serial
-        Serial.print("Internal Temperature: ");
-        Serial.println(tempStr);
-
-        delay(2000);  // Adjust the update frequency as needed
-    }
+  // Call the non-blocking temperature update function
+  updateTemperature();
 
 // Original face control logic
   if (DEBUG) Serial.println(face); // Print the face value if debugging is enabled
@@ -495,19 +601,24 @@ void setOffLine(byte x, byte y, byte line) { //turn off the a line from an initi
 }
 
 void loopBlink(byte x) {
-   tempo = 0;  // Reset tempo
+unsigned long currentMillis = millis();
 
-  // 'Delay' for 7 seconds while periodically performing blink animation
-  while (tempo <= 7000) {
-    delay(1);
+  // Check if the tempo has reached 7000 ms
+  if (tempo <= maxTempo) {
+    // If enough time has passed, increment tempo and do the blink logic
+    if (currentMillis - previousMillis >= interval) {
+      previousMillis = currentMillis;
+      tempo++;
 
-    // Check if face has changed via Bluetooth; if so, exit the loop
-    if (face != x) {
-      mx.clear();  // Clear the display when face changes
-      break;       // Exit the loop if face has been changed via Bluetooth
+      // Check if face has changed via Bluetooth; if so, exit the loop
+      if (face != x) {
+        mx.clear();  // Clear the display when face changes
+        tempo = maxTempo + 1; // End the blinking loop
+        return;
+      }
+
+      // Perform other blink operations here (e.g., update LED status)
     }
-
-    tempo++;
   }
 }
 
