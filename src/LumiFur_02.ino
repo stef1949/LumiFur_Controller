@@ -22,6 +22,8 @@ supported boards.
   uint8_t clockPin   = 14;
   uint8_t latchPin   = 15;
   uint8_t oePin      = 16;
+  #define BUTTON_UP 2
+  #define BUTTON_DOWN 3
 #elif defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) // MatrixPortal ESP32-S3
   uint8_t rgbPins[]  = {42, 41, 40, 38, 39, 37};
   uint8_t addrPins[] = {45, 36, 48, 35, 21};
@@ -107,6 +109,25 @@ supported boards.
   uint8_t oePin      = 0;
 #endif
 
+// Global Variables ---------------------------------------------------------
+
+// View switching
+int currentView = 0;
+const int totalViews = 3;
+
+//Loading Bar
+int loadingProgress = 0; // Current loading progress (0-100)
+int loadingMax = 100;    // Maximum loading value
+
+//Blinking effect variables
+unsigned long lastEyeBlinkTime = 0; // Last time the eyes blinked
+unsigned long nextBlinkDelay = 1000; // Random delay between blinks
+int blinkProgress = 0;              // Progress of the blink (0-100%)
+bool isBlinking = false;            // Whether a blink is in progress
+const int blinkDuration = 300;      // Total time for a full blink (milliseconds)
+const int minBlinkDelay = 1000;     // Minimum time between blinks (ms)
+const int maxBlinkDelay = 3000;     // Maximum time between blinks (ms)
+
 /* ----------------------------------------------------------------------
 Matrix initialization is explained EXTENSIVELY in "simple" example sketch!
 It's very similar here, but we're passing "true" for the last argument,
@@ -123,26 +144,27 @@ Adafruit_Protomatter matrix(
   true);       // HERE IS THE MAGIC FOR DOUBLE-BUFFERING!
 
 //Adafruit_LIS3DH accel = Adafruit_LIS3DH();
+
+/////////////////////////// Button config
+bool debounceButton(int pin) {
+  static uint32_t lastPressTime = 0;
+  uint32_t currentTime = millis();
+  
+  if (digitalRead(pin) == LOW && (currentTime - lastPressTime) > 200) {
+    lastPressTime = currentTime;
+    return true;
+  }
+  return false;
+}
+
 /////////////////////////// Bitmaps
 
-// 'Apple_logo_black', 64x32px
+// 'Apple_logo_black', 18x21px
 const PROGMEM uint8_t appleLogoApple_logo_black[] = {
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 
-	0x00, 0x00, 0x00, 0x00, 0x3e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3c, 0x00, 0x00, 0x00, 
-	0x00, 0x00, 0x00, 0x00, 0x7c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x78, 0x00, 0x00, 0x00, 
-	0x00, 0x00, 0x00, 0x00, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00, 
-	0x00, 0x00, 0x00, 0x7c, 0x0f, 0x80, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xe0, 0x00, 0x00, 
-	0x00, 0x00, 0x03, 0xff, 0xff, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x03, 0xff, 0xff, 0xf0, 0x00, 0x00, 
-	0x00, 0x00, 0x07, 0xff, 0xff, 0xe0, 0x00, 0x00, 0x00, 0x00, 0x07, 0xff, 0xff, 0xc0, 0x00, 0x00, 
-	0x00, 0x00, 0x0f, 0xff, 0xff, 0x80, 0x00, 0x00, 0x00, 0x00, 0x0f, 0xff, 0xff, 0x80, 0x00, 0x00, 
-	0x00, 0x00, 0x0f, 0xff, 0xff, 0x80, 0x00, 0x00, 0x00, 0x00, 0x0f, 0xff, 0xff, 0x80, 0x00, 0x00, 
-	0x00, 0x00, 0x0f, 0xff, 0xff, 0x80, 0x00, 0x00, 0x00, 0x00, 0x0f, 0xff, 0xff, 0x80, 0x00, 0x00, 
-	0x00, 0x00, 0x0f, 0xff, 0xff, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x0f, 0xff, 0xff, 0xe0, 0x00, 0x00, 
-	0x00, 0x00, 0x07, 0xff, 0xff, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x07, 0xff, 0xff, 0xf8, 0x00, 0x00, 
-	0x00, 0x00, 0x03, 0xff, 0xff, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x03, 0xff, 0xff, 0xf0, 0x00, 0x00, 
-	0x00, 0x00, 0x01, 0xff, 0xff, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x01, 0xff, 0xff, 0xe0, 0x00, 0x00, 
-	0x00, 0x00, 0x00, 0xff, 0xff, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7f, 0xff, 0xc0, 0x00, 0x00, 
-	0x00, 0x00, 0x00, 0x3e, 0x1f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+	0x00, 0x18, 0x00, 0x00, 0x30, 0x00, 0x00, 0x70, 0x00, 0x00, 0xe0, 0x00, 0x00, 0xc0, 0x00, 0x1e, 
+	0x1e, 0x00, 0x7f, 0xff, 0x80, 0x7f, 0xff, 0x80, 0x7f, 0xfe, 0x00, 0xff, 0xfe, 0x00, 0xff, 0xfe, 
+	0x00, 0xff, 0xfe, 0x00, 0xff, 0xfe, 0x00, 0xff, 0xfe, 0x00, 0xff, 0xff, 0x00, 0x7f, 0xff, 0x80, 
+	0x7f, 0xff, 0x80, 0x3f, 0xff, 0x80, 0x3f, 0xff, 0x00, 0x1f, 0xfe, 0x00, 0x0f, 0x3c, 0x00
 };
 
 // Array of all bitmaps for convenience. (Total bytes used to store images in PROGMEM = 272)
@@ -165,14 +187,14 @@ const PROGMEM uint8_t nose[] = {
               B00000000
               };
 const PROGMEM uint8_t maw[] = {
-    B00100000, B00000000, B00000000, B00000000,
-             B01111000, B00000000, B00000000, B00000000,
-             B11011110, B00000000, B00000000, B00000000,
-             B11000111, B10000000, B00000000, B11100000,
-             B11111111, B11100000, B00000111, B11111000,
-             B00000000, B01111000, B00011110, B00011110,
-             B00000000, B00011110, B01111000, B00000111,
-             B00000000, B00000111, B11100000, B00000001
+	0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0x3f, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3f, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0xe3, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe3, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0xe0, 0x3f, 0x80, 0x00, 0x00, 0x00, 0xf0, 0x00, 0xe0, 0x3f, 0x80, 0x00, 0x00, 0x00, 0xf0, 0x00, 
+	0xff, 0xff, 0xf0, 0x00, 0x00, 0x1f, 0xff, 0x00, 0xff, 0xff, 0xf0, 0x00, 0x00, 0x1f, 0xff, 0x00, 
+	0x00, 0x00, 0x7f, 0x00, 0x00, 0xfc, 0x07, 0xe0, 0x00, 0x00, 0x7f, 0x00, 0x00, 0xfc, 0x07, 0xe0, 
+	0x00, 0x00, 0x07, 0xf0, 0x0f, 0xe0, 0x00, 0xf8, 0x00, 0x00, 0x07, 0xf0, 0x0f, 0xe0, 0x00, 0xf8, 
+	0x00, 0x00, 0x00, 0x3f, 0xfc, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x00, 0x3f, 0xfc, 0x00, 0x00, 0x1f
              };
 const PROGMEM uint8_t Glitch1[] = {
     B00110000, B00010000, B00000100, B00000100,
@@ -194,14 +216,11 @@ const PROGMEM uint8_t Glitch2[] = {
                  B11100110, B00010110, B01011000, B00000000,
                  B00000000, B00000111, B11100000, B00000000
                  };
-const PROGMEM uint8_t Eye[] = {B00001111, B00000000,
-             B00111111, B11100000,
-             B01111111, B11111000,
-             B11111111, B11111110,
-             B11110000, B00000111,
-             B01100000, B00000001,
-             B00000000, B00000000,
-             B00000000, B00000000
+const PROGMEM uint8_t Eye[] = {
+	0x00, 0xff, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x0f, 0xff, 0xfc, 0x00, 0x0f, 0xff, 0xfc, 0x00, 
+	0x3f, 0xff, 0xff, 0xc0, 0x3f, 0xff, 0xff, 0xc0, 0xff, 0xff, 0xff, 0xfc, 0xff, 0xff, 0xff, 0xfc, 
+	0xff, 0x00, 0x00, 0x3f, 0xff, 0x00, 0x00, 0x3f, 0x3c, 0x00, 0x00, 0x03, 0x3c, 0x00, 0x00, 0x03, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
              };
 const PROGMEM uint8_t Angry[] = {
         B00000000, B00000000,
@@ -246,14 +265,14 @@ const PROGMEM uint8_t noseL[] = {
                B00000000
                };
 const PROGMEM uint8_t mawL[] = {
-    B00000000, B00000000, B00000000, B00000100,
-              B00000000, B00000000, B00000000, B00011110,
-              B00000000, B00000000, B00000000, B01111011,
-              B00000111, B00000000, B00000001, B11100011,
-              B00011111, B11100000, B00000111, B11111111,
-              B01111000, B01111000, B00011110, B00000000,
-              B11100000, B00011110, B01111000, B00000000,
-              B10000000, B00000111, B11100000, B00000000
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xfc, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xfc, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f, 0xc7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f, 0xc7, 
+	0x00, 0x0f, 0x00, 0x00, 0x00, 0x01, 0xfc, 0x07, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x01, 0xfc, 0x07, 
+	0x00, 0xff, 0xf8, 0x00, 0x00, 0x0f, 0xff, 0xff, 0x00, 0xff, 0xf8, 0x00, 0x00, 0x0f, 0xff, 0xff, 
+	0x07, 0xe0, 0x3f, 0x00, 0x00, 0xfe, 0x00, 0x00, 0x07, 0xe0, 0x3f, 0x00, 0x00, 0xfe, 0x00, 0x00, 
+	0x1f, 0x00, 0x07, 0xf0, 0x0f, 0xe0, 0x00, 0x00, 0x1f, 0x00, 0x07, 0xf0, 0x0f, 0xe0, 0x00, 0x00, 
+	0xf8, 0x00, 0x00, 0x3f, 0xfc, 0x00, 0x00, 0x00, 0xf8, 0x00, 0x00, 0x3f, 0xfc, 0x00, 0x00, 0x00
               };
 const PROGMEM uint8_t Glitch1L[] = {
         B00000000, B00000000, B00000000, B00000100,
@@ -271,14 +290,10 @@ const PROGMEM uint8_t Glitch2L[] = {
                   0x32, 0x60, 0x81, 0xe0, 0x27, 0x00
                   };
 const PROGMEM uint8_t EyeL[] = {
-    B00000000, B11110000,
-              B00000111, B11111100,
-              B00011111, B11111110,
-              B01111111, B11111111,
-              B11100000, B00001111,
-              B10000000, B00000110,
-              B00000000, B00000000,
-              B00000000, B00000000
+	0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x3f, 0xff, 0xf0, 0x00, 0x3f, 0xff, 0xf0, 
+	0x03, 0xff, 0xff, 0xfc, 0x03, 0xff, 0xff, 0xfc, 0x3f, 0xff, 0xff, 0xff, 0x3f, 0xff, 0xff, 0xff, 
+	0xfc, 0x00, 0x00, 0xff, 0xfc, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x00, 0x3c, 0xc0, 0x00, 0x00, 0x3c, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
               };
 const PROGMEM uint8_t AngryL[] = {
     B00000000, B00000000,
@@ -399,6 +414,92 @@ void err(int x) {
   }
 }
 
+void displayLoadingBar() {
+  // Draw Apple Logos
+  matrix.drawBitmap(23, 2, appleLogoApple_logo_black, 18, 21, matrix.color565(255, 255, 255));
+  matrix.drawBitmap(88, 2, appleLogoApple_logo_black, 18, 21, matrix.color565(255, 255, 255));
+
+  // Draw the loading bar background
+  int barWidth = matrix.width() - 80; // Width of the loading bar
+  int barHeight = 5;                // Height of the loading bar
+  int barX = (matrix.width() / 4) - (barWidth / 2);        // Center X position
+  int barY = (matrix.height() - barHeight) / 2; // Center vertically
+  int barRadius = 4;                // Rounded corners
+  matrix.fillRoundRect(barX, (barY * 2), barWidth, barHeight, barRadius, matrix.color565(9, 9, 9));
+  matrix.fillRoundRect(barX + 64, (barY * 2), barWidth, barHeight, barRadius, matrix.color565(9, 9, 9));
+
+  // Draw the loading progress
+  int progressWidth = (barWidth - 2) * loadingProgress / loadingMax;
+  matrix.fillRoundRect(barX + 1, (barY * 2) + 1, progressWidth, barHeight - 2, barRadius - 2, matrix.color565(255, 255, 255));
+  matrix.fillRoundRect((barX + 1) + 64, (barY * 2) + 1, progressWidth, barHeight - 2, barRadius - 2, matrix.color565(255, 255, 255));
+
+/*
+  // Display percentage text
+  char progressText[16];
+  sprintf(progressText, "%d%%", loadingProgress);
+  matrix.setTextColor(matrix.color565(255, 255, 255));
+  matrix.setCursor(barX - 8, barY + 14); // Position above the bar
+  matrix.print(progressText);
+*/
+  matrix.show(); // Update the matrix display
+  delay(10);     // Short delay for smoother animation
+}
+
+void updateBlinkAnimation() {
+  unsigned long currentTime = millis();
+  if (isBlinking) {
+    unsigned long elapsed = currentTime - lastEyeBlinkTime;
+    if (elapsed >= blinkDuration) {
+      // End the blink animation
+      isBlinking = false;
+      lastEyeBlinkTime = currentTime;
+      nextBlinkDelay = random(minBlinkDelay, maxBlinkDelay); // Set random delay for the next blink
+    } else {
+      // Update blink progress (0 to 100%)
+      blinkProgress = (elapsed * 100) / blinkDuration;
+    }
+  } else {
+    // Start a new blink after the random delay
+    if (currentTime - lastEyeBlinkTime >= nextBlinkDelay) {
+      isBlinking = true;
+      blinkProgress = 0;
+      lastEyeBlinkTime = currentTime;
+    }
+  }
+}
+
+// Draw the blinking eyes
+void blinkingEyes() {
+  // Draw static eyes
+  matrix.drawBitmap(0, 0, Eye, 32, 16, matrix.color565(255, 255, 255));
+  matrix.drawBitmap(96, 0, EyeL, 32, 16, matrix.color565(255, 255, 255));
+
+  if (isBlinking) {
+    // Calculate the height of the black box
+    int boxHeight = map(blinkProgress, 0, 100, 0, 16); // From 0 to 16 pixels
+
+    // Draw black boxes over the eyes
+    matrix.fillRect(0, 0, 32, boxHeight, 0);     // Cover the right eye
+    matrix.fillRect(96, 0, 32, boxHeight, 0);    // Cover the left eye
+  }
+
+  matrix.show(); // Update the display
+}
+
+void protoFaceTest() {
+   matrix.drawBitmap(56, 10, nose, 8, 8, matrix.color565(255, 255, 255));
+   matrix.drawBitmap(64, 10, noseL, 8, 8, matrix.color565(255, 255, 255));
+   matrix.drawBitmap(0, 16, maw, 64, 16, matrix.color565(255, 255, 255));
+   matrix.drawBitmap(64, 16, mawL, 64, 16, matrix.color565(255, 255, 255));
+   matrix.drawBitmap(0, 0, Eye, 32, 16, matrix.color565(255, 255, 255));
+   matrix.drawBitmap(96, 0, EyeL, 32, 16, matrix.color565(255, 255, 255));
+   
+   // Draw blinking eyes
+   blinkingEyes();
+
+   matrix.show(); // Update the matrix display
+}
+
 void setup(void) {
   Serial.begin(9600);
 
@@ -410,6 +511,7 @@ void setup(void) {
     // DO NOT CONTINUE if matrix setup encountered an error.
     for(;;);
   }
+randomSeed(analogRead(0)); // Seed the random number generator for randomized eye blinking
 
   // Unlike the "simple" example, we don't do any drawing in setup().
   // But we DO initialize some things we plan to animate...
@@ -436,25 +538,32 @@ void setup(void) {
   ballcolor[1] = matrix.color565(0, 0, 20); // Dark blue
   ballcolor[2] = matrix.color565(20, 0, 0); // Dark red
 
+  // Set up buttons if present
+  /* ----------------------------------------------------------------------
+  Use internal pull-up resistor, as the up and down buttons 
+  do not have any pull-up resistors connected to them 
+  and pressing either of them pulls the input low.
+  ------------------------------------------------------------------------- */
   #ifdef BUTTON_UP
-    pinMode(BUTTON_UP, INPUT);
+    pinMode(BUTTON_UP, INPUT_PULLUP);
   #endif
   #ifdef BUTTON_DOWN
-    pinMode(BUTTON_DOWN, INPUT);
+    pinMode(BUTTON_DOWN, INPUT_PULLUP);
   #endif
 }
 
-// LOOP - RUNS REPEATEDLY AFTER SETUP --------------------------------------
+void displayCurrentView(int view) {
 
-void loop(void) {
+  matrix.fillScreen(0);
+
+  switch (view) {
+    case 0:
   // Every frame, we clear the background and draw everything anew.
   // This happens "in the background" with double buffering, that's
   // why you don't see everything flicker. It requires double the RAM,
   // so it's not practical for every situation.
 
-  matrix.fillScreen(0); // Fill background black
-
-  // Draw the big scrolly text
+  // Draw big scrolling text
   matrix.setCursor(textX, textY);
   matrix.print(str);
 
@@ -475,47 +584,43 @@ void loop(void) {
     if((ball[i][1] == 0) || (ball[i][1] == (matrix.height() - 1)))
       ball[i][3] *= -1;
   }
+      break;
 
-#ifdef BUTTON_UP
-  if (digitalRead(BUTTON_UP) == LOW) {
-    // Show apple logo
-    matrix.fillScreen(0); // Clear the screen
-    matrix.drawBitmap(32, 0, appleLogoApple_logo_black, 64, 32, matrix.color565(255, 255, 255));
-  }
-#endif
+        case 1:
+      protoFaceTest();
+      updateBlinkAnimation(); // Update blink animation progress
+      delay(20); // Short delay for smoother animation
+      break;
 
-#ifdef BUTTON_DOWN
-  if (digitalRead(BUTTON_DOWN) == LOW) {
-    // Show current view (scrolling text and bouncy balls)
-    matrix.fillScreen(0); // Fill background black
-
-    // Draw the big scrolly text
-    matrix.setCursor(textX, textY);
-    matrix.print(str);
-
-    // Update text position for next frame. If text goes off the
-    // left edge, reset its position to be off the right edge.
-    if((--textX) < textMin) textX = matrix.width();
-
-    // Draw the three bouncy balls on top of the text...
-    for(byte i=0; i<3; i++) {
-      // Draw 'ball'
-      matrix.fillCircle(ball[i][0], ball[i][1], 5, ballcolor[i]);
-      // Update ball's X,Y position for next frame
-      ball[i][0] += ball[i][2];
-      ball[i][1] += ball[i][3];
-      // Bounce off edges
-      if((ball[i][0] == 0) || (ball[i][0] == (matrix.width() - 1)))
-        ball[i][2] *= -1;
-      if((ball[i][1] == 0) || (ball[i][1] == (matrix.height() - 1)))
-        ball[i][3] *= -1;
+        case 2:
+      displayLoadingBar();
+        if (loadingProgress <= loadingMax) {
+    displayLoadingBar(); // Update the loading bar
+    loadingProgress++;   // Increment progress
+    delay(50);           // Adjust speed of loading animation
+  } else {
+    // Reset or transition to another view
+    loadingProgress = 0;
     }
-  }
-#endif
+  
 
-  // AFTER DRAWING, A show() CALL IS REQUIRED TO UPDATE THE MATRIX!
+      break;
+      }
 
   matrix.show();
+}
 
-  delay(20); // 20 milliseconds = ~50 frames/second
+// LOOP - RUNS REPEATEDLY AFTER SETUP --------------------------------------
+
+void loop(void) {
+
+  if (debounceButton(BUTTON_UP)) {
+    currentView = (currentView + 1) % totalViews;
+  }
+  if (debounceButton(BUTTON_DOWN)) {
+    currentView = (currentView - 1) % totalViews;
+  }
+
+  displayCurrentView(currentView);
+  delay(20);
 }
