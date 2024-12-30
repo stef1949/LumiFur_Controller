@@ -8,7 +8,8 @@ This example is written for a 64x32 matrix but can be adapted to others.
 
 #include <Adafruit_Protomatter.h>
 //#include <Adafruit_LIS3DH.h>      // For accelerometer
-#include <Fonts/FreeSansBold18pt7b.h> // Large friendly font
+#include "fonts/lequahyper20pt7b.h"        // Stylized font
+#include <fonts/FreeSansBold18pt7b.h>     // Larger font
 
 /* ----------------------------------------------------------------------
 The RGB matrix must be wired to VERY SPECIFIC pins, different for each
@@ -126,7 +127,7 @@ int blinkProgress = 0;              // Progress of the blink (0-100%)
 bool isBlinking = false;            // Whether a blink is in progress
 const int blinkDuration = 300;      // Total time for a full blink (milliseconds)
 const int minBlinkDelay = 1000;     // Minimum time between blinks (ms)
-const int maxBlinkDelay = 3000;     // Maximum time between blinks (ms)
+const int maxBlinkDelay = 5000;     // Maximum time between blinks (ms)
 
 /* ----------------------------------------------------------------------
 Matrix initialization is explained EXTENSIVELY in "simple" example sketch!
@@ -250,9 +251,13 @@ const PROGMEM uint8_t vwv[] = {
              B00000000, B01111000,
              B00000001, B11100000,
              B00000111, B10000000,
-             B00001110, B00000000}
-             ;
-
+             B00001110, B00000000};
+const PROGMEM uint8_t blush[] = {
+  	0x00, 0xc1, 0x83, 0x00, 0x00, 0xe1, 0xc3, 0x80, 0x01, 0xc3, 0x87, 0x00, 0x03, 0x87, 0x0e, 0x00, 
+	0x07, 0x8f, 0x1e, 0x00, 0x07, 0x0e, 0x1c, 0x00, 0x0e, 0x1c, 0x38, 0x00, 0x1c, 0x38, 0x70, 0x00, 
+	0x3c, 0x78, 0xf0, 0x00, 0x38, 0x70, 0xe0, 0x00, 0x70, 0xe1, 0xc0, 0x00, 0xe1, 0xc3, 0x80, 0x00, 
+	0x60, 0xc1, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00
+};
 // Left side of the helmet
 const PROGMEM uint8_t noseL[] = {
     B00000000,
@@ -325,7 +330,12 @@ const PROGMEM uint8_t vwvL[] = {
               B00000001, B11100000,
               B00000000, B01110000
               };
-
+const PROGMEM uint8_t blushL[] = {
+	0x30, 0x60, 0xc0, 0x00, 0x70, 0xe1, 0xc0, 0x00, 0x38, 0x70, 0xe0, 0x00, 0x1c, 0x38, 0x70, 0x00, 
+	0x1e, 0x3c, 0x78, 0x00, 0x0e, 0x1c, 0x38, 0x00, 0x07, 0x0e, 0x1c, 0x00, 0x03, 0x87, 0x0e, 0x00, 
+	0x03, 0xc7, 0x8f, 0x00, 0x01, 0xc3, 0x87, 0x00, 0x00, 0xe1, 0xc3, 0x80, 0x00, 0x70, 0xe1, 0xc0, 
+	0x00, 0x60, 0xc1, 0x80, 0x00, 0x00, 0x00, 0x00
+};
 // Buffer icons for transitions
 uint8_t bufferL[] = {
     B00000000, B00000000,
@@ -493,6 +503,11 @@ void protoFaceTest() {
    matrix.drawBitmap(64, 16, mawL, 64, 16, matrix.color565(255, 255, 255));
    matrix.drawBitmap(0, 0, Eye, 32, 16, matrix.color565(255, 255, 255));
    matrix.drawBitmap(96, 0, EyeL, 32, 16, matrix.color565(255, 255, 255));
+
+   if (currentView == 2) {
+     matrix.drawBitmap(25, 12, blush, 26, 14, matrix.color565(255, 0, 255));
+     matrix.drawBitmap(77, 12, blushL, 26, 14, matrix.color565(255, 0, 255));
+   }
    
    // Draw blinking eyes
    blinkingEyes();
@@ -592,7 +607,13 @@ void displayCurrentView(int view) {
       delay(20); // Short delay for smoother animation
       break;
 
-        case 2:
+      case 2:
+      protoFaceTest();
+      updateBlinkAnimation(); // Update blink animation progress
+         matrix.drawBitmap(25, 12, blush, 26, 14, matrix.color565(255, 0, 255));
+         matrix.drawBitmap(77, 12, blushL, 26, 14, matrix.color565(255, 0, 255));
+      break;
+        case 3:
       displayLoadingBar();
         if (loadingProgress <= loadingMax) {
     displayLoadingBar(); // Update the loading bar
