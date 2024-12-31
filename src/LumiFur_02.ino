@@ -7,7 +7,6 @@ This example is written for a 64x32 matrix but can be adapted to others.
 ------------------------------------------------------------------------- */
 
 #include <Adafruit_Protomatter.h>
-//#include <Adafruit_LIS3DH.h>      // For accelerometer
 #include "fonts/lequahyper20pt7b.h"        // Stylized font
 #include <fonts/FreeSansBold18pt7b.h>     // Larger font
 
@@ -33,6 +32,7 @@ supported boards.
   uint8_t oePin      = 14;
   #define BUTTON_UP 6
   #define BUTTON_DOWN 7
+  //#include <Adafruit_LIS3DH.h>      // For accelerometer
 #elif defined(_VARIANT_FEATHER_M4_) // Feather M4 + RGB Matrix FeatherWing
   uint8_t rgbPins[]  = {6, 5, 9, 11, 10, 12};
   uint8_t addrPins[] = {A5, A4, A3, A2};
@@ -114,7 +114,7 @@ supported boards.
 
 // View switching
 int currentView = 0;
-const int totalViews = 3;
+const int totalViews = 6;
 
 //Loading Bar
 int loadingProgress = 0; // Current loading progress (0-100)
@@ -125,9 +125,19 @@ unsigned long lastEyeBlinkTime = 0; // Last time the eyes blinked
 unsigned long nextBlinkDelay = 1000; // Random delay between blinks
 int blinkProgress = 0;              // Progress of the blink (0-100%)
 bool isBlinking = false;            // Whether a blink is in progress
-const int blinkDuration = 300;      // Total time for a full blink (milliseconds)
+
+int blinkDuration = 300;            // Initial time for a full blink (milliseconds)
+const int minBlinkDuration = 100;   // Minimum time for a full blink (ms)
+const int maxBlinkDuration = 500;   // Maximum time for a full blink (ms)
+
 const int minBlinkDelay = 1000;     // Minimum time between blinks (ms)
 const int maxBlinkDelay = 5000;     // Maximum time between blinks (ms)
+
+//Blushing effect variables
+unsigned long blushFadeStartTime = 0;
+const unsigned long blushFadeDuration = 2000; // 2 seconds for full fade-in
+bool isBlushFadingIn = true;                  // Whether the blush is currently fading in
+uint8_t blushBrightness = 0;                  // Current blush brightness (0-255)
 
 /* ----------------------------------------------------------------------
 Matrix initialization is explained EXTENSIVELY in "simple" example sketch!
@@ -253,10 +263,21 @@ const PROGMEM uint8_t vwv[] = {
              B00000111, B10000000,
              B00001110, B00000000};
 const PROGMEM uint8_t blush[] = {
-  	0x00, 0xc1, 0x83, 0x00, 0x00, 0xe1, 0xc3, 0x80, 0x01, 0xc3, 0x87, 0x00, 0x03, 0x87, 0x0e, 0x00, 
-	0x07, 0x8f, 0x1e, 0x00, 0x07, 0x0e, 0x1c, 0x00, 0x0e, 0x1c, 0x38, 0x00, 0x1c, 0x38, 0x70, 0x00, 
-	0x3c, 0x78, 0xf0, 0x00, 0x38, 0x70, 0xe0, 0x00, 0x70, 0xe1, 0xc0, 0x00, 0xe1, 0xc3, 0x80, 0x00, 
-	0x60, 0xc1, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00
+	0x00, 0xc0, 0x00, 0xe0, 0x01, 0xc0, 0x03, 0x80, 0x07, 0x80, 0x07, 0x00, 0x0e, 0x00, 0x1c, 0x00, 
+	0x3c, 0x00, 0x38, 0x00, 0x70, 0x00, 0xe0, 0x00, 0x60, 0x00
+};
+
+const PROGMEM uint8_t semicircleeyes[] = {
+  	0xff, 0xff, 0xff, 0xfe, 0x7f, 0xff, 0xff, 0xfc, 0x7f, 0xff, 0xff, 0xfc, 0x7f, 0xff, 0xff, 0xfc, 
+	0x3f, 0xff, 0xff, 0xf8, 0x3f, 0xff, 0xff, 0xf8, 0x1f, 0xff, 0xff, 0xf0, 0x0f, 0xff, 0xff, 0xe0, 
+	0x07, 0xff, 0xff, 0xc0, 0x01, 0xff, 0xff, 0x00, 0x00, 0x7f, 0xfc, 0x00, 0x00, 0x07, 0xc0, 0x00
+};
+
+const PROGMEM uint8_t x_eyes[] = {
+	  0xe0, 0x00, 0x00, 0x0e, 0xf8, 0x00, 0x00, 0x3e, 0x3e, 0x00, 0x00, 0xf8, 0x0f, 0xc0, 0x07, 0xe0, 
+	0x03, 0xf0, 0x1f, 0x80, 0x00, 0x7c, 0x7c, 0x00, 0x00, 0x1f, 0xf0, 0x00, 0x00, 0x07, 0xc0, 0x00, 
+	0x00, 0x1f, 0xf0, 0x00, 0x00, 0x7c, 0x7c, 0x00, 0x03, 0xf0, 0x1f, 0x80, 0x0f, 0xc0, 0x07, 0xe0, 
+	0x3e, 0x00, 0x00, 0xf8, 0xf8, 0x00, 0x00, 0x3e, 0xe0, 0x00, 0x00, 0x0e
 };
 // Left side of the helmet
 const PROGMEM uint8_t noseL[] = {
@@ -331,10 +352,8 @@ const PROGMEM uint8_t vwvL[] = {
               B00000000, B01110000
               };
 const PROGMEM uint8_t blushL[] = {
-	0x30, 0x60, 0xc0, 0x00, 0x70, 0xe1, 0xc0, 0x00, 0x38, 0x70, 0xe0, 0x00, 0x1c, 0x38, 0x70, 0x00, 
-	0x1e, 0x3c, 0x78, 0x00, 0x0e, 0x1c, 0x38, 0x00, 0x07, 0x0e, 0x1c, 0x00, 0x03, 0x87, 0x0e, 0x00, 
-	0x03, 0xc7, 0x8f, 0x00, 0x01, 0xc3, 0x87, 0x00, 0x00, 0xe1, 0xc3, 0x80, 0x00, 0x70, 0xe1, 0xc0, 
-	0x00, 0x60, 0xc1, 0x80, 0x00, 0x00, 0x00, 0x00
+	0x60, 0x00, 0xe0, 0x00, 0x70, 0x00, 0x38, 0x00, 0x3c, 0x00, 0x1c, 0x00, 0x0e, 0x00, 0x07, 0x00, 
+	0x07, 0x80, 0x03, 0x80, 0x01, 0xc0, 0x00, 0xe0, 0x00, 0xc0
 };
 // Buffer icons for transitions
 uint8_t bufferL[] = {
@@ -457,16 +476,19 @@ void displayLoadingBar() {
 
 void updateBlinkAnimation() {
   unsigned long currentTime = millis();
+
   if (isBlinking) {
     unsigned long elapsed = currentTime - lastEyeBlinkTime;
+
     if (elapsed >= blinkDuration) {
       // End the blink animation
       isBlinking = false;
       lastEyeBlinkTime = currentTime;
       nextBlinkDelay = random(minBlinkDelay, maxBlinkDelay); // Set random delay for the next blink
     } else {
-      // Update blink progress (0 to 100%)
-      blinkProgress = (elapsed * 100) / blinkDuration;
+      // Update non-linear blink progress (0 to 100%)
+      float normalizedProgress = float(elapsed) / blinkDuration;
+      blinkProgress = 100 * easeInOutQuad(normalizedProgress); // Using ease-in-out for natural acceleration and deceleration
     }
   } else {
     // Start a new blink after the random delay
@@ -474,15 +496,35 @@ void updateBlinkAnimation() {
       isBlinking = true;
       blinkProgress = 0;
       lastEyeBlinkTime = currentTime;
+      blinkDuration = random(minBlinkDuration, maxBlinkDuration); // Randomize blink duration for variety
     }
   }
 }
 
+// Helper function for ease-in-out quadratic easing
+float easeInOutQuad(float t) {
+  if (t < 0.5) {
+    return 2 * t * t;
+  }
+  return -1 + (4 - 2 * t) * t;
+}
+
 // Draw the blinking eyes
 void blinkingEyes() {
-  // Draw static eyes
+
+  // Draw  eyes
+  if (currentView == 1 || currentView == 2) {
   matrix.drawBitmap(0, 0, Eye, 32, 16, matrix.color565(255, 255, 255));
   matrix.drawBitmap(96, 0, EyeL, 32, 16, matrix.color565(255, 255, 255));
+  }
+  if (currentView == 3) {
+    matrix.drawBitmap(0, 0, semicircleeyes, 32, 12, matrix.color565(255, 255, 255));
+    matrix.drawBitmap(96, 0, semicircleeyes, 32, 12, matrix.color565(255, 255, 255));
+  }
+  if (currentView == 4) {
+    matrix.drawBitmap(0, 0, x_eyes, 31, 15, matrix.color565(255, 255, 255));
+    matrix.drawBitmap(96, 0, x_eyes, 31, 15, matrix.color565(255, 255, 255));
+  }
 
   if (isBlinking) {
     // Calculate the height of the black box
@@ -496,18 +538,52 @@ void blinkingEyes() {
   matrix.show(); // Update the display
 }
 
+void drawBlush() {
+  // Calculate blush brightness
+  if (isBlushFadingIn) {
+    unsigned long currentTime = millis();
+    unsigned long elapsedTime = currentTime - blushFadeStartTime;
+  // Calculate blush brightness
+  if (elapsedTime <= blushFadeDuration) {
+    blushBrightness = map(elapsedTime, 0, blushFadeDuration, 0, 255); // Gradual fade-in
+  } else {
+      blushBrightness = 255; // Max brightness reached
+      isBlushFadingIn = false; // Stop fading
+    }
+  }
+
+  // Set blush color based on brightness
+  uint16_t blushColor = matrix.color565(blushBrightness, 0, blushBrightness);
+
+     matrix.drawBitmap(35, 12, blush, 11, 13, blushColor);
+     matrix.drawBitmap(30, 12, blush, 11, 13, blushColor);
+     matrix.drawBitmap(25, 12, blush, 11, 13, blushColor);
+     matrix.drawBitmap(82, 12, blushL, 11, 13, blushColor);
+     matrix.drawBitmap(87, 12, blushL, 11, 13, blushColor);
+     matrix.drawBitmap(92, 12, blushL, 11, 13, blushColor);
+}
+
 void protoFaceTest() {
    matrix.drawBitmap(56, 10, nose, 8, 8, matrix.color565(255, 255, 255));
    matrix.drawBitmap(64, 10, noseL, 8, 8, matrix.color565(255, 255, 255));
    matrix.drawBitmap(0, 16, maw, 64, 16, matrix.color565(255, 255, 255));
    matrix.drawBitmap(64, 16, mawL, 64, 16, matrix.color565(255, 255, 255));
-   matrix.drawBitmap(0, 0, Eye, 32, 16, matrix.color565(255, 255, 255));
-   matrix.drawBitmap(96, 0, EyeL, 32, 16, matrix.color565(255, 255, 255));
+   //matrix.drawBitmap(0, 0, Eye, 32, 16, matrix.color565(255, 255, 255));
+   //matrix.drawBitmap(96, 0, EyeL, 32, 16, matrix.color565(255, 255, 255));
 
+    /*
+     matrix.drawBitmap(35, 12, blush, 11, 13, matrix.color565(255, 0, 255));
+     matrix.drawBitmap(30, 12, blush, 11, 13, matrix.color565(255, 0, 255));
+     matrix.drawBitmap(25, 12, blush, 11, 13, matrix.color565(255, 0, 255));
+     matrix.drawBitmap(82, 12, blushL, 11, 13, matrix.color565(255, 0, 255));
+     matrix.drawBitmap(87, 12, blushL, 11, 13, matrix.color565(255, 0, 255));
+     matrix.drawBitmap(92, 12, blushL, 11, 13, matrix.color565(255, 0, 255));
+     */
+
+   // Draw the blush (with fading effect in view 2)
    if (currentView == 2) {
-     matrix.drawBitmap(25, 12, blush, 26, 14, matrix.color565(255, 0, 255));
-     matrix.drawBitmap(77, 12, blushL, 26, 14, matrix.color565(255, 0, 255));
-   }
+   drawBlush();
+}
    
    // Draw blinking eyes
    blinkingEyes();
@@ -568,11 +644,21 @@ randomSeed(analogRead(0)); // Seed the random number generator for randomized ey
 }
 
 void displayCurrentView(int view) {
+  static int previousView = -1; // Track the last active view
+  matrix.fillScreen(0); // Clear display buffer at start of each frame
 
-  matrix.fillScreen(0);
+if (view != previousView) {
+      if (view == 2) {
+      // Reset fade logic when entering the blush view
+      blushFadeStartTime = millis();
+      isBlushFadingIn = true;
+    }
+    previousView = view; // Update the last active view
+  }
 
   switch (view) {
-    case 0:
+
+    case 0: //Scrolling text Debug View
   // Every frame, we clear the background and draw everything anew.
   // This happens "in the background" with double buffering, that's
   // why you don't see everything flicker. It requires double the RAM,
@@ -601,19 +687,28 @@ void displayCurrentView(int view) {
   }
       break;
 
-        case 1:
+      case 1: //Normal
       protoFaceTest();
       updateBlinkAnimation(); // Update blink animation progress
       delay(20); // Short delay for smoother animation
       break;
 
-      case 2:
+      case 2: //Blush with fade in effect
       protoFaceTest();
       updateBlinkAnimation(); // Update blink animation progress
-         matrix.drawBitmap(25, 12, blush, 26, 14, matrix.color565(255, 0, 255));
-         matrix.drawBitmap(77, 12, blushL, 26, 14, matrix.color565(255, 0, 255));
       break;
-        case 3:
+
+      case 3: //Dialated pupils
+      protoFaceTest();
+      updateBlinkAnimation(); // Update blink animation progress
+      break;
+
+      case 4: //X eyes
+      protoFaceTest();
+      updateBlinkAnimation(); // Update blink animation progress
+      break;
+
+      case 5: //Loading bar effect
       displayLoadingBar();
         if (loadingProgress <= loadingMax) {
     displayLoadingBar(); // Update the loading bar
@@ -625,7 +720,7 @@ void displayCurrentView(int view) {
     }
   
 
-      break;
+    break;
       }
 
   matrix.show();
@@ -634,14 +729,24 @@ void displayCurrentView(int view) {
 // LOOP - RUNS REPEATEDLY AFTER SETUP --------------------------------------
 
 void loop(void) {
+  // Non-blocking display update for the current view
+  static unsigned long lastFrameTime = 0;
+  unsigned long currentTime = millis();
 
-  if (debounceButton(BUTTON_UP)) {
-    currentView = (currentView + 1) % totalViews;
-  }
-  if (debounceButton(BUTTON_DOWN)) {
-    currentView = (currentView - 1) % totalViews;
-  }
+  // Target frame duration (e.g., 30 FPS = ~33ms per frame)
+  const unsigned long frameDuration = 15;
 
-  displayCurrentView(currentView);
-  delay(20);
+// Check if it's time for the next frame
+  if (currentTime - lastFrameTime >= frameDuration) {
+    lastFrameTime = currentTime;
+
+    if (debounceButton(BUTTON_UP)) {
+      currentView = (currentView + 1) % totalViews;
+    }
+    if (debounceButton(BUTTON_DOWN)) {
+      currentView = (currentView - 1 + totalViews) % totalViews;
+    }
+
+    displayCurrentView(currentView);
+  }
 }
