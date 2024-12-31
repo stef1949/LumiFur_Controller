@@ -117,7 +117,7 @@ const int matrixWidth = 128;  // Width of the matrix in pixels
 const int matrixHeight = 32; // Height of the matrix in pixels
 
 // View switching
-int currentView = 1; // Current & initial view being displayed
+int currentView = 4; // Current & initial view being displayed
 const int totalViews = 11; // Total number of views to cycle through
 
 //Loading Bar
@@ -288,7 +288,11 @@ const PROGMEM uint8_t semicircleeyes[] = {
 	0x3f, 0xff, 0xff, 0xf8, 0x3f, 0xff, 0xff, 0xf8, 0x1f, 0xff, 0xff, 0xf0, 0x0f, 0xff, 0xff, 0xe0, 
 	0x07, 0xff, 0xff, 0xc0, 0x01, 0xff, 0xff, 0x00, 0x00, 0x7f, 0xfc, 0x00, 0x00, 0x07, 0xc0, 0x00
 };
-
+const PROGMEM uint8_t slanteyes2[] = {
+  	0x00, 0x00, 0x01, 0x00, 0x00, 0x1f, 0x00, 0x01, 0xff, 0x00, 0x0f, 0xff, 0x00, 0xff, 0xff, 0x0f, 
+	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xfe, 0x7f, 0xff, 
+	0xfc, 0x3f, 0xff, 0xf8, 0x1f, 0xff, 0xf0, 0x0f, 0xff, 0xe0, 0x07, 0xff, 0xc0, 0x00, 0xfe, 0x00
+};
 const PROGMEM uint8_t x_eyes[] = {
 	  0xe0, 0x00, 0x00, 0x0e, 0xf8, 0x00, 0x00, 0x3e, 0x3e, 0x00, 0x00, 0xf8, 0x0f, 0xc0, 0x07, 0xe0, 
 	0x03, 0xf0, 0x1f, 0x80, 0x00, 0x7c, 0x7c, 0x00, 0x00, 0x1f, 0xf0, 0x00, 0x00, 0x07, 0xc0, 0x00, 
@@ -386,7 +390,11 @@ const PROGMEM uint8_t slant_eyesL[] = {
 	0xe0, 0x00, 0x7f, 0xff, 0xff, 0x80, 0x00, 0x3f, 0xff, 0xfe, 0x00, 0x00, 0x0f, 0xff, 0xe0, 0x00, 
 	0x00, 0x00, 0xfc, 0x00, 0x00, 0x00
   };
-
+const PROGMEM uint8_t slanteyes2L[] = {
+  	0x80, 0x00, 0x00, 0xf8, 0x00, 0x00, 0xff, 0x80, 0x00, 0xff, 0xf0, 0x00, 0xff, 0xff, 0x00, 0xff, 
+	0xff, 0xf0, 0xff, 0xff, 0xff, 0x7f, 0xff, 0xff, 0x7f, 0xff, 0xff, 0x7f, 0xff, 0xff, 0x3f, 0xff, 
+	0xfe, 0x1f, 0xff, 0xfc, 0x0f, 0xff, 0xf8, 0x07, 0xff, 0xf0, 0x03, 0xff, 0xe0, 0x00, 0x7f, 0x00
+};
 // Buffer icons for transitions
 uint8_t bufferL[] = {
     B00000000, B00000000,
@@ -545,29 +553,33 @@ float easeInOutQuad(float t) {
 void blinkingEyes() {
 
   // Draw  eyes
-  if (currentView == 1 || currentView == 2) {
+  if (currentView == 4 || currentView == 5) {
   matrix.drawBitmap(0, 0, Eye, 32, 16, matrix.color565(255, 255, 255));
   matrix.drawBitmap(96, 0, EyeL, 32, 16, matrix.color565(255, 255, 255));
   }
-  if (currentView == 3) {
+  if (currentView == 6) {
     matrix.drawBitmap(0, 0, semicircleeyes, 32, 12, matrix.color565(255, 255, 255));
     matrix.drawBitmap(96, 0, semicircleeyes, 32, 12, matrix.color565(255, 255, 255));
   }
-  if (currentView == 4) {
+  if (currentView == 7) {
     matrix.drawBitmap(0, 0, x_eyes, 31, 15, matrix.color565(255, 255, 255));
     matrix.drawBitmap(96, 0, x_eyes, 31, 15, matrix.color565(255, 255, 255));
   }
-  if (currentView == 5) {
+  if (currentView == 8) {
     matrix.drawBitmap(0, 0, Angry, 16, 8, matrix.color565(255, 255, 255));
     matrix.drawBitmap(96, 0, AngryL, 16, 8, matrix.color565(255, 255, 255));
   }
-  if (currentView == 6) {
+  if (currentView == 9) {
     matrix.drawBitmap(0, 0, Spooked, 16, 8, matrix.color565(255, 255, 255));
     matrix.drawBitmap(96, 0, SpookedL, 16, 8, matrix.color565(255, 255, 255));
   }
-  if (currentView == 7) {
+  if (currentView == 10) {
     matrix.drawBitmap(0, 0, slant_eyes, 35, 14, matrix.color565(255, 255, 255));
     matrix.drawBitmap(96, 0, slant_eyesL, 35, 14, matrix.color565(255, 255, 255));
+  }
+  if (currentView == 11) {
+    matrix.drawBitmap(0, 0, slanteyes2, 24, 16, matrix.color565(255, 255, 255));
+    matrix.drawBitmap(96, 0, slanteyes2L, 24, 16, matrix.color565(255, 255, 255));
   }
 
   if (isBlinking) {
@@ -652,7 +664,7 @@ void protoFaceTest() {
 }
 
 void patternPlasma() {
-    for (int x = 0; x < matrix.width() * 1; x++) {
+  for (int x = 0; x < matrix.width() * 1; x++) {
     for (int y = 0; y < matrix.height(); y++) {
       int16_t v = 128;
       uint8_t wibble = sin8(time_counter);
@@ -666,7 +678,6 @@ void patternPlasma() {
     }
   }
 
-  matrix.show(); // Refresh display
   ++time_counter;
   ++cycles;
   ++fps;
@@ -676,6 +687,9 @@ void patternPlasma() {
     cycles = 0;
     currentPalette = palettes[random(0, sizeof(palettes) / sizeof(palettes[0]))];
   }
+
+  // Refresh display
+  matrix.show();
 }
 
 void setup(void) {
@@ -748,93 +762,103 @@ if (view != previousView) {
 
   switch (view) {
 
-    case 0: //Scrolling text Debug View
-  // Every frame, we clear the background and draw everything anew.
-  // This happens "in the background" with double buffering, that's
-  // why you don't see everything flicker. It requires double the RAM,
-  // so it's not practical for every situation.
+  case 0: // Scrolling text Debug View
+    // Every frame, we clear the background and draw everything anew.
+    // This happens "in the background" with double buffering, that's
+    // why you don't see everything flicker. It requires double the RAM,
+    // so it's not practical for every situation.
 
-  // Draw big scrolling text
-  matrix.setCursor(textX, textY);
-  matrix.print(str);
+    // Draw big scrolling text
+    matrix.setCursor(textX, textY);
+    matrix.print(str);
 
-  // Update text position for next frame. If text goes off the
-  // left edge, reset its position to be off the right edge.
-  if((--textX) < textMin) textX = matrix.width();
+    // Update text position for next frame. If text goes off the
+    // left edge, reset its position to be off the right edge.
+    if ((--textX) < textMin)
+      textX = matrix.width();
 
-  // Draw the three bouncy balls on top of the text...
-  for(byte i=0; i<3; i++) {
-    // Draw 'ball'
-    matrix.fillCircle(ball[i][0], ball[i][1], 5, ballcolor[i]);
-    // Update ball's X,Y position for next frame
-    ball[i][0] += ball[i][2];
-    ball[i][1] += ball[i][3];
-    // Bounce off edges
-    if((ball[i][0] == 0) || (ball[i][0] == (matrix.width() - 1)))
-      ball[i][2] *= -1;
-    if((ball[i][1] == 0) || (ball[i][1] == (matrix.height() - 1)))
-      ball[i][3] *= -1;
-  }
-      break;
-
-      case 1: //Normal
-      protoFaceTest();
-      updateBlinkAnimation(); // Update blink animation progress
-      delay(20); // Short delay for smoother animation
-      break;
-
-      case 2: //Blush with fade in effect
-      protoFaceTest();
-      updateBlinkAnimation(); // Update blink animation progress
-      break;
-
-      case 3: //Dialated pupils
-      protoFaceTest();
-      updateBlinkAnimation(); // Update blink animation progress
-      break;
-
-      case 4: //X eyes
-      protoFaceTest();
-      updateBlinkAnimation(); // Update blink animation progress
-      break;
-
-      case 5: //Angry eyes
-      protoFaceTest();
-      updateBlinkAnimation(); // Update blink animation progress
-      break;
-
-      case 6: //Spooked eyes
-      protoFaceTest();
-      updateBlinkAnimation(); // Update blink animation progress
-      break;
-
-      case 7: //Slant eyes
-      protoFaceTest();
-      updateBlinkAnimation(); // Update blink animation progress
-      break;
-
-      case 8:
-      drawTransFlag();
-      delay(20);
-      break;
-
-      case 9: //Loading bar effect
-      displayLoadingBar();
-        if (loadingProgress <= loadingMax) {
-    displayLoadingBar(); // Update the loading bar
-    loadingProgress++;   // Increment progress
-    delay(50);           // Adjust speed of loading animation
-  } else {
-    // Reset or transition to another view
-    loadingProgress = 0;
+    // Draw the three bouncy balls on top of the text...
+    for (byte i = 0; i < 3; i++)
+    {
+      // Draw 'ball'
+      matrix.fillCircle(ball[i][0], ball[i][1], 5, ballcolor[i]);
+      // Update ball's X,Y position for next frame
+      ball[i][0] += ball[i][2];
+      ball[i][1] += ball[i][3];
+      // Bounce off edges
+      if ((ball[i][0] == 0) || (ball[i][0] == (matrix.width() - 1)))
+        ball[i][2] *= -1;
+      if ((ball[i][1] == 0) || (ball[i][1] == (matrix.height() - 1)))
+        ball[i][3] *= -1;
     }
     break;
-       case 10: //Pattern plasma
+
+  case 1: // Loading bar effect
+    displayLoadingBar();
+    if (loadingProgress <= loadingMax)
+    {
+      displayLoadingBar(); // Update the loading bar
+      loadingProgress++;   // Increment progress
+      delay(50);           // Adjust speed of loading animation
+    }
+    else
+    {
+      // Reset or transition to another view
+      loadingProgress = 0;
+    }
+    break;
+
+  case 2: // Pattern plasma
     patternPlasma();
-    //delay(10);
+    // delay(10);
     break;
-    }
 
+  case 3:
+    drawTransFlag();
+    delay(20);
+    break;
+
+  case 4: // Normal
+    protoFaceTest();
+    updateBlinkAnimation(); // Update blink animation progress
+    delay(20);              // Short delay for smoother animation
+    break;
+
+  case 5: // Blush with fade in effect
+    protoFaceTest();
+    updateBlinkAnimation(); // Update blink animation progress
+    break;
+
+  case 6: // Dialated pupils
+    protoFaceTest();
+    updateBlinkAnimation(); // Update blink animation progress
+    break;
+
+  case 7: // X eyes
+    protoFaceTest();
+    updateBlinkAnimation(); // Update blink animation progress
+    break;
+
+  case 8: // Angry eyes
+    protoFaceTest();
+    updateBlinkAnimation(); // Update blink animation progress
+    break;
+
+  case 9: // Spooked eyes
+    protoFaceTest();
+    updateBlinkAnimation(); // Update blink animation progress
+    break;
+
+  case 10: // Slant eyes
+    protoFaceTest();
+    updateBlinkAnimation(); // Update blink animation progress
+    break;
+
+  case 11: // Slant eyes2
+    protoFaceTest();
+    updateBlinkAnimation();
+    break;
+  }
   matrix.show();
 }
 
