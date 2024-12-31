@@ -112,9 +112,13 @@ supported boards.
 
 // Global Variables ---------------------------------------------------------
 
+// Matrix measurements (Solely for shapes and text placement)
+const int matrixWidth = 128;  // Width of the matrix in pixels
+const int matrixHeight = 32; // Height of the matrix in pixels
+
 // View switching
-int currentView = 0;
-const int totalViews = 6;
+int currentView = 1; // Current & initial view being displayed
+const int totalViews = 8; // Total number of views to cycle through
 
 //Loading Bar
 int loadingProgress = 0; // Current loading progress (0-100)
@@ -525,6 +529,14 @@ void blinkingEyes() {
     matrix.drawBitmap(0, 0, x_eyes, 31, 15, matrix.color565(255, 255, 255));
     matrix.drawBitmap(96, 0, x_eyes, 31, 15, matrix.color565(255, 255, 255));
   }
+  if (currentView == 5) {
+    matrix.drawBitmap(0, 0, Angry, 16, 8, matrix.color565(255, 255, 255));
+    matrix.drawBitmap(96, 0, AngryL, 16, 8, matrix.color565(255, 255, 255));
+  }
+  if (currentView == 6) {
+    matrix.drawBitmap(0, 0, Spooked, 16, 8, matrix.color565(255, 255, 255));
+    matrix.drawBitmap(96, 0, SpookedL, 16, 8, matrix.color565(255, 255, 255));
+  }
 
   if (isBlinking) {
     // Calculate the height of the black box
@@ -561,6 +573,22 @@ void drawBlush() {
      matrix.drawBitmap(82, 12, blushL, 11, 13, blushColor);
      matrix.drawBitmap(87, 12, blushL, 11, 13, blushColor);
      matrix.drawBitmap(92, 12, blushL, 11, 13, blushColor);
+}
+
+void drawTransFlag() {
+  int stripeHeight = matrixHeight / 5; // Height of each stripe
+
+  // Define colors in RGB565 format
+  uint16_t lightBlue = matrix.color565(0, 102/2, 204/2); // Deeper light blue
+  uint16_t pink = matrix.color565(255, 20/2, 147/2);    // Deeper pink
+  uint16_t white = matrix.color565(255/2, 255/2, 255/2);   // White (unchanged)
+
+  // Draw stripes
+  matrix.fillRect(0, 0, matrixWidth, stripeHeight, lightBlue);       // Top light blue stripe
+  matrix.fillRect(0, stripeHeight, matrixWidth, stripeHeight, pink); // Pink stripe
+  matrix.fillRect(0, stripeHeight * 2, matrixWidth, stripeHeight, white); // Middle white stripe
+  matrix.fillRect(0, stripeHeight * 3, matrixWidth, stripeHeight, pink);  // Pink stripe
+  matrix.fillRect(0, stripeHeight * 4, matrixWidth, stripeHeight, lightBlue); // Bottom light blue stripe
 }
 
 void protoFaceTest() {
@@ -708,7 +736,22 @@ if (view != previousView) {
       updateBlinkAnimation(); // Update blink animation progress
       break;
 
-      case 5: //Loading bar effect
+      case 5: //Angry eyes
+      protoFaceTest();
+      updateBlinkAnimation(); // Update blink animation progress
+      break;
+
+      case 6: //Spooked eyes
+      protoFaceTest();
+      updateBlinkAnimation(); // Update blink animation progress
+      break;
+
+      case 7:
+      drawTransFlag();
+      delay(20);
+      break;
+
+      case 8: //Loading bar effect
       displayLoadingBar();
         if (loadingProgress <= loadingMax) {
     displayLoadingBar(); // Update the loading bar
@@ -718,7 +761,6 @@ if (view != previousView) {
     // Reset or transition to another view
     loadingProgress = 0;
     }
-  
 
     break;
       }
