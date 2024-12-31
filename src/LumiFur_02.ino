@@ -9,7 +9,7 @@ This example is written for a 64x32 matrix but can be adapted to others.
 #include <Adafruit_Protomatter.h>
 #include "fonts/lequahyper20pt7b.h"        // Stylized font
 #include <fonts/FreeSansBold18pt7b.h>     // Larger font
-
+#include <FastLED.h>                      // For pattern plasma colors
 /* ----------------------------------------------------------------------
 The RGB matrix must be wired to VERY SPECIFIC pins, different for each
 microcontroller board. This first section sets that up for a number of
@@ -118,7 +118,7 @@ const int matrixHeight = 32; // Height of the matrix in pixels
 
 // View switching
 int currentView = 1; // Current & initial view being displayed
-const int totalViews = 10; // Total number of views to cycle through
+const int totalViews = 11; // Total number of views to cycle through
 
 //Loading Bar
 int loadingProgress = 0; // Current loading progress (0-100)
@@ -142,6 +142,18 @@ unsigned long blushFadeStartTime = 0;
 const unsigned long blushFadeDuration = 2000; // 2 seconds for full fade-in
 bool isBlushFadingIn = true;                  // Whether the blush is currently fading in
 uint8_t blushBrightness = 0;                  // Current blush brightness (0-255)
+
+// Variables for plasma effect
+uint16_t time_counter = 0, cycles = 0, fps = 0;
+unsigned long fps_timer;
+
+CRGB currentColor;
+CRGBPalette16 palettes[] = {LavaColors_p, HeatColors_p, RainbowColors_p, RainbowStripeColors_p, CloudColors_p};
+CRGBPalette16 currentPalette = palettes[0];
+
+CRGB ColorFromCurrentPalette(uint8_t index = 0, uint8_t brightness = 255, TBlendType blendType = LINEARBLEND) {
+  return ColorFromPalette(currentPalette, index, brightness, blendType);
+}
 
 /* ----------------------------------------------------------------------
 Matrix initialization is explained EXTENSIVELY in "simple" example sketch!
@@ -639,6 +651,33 @@ void protoFaceTest() {
    matrix.show(); // Update the matrix display
 }
 
+void patternPlasma() {
+    for (int x = 0; x < matrix.width() * 1; x++) {
+    for (int y = 0; y < matrix.height(); y++) {
+      int16_t v = 128;
+      uint8_t wibble = sin8(time_counter);
+      v += sin16(x * wibble * 3 + time_counter);
+      v += cos16(y * (128 - wibble) + time_counter);
+      v += sin16(y * x * cos8(-time_counter) / 8);
+
+      currentColor = ColorFromPalette(currentPalette, (v >> 8));
+      uint16_t color = matrix.color565(currentColor.r, currentColor.g, currentColor.b);
+      matrix.drawPixel(x, y, color);
+    }
+  }
+
+  matrix.show(); // Refresh display
+  ++time_counter;
+  ++cycles;
+  ++fps;
+
+  if (cycles >= 1024) {
+    time_counter = 0;
+    cycles = 0;
+    currentPalette = palettes[random(0, sizeof(palettes) / sizeof(palettes[0]))];
+  }
+}
+
 void setup(void) {
   Serial.begin(9600);
 
@@ -676,6 +715,9 @@ randomSeed(analogRead(0)); // Seed the random number generator for randomized ey
   ballcolor[0] = matrix.color565(0, 20, 0); // Dark green
   ballcolor[1] = matrix.color565(0, 0, 20); // Dark blue
   ballcolor[2] = matrix.color565(20, 0, 0); // Dark red
+
+  // Set initial plasma color palette
+  currentPalette = RainbowColors_p;
 
   // Set up buttons if present
   /* ----------------------------------------------------------------------
@@ -786,9 +828,12 @@ if (view != previousView) {
     // Reset or transition to another view
     loadingProgress = 0;
     }
-
     break;
-      }
+       case 10: //Pattern plasma
+    patternPlasma();
+    //delay(10);
+    break;
+    }
 
   matrix.show();
 }
