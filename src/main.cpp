@@ -1,5 +1,3 @@
-// How to use this library with a FM6126 panel, thanks goes to:
-// https://github.com/hzeller/rpi-rgb-led-matrix/issues/746
 
 #ifdef IDF_BUILD
 #include <stdio.h>
@@ -11,6 +9,10 @@
 
 #include <Arduino.h>
 #include "xtensa/core-macros.h"
+#include "bitmaps.h"
+#include "fonts/lequahyper20pt7b.h"       // Stylized font
+#include <fonts/FreeSansBold18pt7b.h>     // Larger font
+//#include <Wire.h>                       // For I2C sensors
 #ifdef VIRTUAL_PANE
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
 #else
@@ -103,7 +105,7 @@
 
 
 // Configure for your panel(s) as appropriate!
-#define PANEL_WIDTH 128
+#define PANEL_WIDTH 64
 #define PANEL_HEIGHT 32         // Panel height of 64 will required PIN_E to be defined.
 
 #ifdef VIRTUAL_PANE
@@ -149,13 +151,13 @@ uint32_t ccount1, ccount2;
 uint8_t color1 = 0, color2 = 0, color3 = 0;
 uint16_t x,y;
 
-const char *str = "* ESP32 I2S DMA *";
+const char *message = "* ESP32 I2S DMA *";
 
 // LumiFur Global Variables ---------------------------------------------------
 
 // View switching
 int currentView = 4; // Current & initial view being displayed
-const int totalViews = 12; // Total number of views to cycle through
+const int totalViews = 10; // Total number of views to cycle through
 
 //Loading Bar
 int loadingProgress = 0; // Current loading progress (0-100)
@@ -204,294 +206,25 @@ bool debounceButton(int pin) {
   return false;
 }
 
-// Bitmaps --------------------------------------------------------------------
-
-// 'Apple_logo_black', 18x21px
-static char appleLogoApple_logo_black[] = {
-	0x00, 0x18, 0x00, 0x00, 0x30, 0x00, 0x00, 0x70, 0x00, 0x00, 0xe0, 0x00, 0x00, 0xc0, 0x00, 0x1e, 
-	0x1e, 0x00, 0x7f, 0xff, 0x80, 0x7f, 0xff, 0x80, 0x7f, 0xfe, 0x00, 0xff, 0xfe, 0x00, 0xff, 0xfe, 
-	0x00, 0xff, 0xfe, 0x00, 0xff, 0xfe, 0x00, 0xff, 0xfe, 0x00, 0xff, 0xff, 0x00, 0x7f, 0xff, 0x80, 
-	0x7f, 0xff, 0x80, 0x3f, 0xff, 0x80, 0x3f, 0xff, 0x00, 0x1f, 0xfe, 0x00, 0x0f, 0x3c, 0x00
-};
-
-/////////////////////////// Facial icons 
-
-// Right side of the helmet
-static char nose[] = {
-    B00000000,
-              B01111110,
-              B00111111,
-              B00000011,
-              B00000011,
-              B00000001,
-              B00000000,
-              B00000000
-              };
-static char maw[] = {
-	0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-	0x3f, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3f, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-	0xe3, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xe3, 0xf8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
-	0xe0, 0x3f, 0x80, 0x00, 0x00, 0x00, 0xf0, 0x00, 0xe0, 0x3f, 0x80, 0x00, 0x00, 0x00, 0xf0, 0x00, 
-	0xff, 0xff, 0xf0, 0x00, 0x00, 0x1f, 0xff, 0x00, 0xff, 0xff, 0xf0, 0x00, 0x00, 0x1f, 0xff, 0x00, 
-	0x00, 0x00, 0x7f, 0x00, 0x00, 0xfc, 0x07, 0xe0, 0x00, 0x00, 0x7f, 0x00, 0x00, 0xfc, 0x07, 0xe0, 
-	0x00, 0x00, 0x07, 0xf0, 0x0f, 0xe0, 0x00, 0xf8, 0x00, 0x00, 0x07, 0xf0, 0x0f, 0xe0, 0x00, 0xf8, 
-	0x00, 0x00, 0x00, 0x3f, 0xfc, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x00, 0x3f, 0xfc, 0x00, 0x00, 0x1f
-             };
-static char Glitch1[] = {
-    B00110000, B00010000, B00000100, B00000100,
-                 B00000000, B00101000, B01100000, B00111010,
-                 B00110001, B00101000, B00000001, B00010011,
-                 B00000111, B00100010, B00100001, B10100001,
-                 B01011101, B11110000, B00000011, B11111111,
-                 B00111000, B01101001, B01001110, B00000100,
-                 B10100000, B01001110, B01001100, B00000110,
-                 B10000001, B00000111, B11100100, B00000000
-                 };
-static char Glitch2[] = {
-    B00000000, B00000000, B00000000, B00000100,
-                 B00000000, B00000000, B00000000, B00011110,
-                 B00100000, B00010000, B00000000, B01001011,
-                 B00000111, B00100000, B00000001, B11100111,
-                 B00011111, B11110000, B00000110, B11111111,
-                 B00001011, B11111101, B01111100, B00000000,
-                 B11100110, B00010110, B01011000, B00000000,
-                 B00000000, B00000111, B11100000, B00000000
-                 };
-static char Eye[] = {
-	0x00, 0xff, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x0f, 0xff, 0xfc, 0x00, 0x0f, 0xff, 0xfc, 0x00, 
-	0x3f, 0xff, 0xff, 0xc0, 0x3f, 0xff, 0xff, 0xc0, 0xff, 0xff, 0xff, 0xfc, 0xff, 0xff, 0xff, 0xfc, 
-	0xff, 0x00, 0x00, 0x3f, 0xff, 0x00, 0x00, 0x3f, 0x3c, 0x00, 0x00, 0x03, 0x3c, 0x00, 0x00, 0x03, 
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-             };
-static char Angry[] = {
-        B00000000, B00000000,
-               B00011111, B11111100,
-               B00111111, B11111110,
-               B00111111, B11111100,
-               B00011111, B11111000,
-               B00001111, B11100000,
-               B00000011, B10000000,
-               B00000000, B00000000
-               };
-static char Spooked[] = {
-    B00000011, B11000000,
-                 B00000111, B11100000,
-                 B00001111, B11110000,
-                 B00001111, B11110000,
-                 B00001111, B11110000,
-                 B00001111, B11110000,
-                 B00000111, B11100000,
-                 B00000011, B11000000
-                 };
-static char vwv[] = {
-        B00001110, B00000000,
-             B00000111, B10000000,
-             B00000001, B11100000,
-             B00000000, B01111000,
-             B00000000, B01111000,
-             B00000001, B11100000,
-             B00000111, B10000000,
-             B00001110, B00000000};
-static char blush[] = {
-	0x00, 0xc0, 0x00, 0xe0, 0x01, 0xc0, 0x03, 0x80, 0x07, 0x80, 0x07, 0x00, 0x0e, 0x00, 0x1c, 0x00, 
-	0x3c, 0x00, 0x38, 0x00, 0x70, 0x00, 0xe0, 0x00, 0x60, 0x00
-};
-static char semicircleeyes[] = {
-  	0xff, 0xff, 0xff, 0xfe, 0x7f, 0xff, 0xff, 0xfc, 0x7f, 0xff, 0xff, 0xfc, 0x7f, 0xff, 0xff, 0xfc, 
-	0x3f, 0xff, 0xff, 0xf8, 0x3f, 0xff, 0xff, 0xf8, 0x1f, 0xff, 0xff, 0xf0, 0x0f, 0xff, 0xff, 0xe0, 
-	0x07, 0xff, 0xff, 0xc0, 0x01, 0xff, 0xff, 0x00, 0x00, 0x7f, 0xfc, 0x00, 0x00, 0x07, 0xc0, 0x00
-};
-static char x_eyes[] = {
-	  0xe0, 0x00, 0x00, 0x0e, 0xf8, 0x00, 0x00, 0x3e, 0x3e, 0x00, 0x00, 0xf8, 0x0f, 0xc0, 0x07, 0xe0, 
-	0x03, 0xf0, 0x1f, 0x80, 0x00, 0x7c, 0x7c, 0x00, 0x00, 0x1f, 0xf0, 0x00, 0x00, 0x07, 0xc0, 0x00, 
-	0x00, 0x1f, 0xf0, 0x00, 0x00, 0x7c, 0x7c, 0x00, 0x03, 0xf0, 0x1f, 0x80, 0x0f, 0xc0, 0x07, 0xe0, 
-	0x3e, 0x00, 0x00, 0xf8, 0xf8, 0x00, 0x00, 0x3e, 0xe0, 0x00, 0x00, 0x0e
-};
-static char slanteyes[] = {
-0x80, 0x00, 0x00, 0xf8, 0x00, 0x00, 0xff, 0x80, 0x00, 0xff, 0xf0, 0x00, 0xff, 0xff, 0x00, 0xff, 
-	0xff, 0xf0, 0xff, 0xff, 0xff, 0x7f, 0xff, 0xff, 0x7f, 0xff, 0xff, 0x7f, 0xff, 0xff, 0x3f, 0xff, 
-	0xfe, 0x1f, 0xff, 0xfc, 0x0f, 0xff, 0xf8, 0x07, 0xff, 0xf0, 0x03, 0xff, 0xe0, 0x00, 0x7f, 0x00
-};
-static char spiral[] = {
-0x00, 0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00, 0x0e, 0x00, 0x00, 0x00, 0xff, 0xc0, 0x00, 
-	0x03, 0xff, 0xf0, 0x00, 0x07, 0xf1, 0xf8, 0x00, 0x0f, 0x80, 0x3c, 0x00, 0x1e, 0x00, 0x1e, 0x00, 
-	0x3c, 0x00, 0x0f, 0x00, 0x38, 0x0e, 0x07, 0x00, 0x78, 0x3f, 0x83, 0x80, 0x70, 0x7f, 0xc3, 0x80, 
-	0x70, 0xf1, 0xc3, 0x80, 0xe1, 0xe1, 0xc3, 0x80, 0xe1, 0xc7, 0xc3, 0x80, 0xe1, 0xc7, 0xc3, 0x80, 
-	0xe1, 0xc7, 0xc3, 0x80, 0xe1, 0xc1, 0x07, 0x80, 0xe1, 0xe0, 0x07, 0x00, 0xf0, 0xe0, 0x0f, 0x00, 
-	0x60, 0xf8, 0x3e, 0x00, 0x00, 0x7f, 0xfc, 0x00, 0x00, 0x3f, 0xf8, 0x00, 0x00, 0x0f, 0xe0, 0x00, 
-	0x00, 0x00, 0x00, 0x00
-  };
-// Left side of the helmet
-static char noseL[] = {
-    B00000000,
-               B01111110,
-               B11111100,
-               B11000000,
-               B11000000,
-               B10000000,
-               B00000000,
-               B00000000
-               };
-static char mawL[] = {
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x30, 
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xfc, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xfc, 
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f, 0xc7, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1f, 0xc7, 
-	0x00, 0x0f, 0x00, 0x00, 0x00, 0x01, 0xfc, 0x07, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x01, 0xfc, 0x07, 
-	0x00, 0xff, 0xf8, 0x00, 0x00, 0x0f, 0xff, 0xff, 0x00, 0xff, 0xf8, 0x00, 0x00, 0x0f, 0xff, 0xff, 
-	0x07, 0xe0, 0x3f, 0x00, 0x00, 0xfe, 0x00, 0x00, 0x07, 0xe0, 0x3f, 0x00, 0x00, 0xfe, 0x00, 0x00, 
-	0x1f, 0x00, 0x07, 0xf0, 0x0f, 0xe0, 0x00, 0x00, 0x1f, 0x00, 0x07, 0xf0, 0x0f, 0xe0, 0x00, 0x00, 
-	0xf8, 0x00, 0x00, 0x3f, 0xfc, 0x00, 0x00, 0x00, 0xf8, 0x00, 0x00, 0x3f, 0xfc, 0x00, 0x00, 0x00
-              };
-static char Glitch1L[] = {
-        B00000000, B00000000, B00000000, B00000100,
-                  B00000000, B00000000, B00000000, B00011110,
-                  B00100000, B00010000, B00000000, B01001011,
-                  B00000111, B00100000, B00000001, B11100111,
-                  B00011111, B11110000, B00000110, B11111111,
-                  B00001011, B11111101, B01111100, B00000000,
-                  B11100110, B00010110, B01011000, B00000000,
-                  B00000000, B00000111, B11100000, B00000000
-                  };
-static char Glitch2L[] = {
-    0x0c, 0x08, 0x20, 0x20, 0x00, 0x14, 0x06, 0x5c, 0x0c, 0x14, 0x80, 0xc8, 0xe0,
-                  0x22, 0xc2, 0xc2, 0xba, 0x0f, 0xc0, 0xff, 0x1c, 0x96, 0x72, 0x20, 0x05, 0x72,
-                  0x32, 0x60, 0x81, 0xe0, 0x27, 0x00
-                  };
-static char EyeL[] = {
-	0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x3f, 0xff, 0xf0, 0x00, 0x3f, 0xff, 0xf0, 
-	0x03, 0xff, 0xff, 0xfc, 0x03, 0xff, 0xff, 0xfc, 0x3f, 0xff, 0xff, 0xff, 0x3f, 0xff, 0xff, 0xff, 
-	0xfc, 0x00, 0x00, 0xff, 0xfc, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x00, 0x3c, 0xc0, 0x00, 0x00, 0x3c, 
-	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-              };
-static char AngryL[] = {
-    B00000000, B00000000,
-                B00111111, B11111000,
-                B01111111, B11111100,
-                B00111111, B11111100,
-                B00011111, B11111000,
-                B00000111, B11110000,
-                B00000001, B11000000,
-                B00000000, B00000000
-                };
-static char SpookedL[] = {
-    B00000011, B11000000,
-                  B00000111, B11100000,
-                  B00001111, B11110000,
-                  B00001111, B11110000,
-                  B00001111, B11110000,
-                  B00001111, B11110000,
-                  B00000111, B11100000,
-                  B00000011, B11000000
-                  };
-static char vwvL[] = {
-    B00000000, B01110000,
-              B00000001, B11100000,
-              B00000111, B10000000,
-              B00011110, B00000000,
-              B00011110, B00000000,
-              B00000111, B10000000,
-              B00000001, B11100000,
-              B00000000, B01110000
-              };
-static char blushL[] = {
-	0x60, 0x00, 0xe0, 0x00, 0x70, 0x00, 0x38, 0x00, 0x3c, 0x00, 0x1c, 0x00, 0x0e, 0x00, 0x07, 0x00, 
-	0x07, 0x80, 0x03, 0x80, 0x01, 0xc0, 0x00, 0xe0, 0x00, 0xc0
-  };
-static char slanteyesL[] = {
-0x00, 0x00, 0x01, 0x00, 0x00, 0x1f, 0x00, 0x01, 0xff, 0x00, 0x0f, 0xff, 0x00, 0xff, 0xff, 0x0f, 
-	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xfe, 0x7f, 0xff, 
-	0xfc, 0x3f, 0xff, 0xf8, 0x1f, 0xff, 0xf0, 0x0f, 0xff, 0xe0, 0x07, 0xff, 0xc0, 0x00, 0xfe, 0x00
-  };
-static char spiralL[] = {
-0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x38, 0x00, 0x00, 0x01, 0xff, 0x80, 0x00, 
-	0x07, 0xff, 0xe0, 0x00, 0x0f, 0xc7, 0xf0, 0x00, 0x1e, 0x00, 0xf8, 0x00, 0x3c, 0x00, 0x3c, 0x00, 
-	0x78, 0x00, 0x1e, 0x00, 0x70, 0x38, 0x0e, 0x00, 0xe0, 0xfe, 0x0f, 0x00, 0xe1, 0xff, 0x07, 0x00, 
-	0xe1, 0xc7, 0x87, 0x00, 0xe1, 0xc3, 0xc3, 0x80, 0xe1, 0xf1, 0xc3, 0x80, 0xe1, 0xf1, 0xc3, 0x80, 
-	0xe1, 0xf1, 0xc3, 0x80, 0xf0, 0x41, 0xc3, 0x80, 0x70, 0x03, 0xc3, 0x80, 0x78, 0x03, 0x87, 0x80, 
-	0x3e, 0x0f, 0x83, 0x00, 0x1f, 0xff, 0x00, 0x00, 0x0f, 0xfe, 0x00, 0x00, 0x03, 0xf8, 0x00, 0x00, 
-	0x00, 0x00, 0x00, 0x00
-};
-// Buffer icons for transitions
-uint8_t bufferL[] = {
-    B00000000, B00000000,
-                     B00000000, B00000000,
-                     B00000000, B00000000,
-                     B00000000, B00000000,
-                     B00000000, B00000000,
-                     B00000000, B00000000,
-                     B00000000, B00000000,
-                     B00000000, B00000000
-                     };
-uint8_t bufferR[] = {
-    B00000000, B00000000,
-                     B00000000, B00000000,
-                     B00000000, B00000000,
-                     B00000000, B00000000,
-                     B00000000, B00000000,
-                     B00000000, B00000000,
-                     B00000000, B00000000,
-                     B00000000, B00000000
-                     };
-uint8_t fftIcon1[] = {
-    B00000000, B00000000,
-                      B00000000, B00000000,
-                      B00000000, B00000000,
-                      B00000000, B00000000,
-                      B00000000, B00000000,
-                      B00000000, B00000000,
-                      B00000000, B00000000,
-                      B00000000, B00000000
-                      };
-uint8_t fftIcon2[] = {
-    B00000000, B00000000,
-                      B00000000, B00000000,
-                      B00000000, B00000000,
-                      B00000000, B00000000,
-                      B00000000, B00000000,
-                      B00000000, B00000000,
-                      B00000000, B00000000,
-                      B00000000, B00000000
-                      };
-uint8_t fftIcon1L[] = {
-    B00000000, B00000000,
-                       B00000000, B00000000,
-                       B00000000, B00000000,
-                       B00000000, B00000000,
-                       B00000000, B00000000,
-                       B00000000, B00000000,
-                       B00000000, B00000000,
-                       B00000000, B00000000
-                       };
-uint8_t fftIcon2L[] = {
-    B00000000, B00000000,
-                       B00000000, B00000000,
-                       B00000000, B00000000,
-                       B00000000, B00000000,
-                       B00000000, B00000000,
-                       B00000000, B00000000,
-                       B00000000, B00000000,
-                       B00000000, B00000000
-                       };
-
-
 // Bitmap Drawing Functions ------------------------------------------------
-void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t color = dma_display->color565(255, 255, 255)) 
-{
-  if (width % 8 != 0) {
-      width =  ((width / 8) + 1) * 8;
-  }
-    for (int i = 0; i < width * height / 8; i++ ) {
-      unsigned char charColumn = pgm_read_byte(xbm + i);
-      for (int j = 0; j < 8; j++) {
-        int targetX = (i * 8 + j) % width + x;
-        int targetY = (8 * i / (width)) + y;
-        if (bitRead(charColumn, j)) {
-          uint8_t r = (color >> 16) & 0xFF;
-          uint8_t g = (color >> 8) & 0xFF;
-          uint8_t b = color & 0xFF;
-          dma_display->drawPixelRGB888(targetX, targetY, r, g, b);
+void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t color = 0xffff) {
+    // Ensure width is padded to the nearest byte boundary
+    int byteWidth = (width + 7) / 8;
+
+    for (int j = 0; j < height; j++) {
+        for (int i = 0; i < width; i++) {
+            // Calculate byte and bit positions
+            int byteIndex = j * byteWidth + (i / 8);
+            int bitIndex = 7 - (i % 8); // Bits are stored MSB first
+
+            // Check if the bit is set
+            if (pgm_read_byte(&xbm[byteIndex]) & (1 << bitIndex)) {
+                // Draw the pixel only if within display boundaries
+                if (x + i >= 0 && y + j >= 0 && x + i < dma_display->width() && y + j < dma_display->height()) {
+                    dma_display->drawPixel(x + i, y + j, color);
+                }
+            }
         }
-      }
     }
 }
 
@@ -501,7 +234,7 @@ void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t c
 int current_view = 4;
 static int number_of_views = 12;
 
-static char view_name[13][30] = {
+static char view_name[12][30] = {
 "nose",
 "maw",
 "Glitch1",
@@ -513,11 +246,10 @@ static char view_name[13][30] = {
 "blush",
 "semicircleeyes",
 "x_eyes",
-"slanteyes",
-"spiral"
+"slanteyes"
 };
 
-static char *view_bits[13] = {
+static char *view_bits[12] = {
 nose,
 maw,
 Glitch1,
@@ -529,8 +261,8 @@ vwv,
 blush,
 semicircleeyes,
 x_eyes,
-slanteyes,
-spiral
+slanteyes
+//spiral
 };
 
 
@@ -539,7 +271,7 @@ spiral
 int16_t  textX;        // Current text position (X)
 int16_t  textY;        // Current text position (Y)
 int16_t  textMin;      // Text pos. (X) when scrolled off left edge
-char     str[64];      // Buffer to hold scrolling message text
+char     txt[64];      // Buffer to hold scrolling message text
 int16_t  ball[3][4] = {
   {  3,  0,  1,  1 },  // Initial X,Y pos+velocity of 3 bouncy balls
   { 17, 15,  1, -1 },
@@ -562,6 +294,7 @@ void err(int x) {
 }
 
 void displayLoadingBar() {
+  dma_display->clearScreen();
   // Draw Apple Logos
   drawXbm565(23, 2, 18, 21, appleLogoApple_logo_black, dma_display->color565(255, 255, 255));
   drawXbm565(88, 2, 18, 21, appleLogoApple_logo_black, dma_display->color565(255, 255, 255));
@@ -577,20 +310,25 @@ void displayLoadingBar() {
 
   // Draw the loading progress
   int progressWidth = (barWidth - 2) * loadingProgress / loadingMax;
-  dma_display->drawRect(barX + 1, (barY * 2) + 1, progressWidth, barHeight - 2, dma_display->color565(255, 255, 255));
+  dma_display->fillRect(barX + 1, (barY * 2) + 1, progressWidth, barHeight - 2, dma_display->color565(255, 255, 255));
   dma_display->fillRect((barX + 1) + 64, (barY * 2) + 1, progressWidth, barHeight - 2, dma_display->color565(255, 255, 255));
 
 /*
   // Display percentage text
   char progressText[16];
   sprintf(progressText, "%d%%", loadingProgress);
-  matrix.setTextColor(dma_display->color565(255, 255, 255));
-  matrix.setCursor(barX - 8, barY + 14); // Position above the bar
-  matrix.print(progressText);
+  dma_display->setTextColor(dma_display->color565(255, 255, 255));
+  dma_display->setCursor(barX - 8, barY + 14); // Position above the bar
+  dma_display->print(progressText);
 */
-  ////matrix.show(); // Update the matrix display
-  
-  delay(10);     // Short delay for smoother animation
+  //delay(10);     // Short delay for smoother animation
+}
+
+// Helper function for ease-in-out quadratic easing
+float easeInOutQuad(float t) {
+return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+
+dma_display->flipDMABuffer();
 }
 
 void updateBlinkAnimation() {
@@ -618,14 +356,8 @@ void updateBlinkAnimation() {
       blinkDuration = random(minBlinkDuration, maxBlinkDuration); // Randomize blink duration for variety
     }
   }
-}
-
-// Helper function for ease-in-out quadratic easing
-float easeInOutQuad(float t) {
-  if (t < 0.5) {
-    return 2 * t * t;
-  }
-  return -1 + (4 - 2 * t) * t;
+  //dma_display->flipDMABuffer();
+  //dma_display->clearScreen();
 }
 
 void drawRotatedBitmap(int16_t x, int16_t y, const uint8_t *bitmap, uint16_t width, uint16_t height, float angle, uint16_t color) {
@@ -667,7 +399,7 @@ void updateRotatingSpiral() {
   unsigned long currentTime = millis();
   if (currentTime - lastUpdate > 20) { // Update every 100 ms
     lastUpdate = currentTime;
-
+    
     // Increment the angle for rotation
     currentAngle += 10.0;
     if (currentAngle >= 360.0) {
@@ -677,7 +409,6 @@ void updateRotatingSpiral() {
   // Increment time_counter to change colors over time
     time_counter++;
 
-
 // Precompute values for efficiency
     int16_t v = 128;
     uint8_t wibble = sin8(time_counter);
@@ -685,29 +416,37 @@ void updateRotatingSpiral() {
     v += cos16((128 - wibble) + time_counter);
     v += sin16(cos8(-time_counter) / 8);
 // Map the calculated value to a color using the palette
-CRGB currentColor = ColorFromPalette(currentPalette, (v >> 8) & 0xFF); // Ensure within palette range
+    CRGB currentColor = ColorFromPalette(currentPalette, (v >> 8) & 0xFF); // Ensure within palette range
     uint16_t color = dma_display->color565(currentColor.r, currentColor.g, currentColor.b);
+
+    // Clear the screen before drawing
+    dma_display->clearScreen();
 
     // Draw the rotating bitmaps
     drawRotatedBitmap(26, 10, spiral, 25, 25, currentAngle, color);
     drawRotatedBitmap(97, 10, spiralL, 25, 25, -currentAngle, color);
-}
+
+    // Flip the DMA buffer to update the display
+    dma_display->flipDMABuffer();
+    }
 }
 
 
 // Draw the blinking eyes
 void blinkingEyes() {
 
+  dma_display->clearScreen(); // Clear the display
+
   // Draw  eyes
   if (currentView == 4 || currentView == 5) {
   drawXbm565(0, 0, 32, 16, Eye, dma_display->color565(255, 255, 255));
   drawXbm565(96, 0, 32, 16, EyeL, dma_display->color565(255, 255, 255));
   }
-  if (currentView == 6) {
+  else if (currentView == 6) {
     drawXbm565(0, 0, 32, 12, semicircleeyes, dma_display->color565(255, 255, 255));
     drawXbm565(96, 0, 32, 12, semicircleeyes, dma_display->color565(255, 255, 255));
   }
-  if (currentView == 7) {
+  else if (currentView == 7) {
     drawXbm565(0, 0, 31, 15, x_eyes, dma_display->color565(255, 255, 255));
     drawXbm565(96, 0, 31, 15, x_eyes, dma_display->color565(255, 255, 255));
   }
@@ -721,32 +460,35 @@ void blinkingEyes() {
     drawXbm565(96, 0, SpookedL, 16, 8, dma_display->color565(255, 255, 255));
   }
   */
-  if (currentView == 8) {
+  else if (currentView == 8) {
     drawXbm565(0, 0, 24, 16, slanteyes, dma_display->color565(255, 255, 255));
     drawXbm565(104, 0, 24, 16, slanteyes, dma_display->color565(255, 255, 255));
   }
-  if (currentView == 9) {
+  else if (currentView == 9) {
   //  drawXbm565(15, 0, 25, 25, spiral, dma_display->color565(255, 255, 255));
   //  drawXbm565(88, 0, 25, 25, spiralL, dma_display->color565(255, 255, 255));
   }
 
   if (isBlinking) {
     // Calculate the height of the black box
-    int boxHeight = map(blinkProgress, 0, 100, 0, 16); // From 0 to 16 pixels
+    int boxHeight = map(blinkProgress, 0, 100, 0, 16); // Adjust height of blink. DEFAULT: From 0 to 16 pixels
 
     // Draw black boxes over the eyes
-    dma_display->drawRect(0, 0, 32, boxHeight, 0);     // Cover the right eye
-    dma_display->drawRect(96, 0, 32, boxHeight, 0);    // Cover the left eye
+    dma_display->fillRect(0, 0, 32, boxHeight, 0);     // Cover the right eye
+    dma_display->fillRect(96, 0, 32, boxHeight, 0);    // Cover the left eye
   }
-
-  ////matrix.show(); // Update the display
+  
+  // Flip DMA buffer to update the display
+  dma_display->flipDMABuffer(); // Update the display
 }
 
 void drawBlush() {
+  //dma_display->clearScreen();
   // Calculate blush brightness
   if (isBlushFadingIn) {
     unsigned long currentTime = millis();
     unsigned long elapsedTime = currentTime - blushFadeStartTime;
+  
   // Calculate blush brightness
   if (elapsedTime <= blushFadeDuration) {
     blushBrightness = map(elapsedTime, 0, blushFadeDuration, 0, 255); // Gradual fade-in
@@ -754,10 +496,16 @@ void drawBlush() {
       blushBrightness = 255; // Max brightness reached
       isBlushFadingIn = false; // Stop fading
     }
+
+  //dma_display->flipDMABuffer(); // Update the display
   }
 
   // Set blush color based on brightness
   uint16_t blushColor = dma_display->color565(blushBrightness, 0, blushBrightness);
+
+  // Clear only the blush area to prevent artifacts
+  dma_display->fillRect(25, 12, 18, 13, 0); // Clear right blush area
+  dma_display->fillRect(82, 12, 18, 13, 0); // Clear left blush area
 
      drawXbm565(35, 12, 11, 13, blush, blushColor);
      drawXbm565(30, 12, 11, 13, blush, blushColor);
@@ -765,9 +513,14 @@ void drawBlush() {
      drawXbm565(82, 12, 11, 13, blushL, blushColor);
      drawXbm565(87, 12, 11, 13, blushL, blushColor);
      drawXbm565(92, 12, 11, 13, blushL, blushColor);
+
+// Flip the DMA buffer after completing all rendering
+//dma_display->flipDMABuffer(); // Update the display
 }
 
 void drawTransFlag() {
+dma_display->clearScreen(); // Clear the display
+
   int stripeHeight = dma_display->height() / 5; // Height of each stripe
 
   // Define colors in RGB565 format
@@ -781,9 +534,12 @@ void drawTransFlag() {
   dma_display->fillRect(0, stripeHeight * 2, dma_display->width(), stripeHeight, white); // Middle white stripe
   dma_display->fillRect(0, stripeHeight * 3, dma_display->width(), stripeHeight, pink);  // Pink stripe
   dma_display->fillRect(0, stripeHeight * 4, dma_display->width(), stripeHeight, lightBlue); // Bottom light blue stripe
+  
+  dma_display->flipDMABuffer();
 }
 
 void protoFaceTest() {
+  dma_display->clearScreen(); // Clear the display
    drawXbm565(56, 10, 8, 8, nose, dma_display->color565(255, 255, 255));
    drawXbm565(64, 10, 8, 8, noseL, dma_display->color565(255, 255, 255));
    drawXbm565(0, 16, 64, 16, maw, dma_display->color565(255, 255, 255));
@@ -799,19 +555,22 @@ void protoFaceTest() {
      drawXbm565(87, 12, blushL, 11, 13, dma_display->color565(255, 0, 255));
      drawXbm565(92, 12, blushL, 11, 13, dma_display->color565(255, 0, 255));
      */
-
+    dma_display->flipDMABuffer(); // Update the display
    // Draw the blush (with fading effect in view 2)
-   if (currentView == 2) {
+   if (currentView == 5) {
    drawBlush();
+   //dma_display->flipDMABuffer(); // Update the display
 }
    
    // Draw blinking eyes
    blinkingEyes();
 
-   ////matrix.show(); // Update the matrix display
+   //dma_display->flipDMABuffer(); // Update the display
+   //dma_display->show(); // Update the matrix display
 }
 
 void patternPlasma() {
+  dma_display->clearScreen();
   for (int x = 0; x < dma_display->width() * 1; x++) {
     for (int y = 0; y < dma_display->height(); y++) {
       int16_t v = 128;
@@ -837,17 +596,15 @@ void patternPlasma() {
   }
 
   // Refresh display
-  //matrix.show();
+  //dma_display->flipDMABuffer();
 }
-
-
-
-
 
 void setup() {
 
   Serial.begin(BAUD_RATE);
-  Serial.println("Starting LumiFur...");
+  Serial.println(F("*****************************************************"));
+  Serial.println(F("*                      LumiFur                      *"));
+  Serial.println(F("*****************************************************"));
 
   // redefine pins if required
   //HUB75_I2S_CFG::i2s_pins _pins={R1, G1, BL1, R2, G2, BL2, CH_A, CH_B, CH_C, CH_D, CH_E, LAT, OE, CLK};
@@ -879,355 +636,190 @@ void setup() {
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
 #endif
 
+dma_display->clearScreen();
+
+/*
   ledbuff = (CRGB *)malloc(NUM_LEDS * sizeof(CRGB));  // allocate buffer for some tests
-  buffclear(ledbuff);
+  if (ledbuff == nullptr) {
+    Serial.println("Memory allocation for ledbuff failed!");
+    while (1); // Stop execution
+  }
+*/
 
 // Initialize accelerometer if MATRIXPORTAL_ESP32S3 is used
 #if defined (ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
   //Adafruit_LIS3DH accel = Adafruit_LIS3DH();
 #endif
 
+randomSeed(analogRead(0)); // Seed the random number generator for randomized eye blinking
+
+  // Set initial plasma color palette
+  currentPalette = RainbowColors_p;
+
+  // Set up buttons if present
+  /* ----------------------------------------------------------------------
+  Use internal pull-up resistor, as the up and down buttons 
+  do not have any pull-up resistors connected to them 
+  and pressing either of them pulls the input low.
+  ------------------------------------------------------------------------- */
+  #ifdef BUTTON_UP
+    pinMode(BUTTON_UP, INPUT_PULLUP);
+  #endif
+  #ifdef BUTTON_DOWN
+    pinMode(BUTTON_DOWN, INPUT_PULLUP);
+  #endif
 }
 
 uint8_t wheelval = 0;
 
+void displayCurrentView(int view) {
+  static int previousView = -1; // Track the last active view
+  //dma_display->clearScreen(); // Clear display buffer at start of each frame
 
-
-void loop(){
-
-  Serial.printf("Cycle: %d\n", ++cycles);
-
-#ifndef NO_GFX
-  drawText(wheelval++);
-#endif
-
-  Serial.print("Estimating clearScreen() - ");
-  ccount1 = XTHAL_GET_CCOUNT();
-  dma_display->clearScreen();
-  ccount1 = XTHAL_GET_CCOUNT() - ccount1;
-  Serial.printf("%d ticks\n", ccount1);
-  delay(PATTERN_DELAY);
-
-/*
-// Power supply tester
-// slowly fills matrix with white, stressing PSU
-  for (int y=0; y!=PANE_HEIGHT; ++y){
-    for (int x=0; x!=PANE_WIDTH; ++x){
-      matrix->drawPixelRGB888(x, y, 255,255,255);
-      //matrix->drawPixelRGB888(x, y-1, 255,0,0);       // pls, be gentle :)
-      delay(10);
+if (view != previousView) {
+  //dma_display->clearScreen(); // Clear the screen for a new view
+    if (view == 5) {
+      // Reset fade logic when entering the blush view
+      blushFadeStartTime = millis();
+      isBlushFadingIn = true;
     }
+    previousView = view; // Update the last active view
   }
-  delay(5000);
-*/
 
+  switch (view) {
 
+  case 0: // Scrolling text Debug View
+    // Every frame, we clear the background and draw everything anew.
+    // This happens "in the background" with double buffering, that's
+    // why you don't see everything flicker. It requires double the RAM,
+    // so it's not practical for every situation.
 
+    // Draw big scrolling text
+    dma_display->setCursor(textX, textY);
+    dma_display->print(txt);
+
+    // Update text position for next frame. If text goes off the
+    // left edge, reset its position to be off the right edge.
+    if ((--textX) < textMin)
+      textX = dma_display->width();
+
+    // Draw the three bouncy balls on top of the text...
+    for (byte i = 0; i < 3; i++)
+    {
+      // Draw 'ball'
+      dma_display->fillCircle(ball[i][0], ball[i][1], 5, ballcolor[i]);
+      // Update ball's X,Y position for next frame
+      ball[i][0] += ball[i][2];
+      ball[i][1] += ball[i][3];
+      // Bounce off edges
+      if ((ball[i][0] == 0) || (ball[i][0] == (dma_display->width() - 1)))
+        ball[i][2] *= -1;
+      if ((ball[i][1] == 0) || (ball[i][1] == (dma_display->height() - 1)))
+        ball[i][3] *= -1;
+    }
+    
+    break;
+
+  case 1: // Loading bar effect
+  dma_display->clearScreen();
+    displayLoadingBar();
+    if (loadingProgress <= loadingMax)
+    {
+      displayLoadingBar(); // Update the loading bar
+      loadingProgress++;   // Increment progress
+      delay(50);           // Adjust speed of loading animation
+    } else {
+      // Reset or transition to another view
+      loadingProgress = 0;
+    }
+    dma_display->flipDMABuffer();
+    break;
+
+  case 2: // Pattern plasma
+    patternPlasma();
+    //delay(10);
+    //dma_display->flipDMABuffer();
+    break;
+
+  case 3:
+    dma_display->clearScreen(); // Clear the display
+    drawTransFlag();
+    delay(20);
+    dma_display->flipDMABuffer();
+    break;
+
+  case 4: // Normal
+    protoFaceTest();
+    updateBlinkAnimation(); // Update blink animation progress
+    delay(20);              // Short delay for smoother animation
+    break;
+
+  case 5: // Blush with fade in effect
+    protoFaceTest();
+    updateBlinkAnimation(); // Update blink animation progress
+    break;
+
+  case 6: // Dialated pupils
+    protoFaceTest();
+    updateBlinkAnimation(); // Update blink animation progress
+    break;
+
+  case 7: // X eyes
+    protoFaceTest();
+    updateBlinkAnimation(); // Update blink animation progress
+    break;
+
+  case 8: // Slant eyes
+    protoFaceTest();
+    updateBlinkAnimation(); // Update blink animation progress
+    break;
+
+  case 9: // Spiral eyes
+    protoFaceTest();
+//  updateBlinkAnimation(); // Update blink animation progress
+    updateRotatingSpiral();
+    break;
 /*
-#ifndef VIRTUAL_PANE
-  // simple solid colors
-  Serial.println("Fill screen: RED");
-  matrix->fillScreenRGB888(255, 0, 0);
-  delay(PATTERN_DELAY);
-  Serial.println("Fill screen: GREEN");
-  matrix->fillScreenRGB888(0, 255, 0);
-  delay(PATTERN_DELAY);
-  Serial.println("Fill screen: BLUE");
-  matrix->fillScreenRGB888(0, 0, 255);
-  delay(PATTERN_DELAY);
-#endif
-
-  for (uint8_t i=5; i; --i){
-    Serial.print("Estimating single drawPixelRGB888(r, g, b) ticks: ");
-    color1 = random8();
-    ccount1 = XTHAL_GET_CCOUNT();
-    matrix->drawPixelRGB888(i,i, color1, color1, color1);
-    ccount1 = XTHAL_GET_CCOUNT() - ccount1;
-    Serial.printf("%d ticks\n", ccount1);
-  }
-
-// Clearing CRGB ledbuff
-  Serial.print("Estimating ledbuff clear time: ");
-  t1 = micros();
-  ccount1 = XTHAL_GET_CCOUNT();
-  buffclear(ledbuff);
-  ccount1 = XTHAL_GET_CCOUNT() - ccount1;
-  t2 = micros()-t1;
-  Serial.printf("%lu us, %u ticks\n\n", t2, ccount1);
-
-#ifndef VIRTUAL_PANE
-  // Bare fillscreen(r, g, b)
-  Serial.print("Estimating fillscreenRGB888(r, g, b) time: ");
-  t1 = micros();
-  ccount1 = XTHAL_GET_CCOUNT();
-  matrix->fillScreenRGB888(64, 64, 64);   // white
-  ccount2 = XTHAL_GET_CCOUNT() - ccount1;
-  t2 = micros()-t1;
-  s1+=t2;
-  Serial.printf("%lu us, avg: %lu, ccnt: %d\n", t2, s1/cycles, ccount2);
-  delay(PATTERN_DELAY);
-#endif
-
-  Serial.print("Estimating full-screen fillrate with looped drawPixelRGB888(): ");
-  y = PANE_HEIGHT;
-  t1 = micros();
-  ccount1 = XTHAL_GET_CCOUNT();
-  do {
-    --y;
-    uint16_t x = PANE_WIDTH;
-    do {
-      --x;
-        matrix->drawPixelRGB888( x, y, 0, 0, 0);
-    } while(x);
-  } while(y);
-  ccount1 = XTHAL_GET_CCOUNT() - ccount1;
-  t2 = micros()-t1;
-  Serial.printf("%lu us, %u ticks\n", t2, ccount1);
-
-
-
-// created random color gradient in ledbuff
-  uint8_t color1 = 0;
-  uint8_t color2 = random8();
-  uint8_t color3 = 0;
-
-  for (uint16_t i = 0; i<NUM_LEDS; ++i){
-    ledbuff[i].r=color1++;
-    ledbuff[i].g=color2;
-    if (i%PANE_WIDTH==0)
-      color3+=255/PANE_HEIGHT;
-
-    ledbuff[i].b=color3;
-  }
-//
-
-//
-  Serial.print("Estimating ledbuff-to-matrix fillrate with drawPixelRGB888(), time: ");
-  t1 = micros();
-  ccount1 = XTHAL_GET_CCOUNT();
-  mxfill(ledbuff);
-  ccount1 = XTHAL_GET_CCOUNT() - ccount1;
-  t2 = micros()-t1;
-  s2+=t2;
-  Serial.printf("%lu us, avg: %lu, %d ticks:\n", t2, s2/cycles, ccount1);
-  delay(PATTERN_DELAY);
-//
-
-#ifndef NO_FAST_FUNCTIONS
-  // Fillrate for fillRect() function
-  Serial.print("Estimating fullscreen fillrate with fillRect() time: ");
-  t1 = micros();
-  matrix->fillRect(0, 0, PANE_WIDTH, PANE_HEIGHT, 0, 224, 0);
-  t2 = micros()-t1;
-  Serial.printf("%lu us\n", t2);
-  delay(PATTERN_DELAY);
-
-
-  Serial.print("Chessboard with fillRect(): ");  // шахматка
-  matrix->fillScreen(0);
-  x =0, y = 0;
-  color1 = random8();
-  color2 = random8();
-  color3 = random8();
-  bool toggle=0;
-  t1 = micros();
-  do {
-    do{
-      matrix->fillRect(x, y, 8, 8, color1, color2, color3);
-      x+=16;
-    }while(x < PANE_WIDTH);
-    y+=8;
-    toggle = !toggle;
-    x = toggle ? 8 : 0;
-  }while(y < PANE_HEIGHT);
-  t2 = micros()-t1;
-  Serial.printf("%lu us\n", t2);
-  delay(PATTERN_DELAY);
-#endif
-
-// ======== V-Lines ==========
-  Serial.println("Estimating V-lines with drawPixelRGB888(): ");  //
-  matrix->fillScreen(0);
-  color1 = random8();
-  color2 = random8();
-  x = y = 0;
-  t1 = micros();
-  ccount1 = XTHAL_GET_CCOUNT();
-  do {
-    y=0;
-    do{
-      matrix->drawPixelRGB888(x, y, color1, color2, color3);
-    } while(++y != PANE_HEIGHT);
-    x+=2;
-  } while(x != PANE_WIDTH);
-  ccount1 = XTHAL_GET_CCOUNT() - ccount1;
-  t2 = micros()-t1;
-  Serial.printf("%lu us, %u ticks\n", t2, ccount1);
-  delay(PATTERN_DELAY);
-
-#ifndef NO_FAST_FUNCTIONS
-  Serial.println("Estimating V-lines with vlineDMA(): ");  //
-  matrix->fillScreen(0);
-  color2 = random8();
-  x = y = 0;
-  t1 = micros();
-  ccount1 = XTHAL_GET_CCOUNT();
-  do {
-    matrix->drawFastVLine(x, y, PANE_HEIGHT, color1, color2, color3);
-    x+=2;
-  } while(x != PANE_WIDTH);
-  ccount1 = XTHAL_GET_CCOUNT() - ccount1;
-  t2 = micros()-t1;
-  Serial.printf("%lu us, %u ticks\n", t2, ccount1);
-  delay(PATTERN_DELAY);
-
-  Serial.println("Estimating V-lines with fillRect(): ");  //
-  matrix->fillScreen(0);
-  color1 = random8();
-  color2 = random8();
-  x = y = 0;
-  t1 = micros();
-  ccount1 = XTHAL_GET_CCOUNT();
-  do {
-    matrix->fillRect(x, y, 1, PANE_HEIGHT, color1, color2, color3);
-    x+=2;
-  } while(x != PANE_WIDTH);
-  ccount1 = XTHAL_GET_CCOUNT() - ccount1;
-  t2 = micros()-t1;
-  Serial.printf("%lu us, %u ticks\n", t2, ccount1);
-  delay(PATTERN_DELAY);
-#endif
-
-
-
-// ======== H-Lines ==========
-  Serial.println("Estimating H-lines with drawPixelRGB888(): ");  //
-  matrix->fillScreen(0);
-  color2 = random8();
-  x = y = 0;
-  t1 = micros();
-  ccount1 = XTHAL_GET_CCOUNT();
-  do {
-    x=0;
-    do{
-      matrix->drawPixelRGB888(x, y, color1, color2, color3);
-    } while(++x != PANE_WIDTH);
-    y+=2;
-  } while(y != PANE_HEIGHT);
-  ccount1 = XTHAL_GET_CCOUNT() - ccount1;
-  t2 = micros()-t1;
-  Serial.printf("%lu us, %u ticks\n", t2, ccount1);
-  delay(PATTERN_DELAY);
-
-#ifndef NO_FAST_FUNCTIONS
-  Serial.println("Estimating H-lines with hlineDMA(): ");
-  matrix->fillScreen(0);
-  color2 = random8();
-  color3 = random8();
-  x = y = 0;
-  t1 = micros();
-  ccount1 = XTHAL_GET_CCOUNT();
-  do {
-    matrix->drawFastHLine(x, y, PANE_WIDTH, color1, color2, color3);
-    y+=2;
-  } while(y != PANE_HEIGHT);
-  ccount1 = XTHAL_GET_CCOUNT() - ccount1;
-  t2 = micros()-t1;
-  Serial.printf("%lu us, %u ticks\n", t2, ccount1);
-  delay(PATTERN_DELAY);
-
-  Serial.println("Estimating H-lines with fillRect(): ");  //
-  matrix->fillScreen(0);
-  color2 = random8();
-  color3 = random8();
-  x = y = 0;
-  t1 = micros();
-  ccount1 = XTHAL_GET_CCOUNT();
-  do {
-    matrix->fillRect(x, y, PANE_WIDTH, 1, color1, color2, color3);
-    y+=2;
-  } while(y != PANE_HEIGHT);
-  ccount1 = XTHAL_GET_CCOUNT() - ccount1;
-  t2 = micros()-t1;
-  Serial.printf("%lu us, %u ticks\n", t2, ccount1);
-  delay(PATTERN_DELAY);
-#endif
-
-
-
-
-  Serial.println("\n====\n");
-
-  // take a rest for a while
-  delay(10000);
-}
-
+  case 10: // Slant eyes
+    protoFaceTest();
+    updateBlinkAnimation(); // Update blink animation progress
+    break;
+  
+  case 11: // Spiral eyes
+    protoFaceTest();
+    updateBlinkAnimation(); // Update blink animation progress
+    break;
 */
-}
-
-
-
-void buffclear(CRGB *buf){
-  memset(buf, 0x00, NUM_LEDS * sizeof(CRGB)); // flush buffer to black  
-}
-
-void IRAM_ATTR mxfill(CRGB *leds){
-  uint16_t y = PANE_HEIGHT;
-  do {
-    --y;
-    uint16_t x = PANE_WIDTH;
-    do {
-      --x;
-        uint16_t _pixel = y * PANE_WIDTH + x;
-        dma_display->drawPixelRGB888( x, y, leds[_pixel].r, leds[_pixel].g, leds[_pixel].b);
-    } while(x);
-  } while(y);
-}
-//
-
-/**
- *  The one for 256+ matrices
- *  otherwise this:
- *    for (uint8_t i = 0; i < MATRIX_WIDTH; i++) {}
- *  turns into an infinite loop
- */
-uint16_t XY16( uint16_t x, uint16_t y)
-{ 
-  if (x<PANE_WIDTH && y < PANE_HEIGHT){
-    return (y * PANE_WIDTH) + x;
-  } else {
-    return 0;
+  default:
+      // Optional: Handle unsupported views
+      //dma_display->clearScreen();
+      break;
   }
+  //dma_display->clearScreen();
+  dma_display->flipDMABuffer();
 }
 
 
-#ifdef NO_GFX
-void drawText(int colorWheelOffset){}
-#else
-void drawText(int colorWheelOffset){
-  // draw some text
-  dma_display->setTextSize(1);     // size 1 == 8 pixels high
-  dma_display->setTextWrap(false); // Don't wrap at end of line - will do ourselves
+void loop(void) {
+  // Non-blocking display update for the current view
+  static unsigned long lastFrameTime = 0;
+  unsigned long currentTime = millis();
 
-  dma_display->setCursor(5, 5);    // start at top left, with 5,5 pixel of spacing
-  uint8_t w = 0;
+  // Target frame duration (e.g., 30 FPS = ~33ms per frame)
+  const unsigned long frameDuration = 11;
 
-  for (w=0; w<strlen(str); w++) {
-    dma_display->setTextColor(colorWheel((w*32)+colorWheelOffset));
-    dma_display->print(str[w]);
-  }
-}
-#endif
+// Check if it's time for the next frame
+  if (currentTime - lastFrameTime >= frameDuration) {
+    lastFrameTime = currentTime;
 
+    if (debounceButton(BUTTON_UP)) {
+      currentView = (currentView + 1) % totalViews;
+    }
+    if (debounceButton(BUTTON_DOWN)) {
+      currentView = (currentView - 1 + totalViews) % totalViews;
+    }
+    displayCurrentView(currentView);
 
-uint16_t colorWheel(uint8_t pos) {
-  if(pos < 85) {
-    return dma_display->color565(pos * 3, 255 - pos * 3, 0);
-  } else if(pos < 170) {
-    pos -= 85;
-    return dma_display->color565(255 - pos * 3, 0, pos * 3);
-  } else {
-    pos -= 170;
-    return dma_display->color565(0, pos * 3, 255 - pos * 3);
+    //dma_display->flipDMABuffer();
   }
 }
