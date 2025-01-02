@@ -144,6 +144,12 @@ const unsigned long blushFadeDuration = 2000; // 2 seconds for full fade-in
 bool isBlushFadingIn = true;                  // Whether the blush is currently fading in
 uint8_t blushBrightness = 0;                  // Current blush brightness (0-255)
 
+//Heartbeat effect variables
+// Global variables for heart effect
+unsigned long lastHeartUpdate = 0;
+int heartScale = 1;
+bool isScalingUp = true; // Flag to control scaling direction
+
 // Variables for plasma effect
 uint16_t time_counter = 0, cycles = 0, fps = 0;
 unsigned long fps_timer;
@@ -155,6 +161,13 @@ CRGBPalette16 currentPalette = palettes[0];
 CRGB ColorFromCurrentPalette(uint8_t index = 0, uint8_t brightness = 255, TBlendType blendType = LINEARBLEND) {
   return ColorFromPalette(currentPalette, index, brightness, blendType);
 }
+
+// Spiral Colors
+static unsigned long spiralLastUpdate = 0;
+static float spiralCurrentAngle = 0;
+static uint16_t spiralTime_counter = 0;
+CRGBPalette16 spiralCurrentPalette = RainbowColors_p;
+
 
 /* ----------------------------------------------------------------------
 Matrix initialization is explained EXTENSIVELY in "simple" example sketch!
@@ -308,6 +321,15 @@ const PROGMEM uint8_t spiral[] = {
 	0x60, 0xf8, 0x3e, 0x00, 0x00, 0x7f, 0xfc, 0x00, 0x00, 0x3f, 0xf8, 0x00, 0x00, 0x0f, 0xe0, 0x00, 
 	0x00, 0x00, 0x00, 0x00
   };
+const PROGMEM uint8_t hearteyes[] = {
+0x0f, 0x0f, 0x00, 0x3f, 0x9f, 0xc0, 0x7f, 0xff, 0xe0, 0x7f, 0xff, 0xe0, 0xff, 0xff, 0xf0, 0xff, 
+	0xff, 0xf0, 0xff, 0xff, 0xf0, 0x7f, 0xff, 0xe0, 0x7f, 0xff, 0xe0, 0x3f, 0xff, 0xc0, 0x1f, 0xff, 
+	0x80, 0x0f, 0xff, 0x00, 0x07, 0xfe, 0x00, 0x03, 0xfc, 0x00, 0x01, 0xf8, 0x00, 0x00, 0xf0, 0x00, 
+	0x00, 0x60, 0x00
+};
+
+
+
 // Left side of the helmet
 const PROGMEM uint8_t noseL[] = {
     B00000000,
@@ -531,7 +553,15 @@ void updateBlinkAnimation() {
     } else {
       // Update non-linear blink progress (0 to 100%)
       float normalizedProgress = float(elapsed) / blinkDuration;
-      blinkProgress = 100 * easeInOutQuad(normalizedProgress); // Using ease-in-out for natural acceleration and deceleration
+      
+      // Smooth easing for closing and opening
+      if (normalizedProgress < 0.5) {
+        // Closing phase
+        blinkProgress = 100 * easeInOutQuad(normalizedProgress * 2);
+      } else {
+        // Opening phase
+        blinkProgress = 100 * (1 - easeInOutQuad((normalizedProgress - 0.5) * 2));
+      }
     }
   } else {
     // Start a new blink after the random delay
@@ -551,6 +581,8 @@ float easeInOutQuad(float t) {
   }
   return -1 + (4 - 2 * t) * t;
 }
+
+// Function for rotating bitmap
 void drawRotatedBitmap(int16_t x, int16_t y, const uint8_t *bitmap, uint16_t width, uint16_t height, float angle, uint16_t color) {
   // Convert angle from degrees to radians
   float radians = angle * PI / 180.0;
@@ -569,7 +601,6 @@ void drawRotatedBitmap(int16_t x, int16_t y, const uint8_t *bitmap, uint16_t wid
         // Calculate the offset from the center
         int16_t offsetX = i - centerX;
         int16_t offsetY = j - centerY;
-
         // Apply rotation
         int16_t newX = cosA * offsetX - sinA * offsetY + x;
         int16_t newY = sinA * offsetX + cosA * offsetY + y;
@@ -583,38 +614,48 @@ void drawRotatedBitmap(int16_t x, int16_t y, const uint8_t *bitmap, uint16_t wid
   }
 }
 
+void drawScaledBitmap(int16_t x, int16_t y, const uint8_t* bitmap, int16_t width, int16_t height, int16_t scale, uint16_t color) {
+    for (int16_t j = 0; j < height; j++) {
+        for (int16_t i = 0; i < width; i++) {
+            if (bitmap[j * ((width + 7) / 8) + (i / 8)] & (1 << (7 - (i % 8)))) {
+                for (int16_t dy = 0; dy < scale; dy++) {
+                    for (int16_t dx = 0; dx < scale; dx++) {
+                        matrix.drawPixel(x + i * scale + dx, y + j * scale + dy, color);
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Spiral update function
 void updateRotatingSpiral() {
+  unsigned long currentTime = millis();
   static unsigned long lastUpdate = 0;
   static float currentAngle = 0;
   static uint16_t time_counter = 0;
-  unsigned long currentTime = millis();
-  if (currentTime - lastUpdate > 20) { // Update every 100 ms
+  if (currentTime - lastUpdate > 5) { // Update every 30 ms
     lastUpdate = currentTime;
-
-    // Increment the angle for rotation
-    currentAngle += 10.0;
+    currentAngle += 10.0; // Increment the angle for rotation
     if (currentAngle >= 360.0) {
       currentAngle -= 360.0; // Wrap angle to 0-359°
     }
+    time_counter++; // Increment time_counter to change colors over time
 
-  // Increment time_counter to change colors over time
-    time_counter++;
-
-
-// Precompute values for efficiency
-    int16_t v = 128;
-    uint8_t wibble = sin8(time_counter);
-    v += sin16(wibble * 3 + time_counter);
-    v += cos16((128 - wibble) + time_counter);
-    v += sin16(cos8(-time_counter) / 8);
-// Map the calculated value to a color using the palette
-CRGB currentColor = ColorFromPalette(currentPalette, (v >> 8) & 0xFF); // Ensure within palette range
+    uint8_t paletteIndex = (time_counter / 4) % 255;
+    CRGB currentColor = ColorFromPalette(currentPalette, paletteIndex);
     uint16_t color = matrix.color565(currentColor.r, currentColor.g, currentColor.b);
 
-    // Draw the rotating bitmaps
-    drawRotatedBitmap(26, 10, spiral, 25, 25, currentAngle, color);
-    drawRotatedBitmap(97, 10, spiralL, 25, 25, -currentAngle, color);
-}
+    // Clear the area where the spirals are drawn
+    //matrix.fillRect(1, 1, 64, 64, 0);
+    //matrix.fillRect(64, 1, 64, 64, 0);
+    // Draw the rotating spirals
+    drawRotatedBitmap(32, 15, spiral, 25, 25, currentAngle, color);
+    drawRotatedBitmap(96, 15, spiralL, 25, 25, -currentAngle, color);
+
+    matrix.show();
+    Serial.println(millis() - lastUpdate);
+  }
 }
 
 
@@ -647,10 +688,6 @@ void blinkingEyes() {
   if (currentView == 8) {
     matrix.drawBitmap(0, 0, slanteyes, 24, 16, matrix.color565(255, 255, 255));
     matrix.drawBitmap(104, 0, slanteyesL, 24, 16, matrix.color565(255, 255, 255));
-  }
-  if (currentView == 9) {
-  //  matrix.drawBitmap(15, 0, spiral, 25, 25, matrix.color565(255, 255, 255));
-  //  matrix.drawBitmap(88, 0, spiralL, 25, 25, matrix.color565(255, 255, 255));
   }
 
   if (isBlinking) {
@@ -690,6 +727,72 @@ void drawBlush() {
      matrix.drawBitmap(92, 12, blushL, 11, 13, blushColor);
 }
 
+void heartbeat() {
+    unsigned long currentTime = millis();
+    static float heartScale = 1.0; // Use float for smoother scaling
+    static bool isScalingUp = true; // Track scaling direction
+
+    if (currentTime - lastHeartUpdate > 30) { // Faster updates for smooth animation
+        lastHeartUpdate = currentTime;
+
+        // Clear previous hearts
+        int heartWidth = 20 * heartScale;
+        int heartHeight = 17 * heartScale;
+
+         // Clear previous hearts
+        matrix.fillRect(
+            (matrix.width() / 2 - 20 * heartScale) / 2, 
+            (matrix.height() - 17 * heartScale) / 2, 
+            20 * heartScale, 
+            17 * heartScale, 
+            0
+        );
+        matrix.fillRect(
+            (matrix.width() / 2 + (matrix.width() / 2 - 20 * heartScale) / 2), 
+            (matrix.height() - 17 * heartScale) / 2, 
+            20 * heartScale, 
+            17 * heartScale, 
+            0
+        );
+
+        // Update scaling with smooth transition
+        if (isScalingUp) {
+            heartScale += 0.1; // Increment by a small value
+            if (heartScale >= 2.0) { // Max scale
+                isScalingUp = false;
+            }
+        } else {
+            heartScale -= 0.1; // Decrement by a small value
+            if (heartScale <= 1.0) { // Min scale
+                isScalingUp = true;
+            }
+        }
+
+        // Draw scaled hearts on both screens
+        // Draw scaled hearts on both screens
+        drawScaledBitmap(
+            (matrix.width() / 2 - 20 * heartScale) / 2, 
+            (matrix.height() - 17 * heartScale) / 2, 
+            hearteyes, 
+            20, 
+            17, 
+            heartScale, 
+            matrix.color565(255, 0, 0)
+        );
+        drawScaledBitmap(
+            (matrix.width() / 2 + (matrix.width() / 2 - 20 * heartScale) / 2), 
+            (matrix.height() - 17 * heartScale) / 2, 
+            hearteyes, 
+            20, 
+            17, 
+            heartScale, 
+            matrix.color565(255, 0, 0)
+        );
+
+        matrix.show();
+    }
+}
+
 void drawTransFlag() {
   int stripeHeight = matrixHeight / 5; // Height of each stripe
 
@@ -723,8 +826,8 @@ void protoFaceTest() {
      matrix.drawBitmap(92, 12, blushL, 11, 13, matrix.color565(255, 0, 255));
      */
 
-   // Draw the blush (with fading effect in view 2)
-   if (currentView == 2) {
+   // Draw the blush (with fading effect in view 5)
+   if (currentView == 5) {
    drawBlush();
 }
    
@@ -820,15 +923,16 @@ randomSeed(analogRead(0)); // Seed the random number generator for randomized ey
 
 void displayCurrentView(int view) {
   static int previousView = -1; // Track the last active view
-  matrix.fillScreen(0); // Clear display buffer at start of each frame
+  //matrix.fillScreen(0); // Clear display buffer at start of each frame
 
 if (view != previousView) {
-      if (view == 2) {
+      if (view == 5) {
       // Reset fade logic when entering the blush view
       blushFadeStartTime = millis();
       isBlushFadingIn = true;
     }
     previousView = view; // Update the last active view
+    matrix.fillScreen(0); // Clear display buffer at start of each frame
   }
 
   switch (view) {
@@ -838,7 +942,7 @@ if (view != previousView) {
     // This happens "in the background" with double buffering, that's
     // why you don't see everything flicker. It requires double the RAM,
     // so it's not practical for every situation.
-
+    matrix.fillScreen(0); // Clear display buffer at start of each frame
     // Draw big scrolling text
     matrix.setCursor(textX, textY);
     matrix.print(str);
@@ -892,7 +996,7 @@ if (view != previousView) {
   case 4: // Normal
     protoFaceTest();
     updateBlinkAnimation(); // Update blink animation progress
-    delay(20);              // Short delay for smoother animation
+    //delay(20);              // Short delay for smoother animation
     break;
 
   case 5: // Blush with fade in effect
@@ -916,9 +1020,13 @@ if (view != previousView) {
     break;
 
   case 9: // Spiral eyes
+    matrix.fillScreen(0); // Clear display buffer at start of each frame
     protoFaceTest();
-//  updateBlinkAnimation(); // Update blink animation progress
     updateRotatingSpiral();
+    break;
+  case 10: //Heart eyes
+    protoFaceTest();
+    heartbeat(); //Beating heart eyes effect
     break;
 /*
   case 10: // Slant eyes
@@ -951,9 +1059,13 @@ void loop(void) {
 
     if (debounceButton(BUTTON_UP)) {
       currentView = (currentView + 1) % totalViews;
+      Serial.print("Button UP pressed. Current view: ");
+      Serial.println(currentView);
     }
     if (debounceButton(BUTTON_DOWN)) {
       currentView = (currentView - 1 + totalViews) % totalViews;
+      Serial.print("Button DOWN pressed. Current view: ");
+      Serial.println(currentView);
     }
 
     displayCurrentView(currentView);
