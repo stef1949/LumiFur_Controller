@@ -802,12 +802,12 @@ void drawBlush() {
   // Set blush color based on brightness
   uint16_t blushColor = matrix.color565(blushBrightness, 0, blushBrightness);
 
-     matrix.drawBitmap(45, 2, blush, 11, 13, blushColor);
-     matrix.drawBitmap(40, 2, blush, 11, 13, blushColor);
-     matrix.drawBitmap(35, 2, blush, 11, 13, blushColor);
-     matrix.drawBitmap(72, 2, blushL, 11, 13, blushColor);
-     matrix.drawBitmap(77, 2, blushL, 11, 13, blushColor);
-     matrix.drawBitmap(82, 2, blushL, 11, 13, blushColor);
+     matrix.drawBitmap(45, 1, blush, 11, 13, blushColor);
+     matrix.drawBitmap(40, 1, blush, 11, 13, blushColor);
+     matrix.drawBitmap(35, 1, blush, 11, 13, blushColor);
+     matrix.drawBitmap(72, 1, blushL, 11, 13, blushColor);
+     matrix.drawBitmap(77, 1, blushL, 11, 13, blushColor);
+     matrix.drawBitmap(82, 1, blushL, 11, 13, blushColor);
 }
 
 void heartbeat() {
