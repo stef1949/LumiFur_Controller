@@ -10,7 +10,7 @@ This example is written for a 64x32 matrix but can be adapted to others.
 #include "fonts/lequahyper20pt7b.h"       // Stylized font
 #include <fonts/FreeSansBold18pt7b.h>     // Larger font
 #include <FastLED.h>                      // For pattern plasma colors
-//#include <Wire.h>                       // For I2C sensors
+#include <Wire.h>                       // For I2C sensors
 /* ----------------------------------------------------------------------
 The RGB matrix must be wired to VERY SPECIFIC pins, different for each
 microcontroller board. This first section sets that up for a number of
@@ -33,7 +33,9 @@ supported boards.
   uint8_t oePin      = 14;
   #define BUTTON_UP 6
   #define BUTTON_DOWN 7
-  //#include <Adafruit_LIS3DH.h>      // For accelerometer
+  #include <Adafruit_LIS3DH.h>      // For accelerometer
+  #include <Adafruit_Sensor.h>      // For accelerometer
+  #include <SPI.h>                  // For accelerometer
 #elif defined(_VARIANT_FEATHER_M4_) // Feather M4 + RGB Matrix FeatherWing
   uint8_t rgbPins[]  = {6, 5, 9, 11, 10, 12};
   uint8_t addrPins[] = {A5, A4, A3, A2};
@@ -121,6 +123,12 @@ const int matrixHeight = 32; // Height of the matrix in pixels
 int currentView = 4; // Current & initial view being displayed
 const int totalViews = 12; // Total number of views to cycle through
 
+// Maw switching
+int currentMaw = 1; // Current & initial maw being displayed
+const int totalMaws = 2; // Total number of maws to cycle through
+unsigned long mawChangeTime = 0; // Time when maw was changed
+bool mawTemporaryChange = false; // Whether the maw is temporarily changed
+
 //Loading Bar
 int loadingProgress = 0; // Current loading progress (0-100)
 int loadingMax = 100;    // Maximum loading value
@@ -145,7 +153,6 @@ bool isBlushFadingIn = true;                  // Whether the blush is currently 
 uint8_t blushBrightness = 0;                  // Current blush brightness (0-255)
 
 //Heartbeat effect variables
-// Global variables for heart effect
 unsigned long lastHeartUpdate = 0;
 int heartScale = 1;
 bool isScalingUp = true; // Flag to control scaling direction
@@ -161,7 +168,13 @@ CRGBPalette16 currentPalette = palettes[0];
 CRGB ColorFromCurrentPalette(uint8_t index = 0, uint8_t brightness = 255, TBlendType blendType = LINEARBLEND) {
   return ColorFromPalette(currentPalette, index, brightness, blendType);
 }
-
+/*
+// Function to retrieve a color from the current palette
+uint16_t getColorFromPalette(uint8_t index) {
+  CRGB color = ColorFromPalette(currentPalette, index);
+  return matrix.color565(color.r, color.g, color.b);
+}
+*/
 // Spiral Colors
 static unsigned long spiralLastUpdate = 0;
 static float spiralCurrentAngle = 0;
@@ -184,7 +197,12 @@ Adafruit_Protomatter matrix(
   clockPin, latchPin, oePin, // Other matrix control pins
   true);       // HERE IS THE MAGIC FOR DOUBLE-BUFFERING!
 
-//Adafruit_LIS3DH accel = Adafruit_LIS3DH();
+Adafruit_LIS3DH accel = Adafruit_LIS3DH();
+
+  // Adjust this number for the sensitivity of the 'click' force
+  // this strongly depend on the range! for 16G, try 5-10
+  // for 8G, try 10-20. for 4G try 20-40. for 2G try 40-80
+#define CLICKTHRESHHOLD 20
 
 /////////////////////////// Button config
 bool debounceButton(int pin) {
@@ -237,6 +255,32 @@ const PROGMEM uint8_t maw[] = {
 	0x00, 0x00, 0x07, 0xf0, 0x0f, 0xe0, 0x00, 0xf8, 0x00, 0x00, 0x07, 0xf0, 0x0f, 0xe0, 0x00, 0xf8, 
 	0x00, 0x00, 0x00, 0x3f, 0xfc, 0x00, 0x00, 0x1f, 0x00, 0x00, 0x00, 0x3f, 0xfc, 0x00, 0x00, 0x1f
              };
+const PROGMEM uint8_t maw2[] = {
+  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0f, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x1f, 0x40, 0x00, 0x00, 0x00, 0x03, 0xc0, 0x00, 0x3f, 
+	0xf0, 0x00, 0x00, 0x00, 0x07, 0xf8, 0x00, 0xff, 0xff, 0x00, 0x00, 0x00, 0x0f, 0xfc, 0x01, 0xff, 
+	0xcf, 0xe0, 0x00, 0x00, 0x1f, 0xfe, 0x03, 0xff, 0xc7, 0xfe, 0x00, 0x00, 0x7f, 0xff, 0xc3, 0xff, 
+	0xc3, 0xff, 0xe0, 0x00, 0xff, 0xff, 0xe7, 0xff, 0xc7, 0xff, 0xfe, 0x01, 0xff, 0xff, 0xff, 0xff, 
+	0xcf, 0x3f, 0xff, 0xe7, 0xff, 0xff, 0xff, 0xff, 0x7f, 0x07, 0xff, 0xff, 0xff, 0x7f, 0xff, 0xff, 
+	0x3c, 0x01, 0xff, 0xff, 0xfc, 0x3f, 0xff, 0xfe, 0x00, 0x00, 0x7f, 0xff, 0xf0, 0x3f, 0xff, 0xfc, 
+	0x00, 0x00, 0x1f, 0xff, 0xe0, 0x0f, 0xff, 0xf0, 0x00, 0x00, 0x03, 0xff, 0x80, 0x07, 0xff, 0xe0, 
+	0x00, 0x00, 0x00, 0xfe, 0x00, 0x03, 0xff, 0xc0, 0x00, 0x00, 0x00, 0x18, 0x00, 0x03, 0xff, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0xfe, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7c, 0x00
+};
+const PROGMEM uint8_t maw2Closed[] = {
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x38, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 
+	0x7e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03, 0xef, 0x80, 0x00, 0x00, 0x01, 0x80, 0x00, 0x07, 
+	0xc1, 0xf0, 0x00, 0x00, 0x03, 0xc0, 0x00, 0x0f, 0xc3, 0xfc, 0x00, 0x00, 0x0f, 0xf0, 0x00, 0x1f, 
+	0xef, 0x3f, 0x80, 0x00, 0x3f, 0xfc, 0x00, 0x3f, 0x7f, 0x0f, 0xe0, 0x00, 0xff, 0xfe, 0x00, 0xff, 
+	0x3c, 0x03, 0xf8, 0x03, 0xf8, 0x7f, 0x87, 0xff, 0x00, 0x00, 0xfe, 0x0f, 0xe0, 0x3f, 0xff, 0xff, 
+	0x00, 0x00, 0x3f, 0xff, 0x80, 0x1f, 0xff, 0xfc, 0x00, 0x00, 0x0f, 0xfe, 0x00, 0x07, 0xff, 0xe0, 
+	0x00, 0x00, 0x03, 0xf0, 0x00, 0x01, 0xff, 0x80, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x7e, 0x00
+};
 const PROGMEM uint8_t Glitch1[] = {
     B00110000, B00010000, B00000100, B00000100,
                  B00000000, B00101000, B01100000, B00111010,
@@ -328,8 +372,6 @@ const PROGMEM uint8_t hearteyes[] = {
 	0x00, 0x60, 0x00
 };
 
-
-
 // Left side of the helmet
 const PROGMEM uint8_t noseL[] = {
     B00000000,
@@ -351,6 +393,32 @@ const PROGMEM uint8_t mawL[] = {
 	0x1f, 0x00, 0x07, 0xf0, 0x0f, 0xe0, 0x00, 0x00, 0x1f, 0x00, 0x07, 0xf0, 0x0f, 0xe0, 0x00, 0x00, 
 	0xf8, 0x00, 0x00, 0x3f, 0xfc, 0x00, 0x00, 0x00, 0xf8, 0x00, 0x00, 0x3f, 0xfc, 0x00, 0x00, 0x00
               };
+const PROGMEM uint8_t maw2L[] = {
+  0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xf0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0xf8, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0xfc, 0x00, 0x03, 0xc0, 0x00, 0x00, 0x00, 0x02, 
+	0xff, 0x00, 0x1f, 0xe0, 0x00, 0x00, 0x00, 0x0f, 0xff, 0x80, 0x3f, 0xf0, 0x00, 0x00, 0x00, 0xff, 
+	0xff, 0xc0, 0x7f, 0xf8, 0x00, 0x00, 0x07, 0xf3, 0xff, 0xc3, 0xff, 0xfe, 0x00, 0x00, 0x7f, 0xe3, 
+	0xff, 0xe7, 0xff, 0xff, 0x00, 0x07, 0xff, 0xc3, 0xff, 0xff, 0xff, 0xff, 0x80, 0x7f, 0xff, 0xe3, 
+	0xff, 0xff, 0xff, 0xff, 0xe7, 0xff, 0xfc, 0xf3, 0xff, 0xff, 0xfe, 0xff, 0xff, 0xff, 0xe0, 0xfe, 
+	0x7f, 0xff, 0xfc, 0x3f, 0xff, 0xff, 0x80, 0x3c, 0x3f, 0xff, 0xfc, 0x0f, 0xff, 0xfe, 0x00, 0x00, 
+	0x0f, 0xff, 0xf0, 0x07, 0xff, 0xf8, 0x00, 0x00, 0x07, 0xff, 0xe0, 0x01, 0xff, 0xc0, 0x00, 0x00, 
+	0x03, 0xff, 0xc0, 0x00, 0x7f, 0x00, 0x00, 0x00, 0x00, 0xff, 0xc0, 0x00, 0x18, 0x00, 0x00, 0x00, 
+	0x00, 0x7f, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x3e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+};
+const PROGMEM uint8_t maw2ClosedL[] = {
+0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1c, 
+	0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7e, 0xe0, 0x00, 0x01, 0x80, 0x00, 0x00, 0x01, 0xf7, 
+	0xf0, 0x00, 0x03, 0xc0, 0x00, 0x00, 0x0f, 0x83, 0xf8, 0x00, 0x0f, 0xf0, 0x00, 0x00, 0x3f, 0xc3, 
+	0xfc, 0x00, 0x3f, 0xfc, 0x00, 0x01, 0xfc, 0xf7, 0xff, 0x00, 0x7f, 0xff, 0x00, 0x07, 0xf0, 0xfe, 
+	0xff, 0xe1, 0xfe, 0x1f, 0xc0, 0x1f, 0xc0, 0x3c, 0xff, 0xff, 0xfc, 0x07, 0xf0, 0x7f, 0x00, 0x00, 
+	0x3f, 0xff, 0xf8, 0x01, 0xff, 0xfc, 0x00, 0x00, 0x07, 0xff, 0xe0, 0x00, 0x7f, 0xf0, 0x00, 0x00, 
+	0x01, 0xff, 0x80, 0x00, 0x0f, 0xc0, 0x00, 0x00, 0x00, 0x7e, 0x00, 0x00, 0x03, 0x00, 0x00, 0x00
+};
 const PROGMEM uint8_t Glitch1L[] = {
         B00000000, B00000000, B00000000, B00000100,
                   B00000000, B00000000, B00000000, B00011110,
@@ -634,7 +702,7 @@ void updateRotatingSpiral() {
   static unsigned long lastUpdate = 0;
   static float currentAngle = 0;
   static uint16_t time_counter = 0;
-  if (currentTime - lastUpdate > 5) { // Update every 30 ms
+  if (currentTime - lastUpdate > 0) { // Update every 30 ms
     lastUpdate = currentTime;
     currentAngle += 10.0; // Increment the angle for rotation
     if (currentAngle >= 360.0) {
@@ -647,21 +715,36 @@ void updateRotatingSpiral() {
     uint16_t color = matrix.color565(currentColor.r, currentColor.g, currentColor.b);
 
     // Clear the area where the spirals are drawn
-    //matrix.fillRect(1, 1, 64, 64, 0);
-    //matrix.fillRect(64, 1, 64, 64, 0);
+    matrix.fillRect(11, 1, 27, 27, 0);
+    matrix.fillRect(91, 1, 27, 27, 0);
     // Draw the rotating spirals
-    drawRotatedBitmap(32, 15, spiral, 25, 25, currentAngle, color);
-    drawRotatedBitmap(96, 15, spiralL, 25, 25, -currentAngle, color);
+    drawRotatedBitmap(24, 15, spiral, 25, 25, currentAngle, color);
+    drawRotatedBitmap(105, 15, spiralL, 25, 25, -currentAngle, color);
 
-    matrix.show();
+    //matrix.show();
     Serial.println(millis() - lastUpdate);
   }
 }
+/*
+#define PALETTE_SIZE 256
+uint16_t paletteCache[PALETTE_SIZE];
 
+void cachePaletteColors() {
+  for (int i = 0; i < PALETTE_SIZE; i++) {
+    CRGB currentColor = ColorFromPalette(currentPalette, i);
+    paletteCache[i] = matrix.color565(currentColor.r, currentColor.g, currentColor.b);
+  }
+  Serial.println("Palette cached.");
+}
+
+uint16_t getCachedColor(uint8_t index) {
+  return paletteCache[index];
+}
+*/
 
 // Draw the blinking eyes
 void blinkingEyes() {
-
+    
   // Draw  eyes
   if (currentView == 4 || currentView == 5) {
   matrix.drawBitmap(0, 0, Eye, 32, 16, matrix.color565(255, 255, 255));
@@ -700,8 +783,8 @@ void blinkingEyes() {
   }
 
   //matrix.show(); // Update the display
-}
-
+  }
+  
 void drawBlush() {
   // Calculate blush brightness
   if (isBlushFadingIn) {
@@ -719,12 +802,12 @@ void drawBlush() {
   // Set blush color based on brightness
   uint16_t blushColor = matrix.color565(blushBrightness, 0, blushBrightness);
 
-     matrix.drawBitmap(35, 12, blush, 11, 13, blushColor);
-     matrix.drawBitmap(30, 12, blush, 11, 13, blushColor);
-     matrix.drawBitmap(25, 12, blush, 11, 13, blushColor);
-     matrix.drawBitmap(82, 12, blushL, 11, 13, blushColor);
-     matrix.drawBitmap(87, 12, blushL, 11, 13, blushColor);
-     matrix.drawBitmap(92, 12, blushL, 11, 13, blushColor);
+     matrix.drawBitmap(45, 2, blush, 11, 13, blushColor);
+     matrix.drawBitmap(40, 2, blush, 11, 13, blushColor);
+     matrix.drawBitmap(35, 2, blush, 11, 13, blushColor);
+     matrix.drawBitmap(72, 2, blushL, 11, 13, blushColor);
+     matrix.drawBitmap(77, 2, blushL, 11, 13, blushColor);
+     matrix.drawBitmap(82, 2, blushL, 11, 13, blushColor);
 }
 
 void heartbeat() {
@@ -809,11 +892,15 @@ void drawTransFlag() {
   matrix.fillRect(0, stripeHeight * 4, matrixWidth, stripeHeight, lightBlue); // Bottom light blue stripe
 }
 
-void protoFaceTest() {
-   matrix.drawBitmap(56, 10, nose, 8, 8, matrix.color565(255, 255, 255));
-   matrix.drawBitmap(64, 10, noseL, 8, 8, matrix.color565(255, 255, 255));
-   matrix.drawBitmap(0, 16, maw, 64, 16, matrix.color565(255, 255, 255));
-   matrix.drawBitmap(64, 16, mawL, 64, 16, matrix.color565(255, 255, 255));
+void protoFace() {
+  uint8_t click = accel.getClick();
+
+   matrix.drawBitmap(56, 2, nose, 8, 8, matrix.color565(255, 255, 255));
+   matrix.drawBitmap(64, 2, noseL, 8, 8, matrix.color565(255, 255, 255));
+   //Testing new maw shape
+   //matrix.drawBitmap(0, 16, maw, 64, 16, matrix.color565(255, 255, 255));
+   //matrix.drawBitmap(64, 16, mawL, 64, 16, matrix.color565(255, 255, 255));
+
    //matrix.drawBitmap(0, 0, Eye, 32, 16, matrix.color565(255, 255, 255));
    //matrix.drawBitmap(96, 0, EyeL, 32, 16, matrix.color565(255, 255, 255));
 
@@ -867,7 +954,7 @@ void patternPlasma() {
 }
 
 void setup(void) {
-  Serial.begin(9600);
+  Serial.begin(115200);
 
   // Initialize matrix...
   ProtomatterStatus status = matrix.begin();
@@ -919,7 +1006,56 @@ randomSeed(analogRead(0)); // Seed the random number generator for randomized ey
   #ifdef BUTTON_DOWN
     pinMode(BUTTON_DOWN, INPUT_PULLUP);
   #endif
+
+// Confugure LIS3DH accelerometer if present (Built-in on MatrixPortal)
+#if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
+// Initialize LIS3DH
+  if (! accel.begin(0x19)) { // 0x18 is the default I2C address for LIS3DH
+    Serial.println("Could not find LIS3DH!");
+    while (1) yield(); // Loop forever
+  }
+  Serial.println("LIS3DH found!");
+
+  // Set data rate to 400 Hz
+  //accel.setDataRate(LIS3DH_DATARATE_400_HZ);
+
+  // Set range to ±2G
+  accel.setRange(LIS3DH_RANGE_2_G); // 2, 4, 8 or 16 G
+
+  // Configure tap detection
+  // Single-tap: tap detection on all axes
+  accel.setClick(1, CLICKTHRESHHOLD); // 1 = single-tap, threshold = 20
+  delay(100); // Give time for accelerometer to settle
+
+  // Uncomment below for double-tap detection
+  // accel.setClick(2, 20, 80, 200); // taps = 2, threshold = 20, latency = 80 ms, window = 200 ms
+#endif
 }
+
+  void displayCurrentMaw() {
+  switch (currentMaw) {
+    case 0:
+    // Closed maw
+    Serial.println("Displaying closed maw");
+    matrix.fillRect(0, 10, 128, 22, matrix.color565(0, 0, 0)); // Clear the maw area
+    matrix.drawBitmap(0, 10, maw2Closed, 64, 22, matrix.color565(255, 255, 255));
+    matrix.drawBitmap(64, 10, maw2ClosedL, 64, 22, matrix.color565(255, 255, 255));
+    break;
+    
+    case 1:
+    //Opened maw
+    Serial.println("Displaying open maw");
+    matrix.fillRect(0, 10, 128, 22, matrix.color565(0, 0, 0)); // Clear the maw area
+    matrix.drawBitmap(0, 10, maw2, 64, 22, matrix.color565(255, 255, 255));
+    matrix.drawBitmap(64, 10, maw2L, 64, 22, matrix.color565(255, 255, 255));
+    break;
+
+    default:
+      Serial.println("Unknown Maw State");
+      break;
+  }
+  matrix.show();
+  }
 
 void displayCurrentView(int view) {
   static int previousView = -1; // Track the last active view
@@ -994,53 +1130,58 @@ if (view != previousView) {
     break;
 
   case 4: // Normal
-    protoFaceTest();
+    protoFace();
     updateBlinkAnimation(); // Update blink animation progress
     //delay(20);              // Short delay for smoother animation
     break;
 
   case 5: // Blush with fade in effect
-    protoFaceTest();
+    protoFace();
     updateBlinkAnimation(); // Update blink animation progress
     break;
 
   case 6: // Dialated pupils
-    protoFaceTest();
+    protoFace();
     updateBlinkAnimation(); // Update blink animation progress
     break;
 
   case 7: // X eyes
-    protoFaceTest();
+    protoFace();
     updateBlinkAnimation(); // Update blink animation progress
     break;
 
   case 8: // Slant eyes
-    protoFaceTest();
+    protoFace();
     updateBlinkAnimation(); // Update blink animation progress
     break;
 
   case 9: // Spiral eyes
-    matrix.fillScreen(0); // Clear display buffer at start of each frame
-    protoFaceTest();
+    //matrix.fillScreen(0); // Clear display buffer at start of each frame
+    protoFace();
+    //displayCurrentMaw();  // Ensure the maw is displayed
+    matrix.fillRect(0, 10, 128, 22, matrix.color565(0, 0, 0)); // Clear the maw area
     updateRotatingSpiral();
+    matrix.drawBitmap(0, 10, maw2Closed, 64, 22, matrix.color565(255, 255, 255));
+    matrix.drawBitmap(64, 10, maw2ClosedL, 64, 22, matrix.color565(255, 255, 255));
+    //updateRotatingSpiral();
     break;
   case 10: //Heart eyes
-    protoFaceTest();
+    protoFace();
     heartbeat(); //Beating heart eyes effect
     break;
 /*
   case 10: // Slant eyes
-    protoFaceTest();
+    protoFace();
     updateBlinkAnimation(); // Update blink animation progress
     break;
   
   case 11: // Spiral eyes
-    protoFaceTest();
+    protoFace();
     updateBlinkAnimation(); // Update blink animation progress
     break;
 */
   }
-  matrix.show();
+  matrix.show(); // Update the display with the current buffer
 }
 
 // LOOP - RUNS REPEATEDLY AFTER SETUP --------------------------------------
@@ -1052,6 +1193,12 @@ void loop(void) {
 
   // Target frame duration (e.g., 30 FPS = ~33ms per frame)
   const unsigned long frameDuration = 11;
+  
+  // Shake detection variables
+  static unsigned long lastShakeTime = 0;
+  const unsigned long shakeCooldown = 2000; // 2 seconds cooldown
+  const float shakeThreshold = 60.0; // Acceleration threshold for shake detection
+  static int previousView = -1; // To store the view before the spiral effect
 
 // Check if it's time for the next frame
   if (currentTime - lastFrameTime >= frameDuration) {
@@ -1069,5 +1216,63 @@ void loop(void) {
     }
 
     displayCurrentView(currentView);
+  }
+
+// Check for tap for temporary maw change
+  uint8_t clickType = accel.getClick();
+  if (currentView != 0 && currentView != 1 && currentView != 2 && 
+    currentView != 3 && currentView != 9 && currentView != 10) {
+  if (clickType == 1) { // Single tap detected
+    Serial.println("Single Tap Detected!");
+    currentMaw = 1;                 // Switch to open maw
+    mawTemporaryChange = true;      // Mark the change as temporary
+    mawChangeTime = currentTime;    // Record the current time
+    displayCurrentMaw();            // Update display
+  }
+
+  // Check if 1 second has passed since the temporary change
+  if (mawTemporaryChange && (currentTime - mawChangeTime >= 1000)) {
+    currentMaw = 0;                 // Revert to closed maw
+    mawTemporaryChange = false;     // Reset temporary change flag
+    displayCurrentMaw();            // Update display
+  }
+  } else {
+    // Disable tap detection and show closed maw in the specified views
+  if (currentMaw != 0) { // Ensure maw is closed
+    currentMaw = 0;                 // Set maw to closed
+    mawTemporaryChange = false;     // Reset any temporary change
+    displayCurrentMaw();            // Update display
+    Serial.println("Tap detection disabled. Maw set to closed.");
+  }
+  }
+  // Add a small delay for stability
+  //delay(50);
+
+  // Detect shake for triggering spiral
+  sensors_event_t event;
+  accel.getEvent(&event); // Get current acceleration data
+  if ((currentTime - lastShakeTime >= shakeCooldown) &&
+        (abs(event.acceleration.x) > shakeThreshold || 
+        abs(event.acceleration.y) > shakeThreshold || 
+        abs(event.acceleration.z) > shakeThreshold)) {
+    Serial.println("Shake Detected! Triggering Spiral...");
+  // Store the current view and switch to the spiral effect
+    if (currentView != 9) { // Avoid overwriting if already in spiral view
+      previousView = currentView;
+    }
+    currentView = 9; // Set to spiral view
+    displayCurrentView(currentView); // Immediately display spiral
+    lastShakeTime = currentTime; // Record the time of this shake
+  }
+
+  // Return to the previous view after the cooldown
+  if (currentView == 9 && (currentTime - lastShakeTime >= shakeCooldown)) {
+    if (previousView != -1) { // Check if a previous view is stored
+      currentView = previousView; // Restore the previous view
+      previousView = -1; // Reset the stored view
+      displayCurrentView(currentView); // Update display
+      Serial.print("Returning to previous view: ");
+      Serial.println(currentView);
+    }
   }
 }
