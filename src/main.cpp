@@ -360,31 +360,23 @@ void updateBlinkAnimation() {
   //dma_display->clearScreen();
 }
 
-void drawRotatedBitmap(int16_t x, int16_t y, const uint8_t *bitmap, uint16_t width, uint16_t height, float angle, uint16_t color) {
-  // Convert angle from degrees to radians
-  float radians = angle * PI / 180.0;
-  float cosA = cos(radians);
-  float sinA = sin(radians);
-
-  // Calculate the center of the bitmap
-  int16_t centerX = width / 2;
-  int16_t centerY = height / 2;
-
-  // Iterate through the bitmap's rows and columns
-  for (int16_t j = 0; j < height; j++) {
-    for (int16_t i = 0; i < width; i++) {
-      // Check if the pixel is set in the bitmap
-      if (bitmap[j * ((width + 7) / 8) + (i / 8)] & (1 << (7 - (i % 8)))) {
-        // Calculate the offset from the center
-        int16_t offsetX = i - centerX;
-        int16_t offsetY = j - centerY;
-
-        // Apply rotation
-        int16_t newX = cosA * offsetX - sinA * offsetY + x;
-        int16_t newY = sinA * offsetX + cosA * offsetY + y;
-
-        // Check bounds and draw the pixel
-        if (newX >= 0 && newX < MATRIX_WIDTH && newY >= 0 && newY < MATRIX_HEIGHT) {
+// Optimized rotation function
+void drawRotatedBitmap(int16_t x, int16_t y, const uint8_t *bitmap, 
+                      uint16_t w, uint16_t h, float cosA, float sinA, 
+                      uint16_t color) {
+  const int16_t cx = w/2, cy = h/2; // Center point
+  
+  for (int16_t j = 0; j < h; j++) {
+    for (int16_t i = 0; i < w; i++) {
+      if (pgm_read_byte(&bitmap[j * ((w+7)/8) + (i/8)]) & (1 << (7 - (i%8)))) {
+        // Calculate rotated position
+        int16_t dx = i - cx;
+        int16_t dy = j - cy;
+        int16_t newX = x + lround(dx * cosA - dy * sinA);
+        int16_t newY = y + lround(dx * sinA + dy * cosA);
+        
+        // Boundary check and draw
+        if (newX >= 0 && newX < PANE_WIDTH && newY >= 0 && newY < PANE_HEIGHT) {
           dma_display->drawPixel(newX, newY, color);
         }
       }
@@ -395,41 +387,35 @@ void drawRotatedBitmap(int16_t x, int16_t y, const uint8_t *bitmap, uint16_t wid
 void updateRotatingSpiral() {
   static unsigned long lastUpdate = 0;
   static float currentAngle = 0;
-  //static uint16_t time_counter = 0;
+  const unsigned long frameInterval = 11; // ~30 FPS (33ms per frame)
   unsigned long currentTime = millis();
-  if (currentTime - lastUpdate > 20) { // Update every 100 ms
-    lastUpdate = currentTime;
-    
-    // Increment the angle for rotation
-    currentAngle += 10.0;
-    if (currentAngle >= 360.0) {
-      currentAngle -= 360.0; // Wrap angle to 0-359°
-    }
 
-  // Increment time_counter to change colors over time
-    time_counter++;
+  if (currentTime - lastUpdate < frameInterval) return;
+  lastUpdate = currentTime;
 
-// Precompute values for efficiency
-    int16_t v = 128;
-    uint8_t wibble = sin8(time_counter);
-    v += sin16(wibble * 3 + time_counter);
-    v += cos16((128 - wibble) + time_counter);
-    v += sin16(cos8(-time_counter) / 8);
-// Map the calculated value to a color using the palette
-    CRGB currentColor = ColorFromPalette(currentPalette, (v >> 8) & 0xFF); // Ensure within palette range
-    uint16_t color = dma_display->color565(currentColor.r, currentColor.g, currentColor.b);
+  // Calculate color once per frame
+  static uint8_t colorIndex = 0;
+  colorIndex += 2; // Slower color transition
+  CRGB currentColor = ColorFromPalette(currentPalette, colorIndex);
+  uint16_t color = dma_display->color565(currentColor.r, currentColor.g, currentColor.b);
+   
+  // Clear the screen before drawing
+  dma_display->clearScreen();
 
-    // Clear the screen before drawing
-    dma_display->clearScreen();
+  // Optimized rotation with pre-calculated values
+  float radians = currentAngle * PI / 180.0;
+  float cosA = cos(radians);
+  float sinA = sin(radians);
+  currentAngle = fmod(currentAngle + 6, 360); // Slower rotation (6° per frame)
 
-    // Draw the rotating bitmaps
-    drawRotatedBitmap(26, 10, spiral, 25, 25, currentAngle, color);
-    drawRotatedBitmap(97, 10, spiralL, 25, 25, -currentAngle, color);
+  // Draw both spirals using pre-transformed coordinates
+  drawRotatedBitmap(26, 10, spiral, 25, 25,  cosA, sinA, color);
+  drawRotatedBitmap(97, 10, spiralL, 25, 25,  cosA, sinA, color);
 
-    // Flip the DMA buffer to update the display
-    dma_display->flipDMABuffer();
-    }
+  // Single buffer flip at the end
+  //dma_display->flipDMABuffer();
 }
+
 
 
 // Draw the blinking eyes
@@ -479,7 +465,7 @@ void blinkingEyes() {
   }
   
   // Flip DMA buffer to update the display
-  dma_display->flipDMABuffer(); // Update the display
+  //dma_display->flipDMABuffer(); // Update the display
 }
 
 void drawBlush() {
@@ -535,13 +521,18 @@ dma_display->clearScreen(); // Clear the display
   dma_display->fillRect(0, stripeHeight * 3, dma_display->width(), stripeHeight, pink);  // Pink stripe
   dma_display->fillRect(0, stripeHeight * 4, dma_display->width(), stripeHeight, lightBlue); // Bottom light blue stripe
   
-  dma_display->flipDMABuffer();
+  //dma_display->flipDMABuffer();
 }
 
 void protoFaceTest() {
   dma_display->clearScreen(); // Clear the display
    drawXbm565(56, 10, 8, 8, nose, dma_display->color565(255, 255, 255));
    drawXbm565(64, 10, 8, 8, noseL, dma_display->color565(255, 255, 255));
+
+   // Draw blinking eyes
+   blinkingEyes();
+
+   // Draw mouth
    drawXbm565(0, 16, 64, 16, maw, dma_display->color565(255, 255, 255));
    drawXbm565(64, 16, 64, 16, mawL, dma_display->color565(255, 255, 255));
    //drawXbm565(0, 0, Eye, 32, 16, dma_display->color565(255, 255, 255));
@@ -555,15 +546,12 @@ void protoFaceTest() {
      drawXbm565(87, 12, blushL, 11, 13, dma_display->color565(255, 0, 255));
      drawXbm565(92, 12, blushL, 11, 13, dma_display->color565(255, 0, 255));
      */
-    dma_display->flipDMABuffer(); // Update the display
+    //dma_display->flipDMABuffer(); // Update the display
    // Draw the blush (with fading effect in view 2)
    if (currentView == 5) {
    drawBlush();
    //dma_display->flipDMABuffer(); // Update the display
 }
-   
-   // Draw blinking eyes
-   blinkingEyes();
 
    //dma_display->flipDMABuffer(); // Update the display
    //dma_display->show(); // Update the matrix display
@@ -637,6 +625,7 @@ void setup() {
 #endif
 
 dma_display->clearScreen();
+dma_display->flipDMABuffer();
 
 /*
   ledbuff = (CRGB *)malloc(NUM_LEDS * sizeof(CRGB));  // allocate buffer for some tests
@@ -673,11 +662,16 @@ randomSeed(analogRead(0)); // Seed the random number generator for randomized ey
 uint8_t wheelval = 0;
 
 void displayCurrentView(int view) {
+  static unsigned long lastFrameTime = 0; // Track the last frame time
+  const unsigned long frameInterval = 11; // Consistent 30 FPS
   static int previousView = -1; // Track the last active view
-  //dma_display->clearScreen(); // Clear display buffer at start of each frame
 
-if (view != previousView) {
-  //dma_display->clearScreen(); // Clear the screen for a new view
+   if (millis() - lastFrameTime < frameInterval) return; // Skip frame if not time yet
+  lastFrameTime = millis(); // Update last frame time
+
+  dma_display->clearScreen(); // Clear the display
+
+if (view != previousView) { // Check if the view has changed
     if (view == 5) {
       // Reset fade logic when entering the blush view
       blushFadeStartTime = millis();
@@ -732,7 +726,7 @@ if (view != previousView) {
       // Reset or transition to another view
       loadingProgress = 0;
     }
-    dma_display->flipDMABuffer();
+    //dma_display->flipDMABuffer();
     break;
 
   case 2: // Pattern plasma
@@ -745,7 +739,7 @@ if (view != previousView) {
     dma_display->clearScreen(); // Clear the display
     drawTransFlag();
     delay(20);
-    dma_display->flipDMABuffer();
+    //dma_display->flipDMABuffer();
     break;
 
   case 4: // Normal
@@ -775,9 +769,9 @@ if (view != previousView) {
     break;
 
   case 9: // Spiral eyes
+    updateRotatingSpiral();
     protoFaceTest();
 //  updateBlinkAnimation(); // Update blink animation progress
-    updateRotatingSpiral();
     break;
 /*
   case 10: // Slant eyes
@@ -795,8 +789,9 @@ if (view != previousView) {
       //dma_display->clearScreen();
       break;
   }
-  //dma_display->clearScreen();
-  dma_display->flipDMABuffer();
+
+  // Only flip buffer if not spiral view (spiral handles its own flip)
+  if (view != 9) dma_display->flipDMABuffer();
 }
 
 
@@ -820,6 +815,7 @@ void loop(void) {
     }
     displayCurrentView(currentView);
 
+    dma_display->clearScreen();
     //dma_display->flipDMABuffer();
   }
 }
