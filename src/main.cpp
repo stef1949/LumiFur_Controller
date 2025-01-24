@@ -19,7 +19,7 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #endif
 #include "main.h"
-
+//#include <FastLED.h>
 // HUB75E pinout
 // R1 | G1
 // B1 | GND
@@ -138,9 +138,6 @@ MatrixPanel_I2S_DMA *dma_display = nullptr;
 // patten change delay
 #define PATTERN_DELAY 2000
 
-uint16_t time_counter = 0, cycles = 0, fps = 0;
-unsigned long fps_timer;
-
 // gradient buffer
 CRGB *ledbuff;
 //
@@ -153,11 +150,23 @@ uint16_t x,y;
 
 const char *message = "* ESP32 I2S DMA *";
 
+
+//#include "EffectsLayer.hpp" // FastLED CRGB Pixel Buffer for which the patterns are drawn
+//EffectsLayer effects(VPANEL_W, VPANEL_H);
+
+
+
 // LumiFur Global Variables ---------------------------------------------------
 
 // View switching
 int currentView = 4; // Current & initial view being displayed
-const int totalViews = 10; // Total number of views to cycle through
+const int totalViews = 11; // Total number of views to cycle through
+
+//Maw switching
+int currentMaw = 1; // Current & initial maw being displayed
+const int totalMaws = 2; // Total number of maws to cycle through
+unsigned long mawChangeTime = 0; // Time when maw was changed
+bool mawTemporaryChange = false; // Whether the maw is temporarily changed
 
 //Loading Bar
 int loadingProgress = 0; // Current loading progress (0-100)
@@ -183,11 +192,11 @@ bool isBlushFadingIn = true;                  // Whether the blush is currently 
 uint8_t blushBrightness = 0;                  // Current blush brightness (0-255)
 
 // Variables for plasma effect
-//uint16_t time_counter = 0, cycles = 0, fps = 0;
-//unsigned long fps_timer;
+uint16_t time_counter = 0, cycles = 0, fps = 0;
+unsigned long fps_timer;
 
 CRGB currentColor;
-CRGBPalette16 palettes[] = {LavaColors_p, HeatColors_p, RainbowColors_p, RainbowStripeColors_p, CloudColors_p};
+CRGBPalette16 palettes[] = {ForestColors_p, LavaColors_p, HeatColors_p, RainbowColors_p, RainbowStripeColors_p, CloudColors_p};
 CRGBPalette16 currentPalette = palettes[0];
 
 CRGB ColorFromCurrentPalette(uint8_t index = 0, uint8_t brightness = 255, TBlendType blendType = LINEARBLEND) {
@@ -226,6 +235,60 @@ void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t c
             }
         }
     }
+}
+
+void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm, 
+                 uint8_t time_offset = 0, float scale = 1.0) {
+  int byteWidth = (width + 7) / 8;
+  uint16_t plasmaSpeed = 10; // Lower = slower animation
+  
+  for (int j = 0; j < height; j++) {
+    for (int i = 0; i < width; i++) {
+      if (pgm_read_byte(&xbm[j * byteWidth + (i / 8)]) & (1 << (7 - (i % 8)))) {
+        // Plasma calculation specific to pixel position
+        uint8_t v = 
+          sin8((x + i) * scale + time_counter) + 
+          cos8((y + j) * scale + time_counter/2) + 
+          sin8((x + i + y + j) * scale * 0.5 + time_counter/3);
+        
+        CRGB color = ColorFromPalette(currentPalette, v + time_offset);
+        uint16_t rgb565 = dma_display->color565(color.r, color.g, color.b);
+        
+        dma_display->drawPixel(x + i, y + j, rgb565);
+      }
+    }
+  }
+}
+
+void drawPlasmaFace() {
+  // Draw eyes with different plasma parameters
+  drawPlasmaXbm(0, 0, 32, 16, Eye, 0, 1.0);     // Right eye
+  drawPlasmaXbm(96, 0, 32, 16, EyeL, 128, 1.0); // Left eye (phase offset)
+  
+  // Nose with finer pattern
+  drawPlasmaXbm(56, 10, 8, 8, nose, 64, 2.0);
+  drawPlasmaXbm(64, 10, 8, 8, noseL, 64, 2.0);
+  
+  // Mouth with larger pattern
+  //drawPlasmaXbm(0, 16, 64, 16, maw, 32, 2.0);
+  //drawPlasmaXbm(64, 16, 64, 16, mawL, 32, 2.0);
+  drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 32, 0.5);
+  drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 32, 0.5);
+}
+
+void updatePlasmaFace() {
+  static unsigned long lastUpdate = 0;
+  const uint16_t frameDelay = 50; // Slower update for smoother transition
+  
+  if (millis() - lastUpdate > frameDelay) {
+    lastUpdate = millis();
+    time_counter += 5; // Speed of plasma animation
+    
+    // Cycle palette every 10 seconds
+    if (millis() % 10000 < frameDelay) {
+      currentPalette = palettes[random(0, sizeof(palettes)/sizeof(palettes[0]))];
+    }
+  }
 }
 
 //Array of all the bitmaps (Total bytes used to store images in PROGMEM = Cant remember)
@@ -356,8 +419,6 @@ void updateBlinkAnimation() {
       blinkDuration = random(minBlinkDuration, maxBlinkDuration); // Randomize blink duration for variety
     }
   }
-  //dma_display->flipDMABuffer();
-  //dma_display->clearScreen();
 }
 
 // Optimized rotation function
@@ -400,20 +461,20 @@ void updateRotatingSpiral() {
   uint16_t color = dma_display->color565(currentColor.r, currentColor.g, currentColor.b);
    
   // Clear the screen before drawing
-  dma_display->clearScreen();
+  //dma_display->clearScreen();
 
   // Optimized rotation with pre-calculated values
   float radians = currentAngle * PI / 180.0;
   float cosA = cos(radians);
   float sinA = sin(radians);
   currentAngle = fmod(currentAngle + 6, 360); // Slower rotation (6° per frame)
-
+  
+  //Clear previous spiral frame
+  //dma_display->fillRect(24, 15, 32, 25, 0);
+  //dma_display->fillRect(105, 15, 32, 25, 0);
   // Draw both spirals using pre-transformed coordinates
-  drawRotatedBitmap(26, 10, spiral, 25, 25,  cosA, sinA, color);
-  drawRotatedBitmap(97, 10, spiralL, 25, 25,  cosA, sinA, color);
-
-  // Single buffer flip at the end
-  //dma_display->flipDMABuffer();
+  drawRotatedBitmap(24, 15, spiral, 25, 25,  cosA, sinA, color);
+  drawRotatedBitmap(105, 15, spiralL, 25, 25,  cosA, sinA, color);
 }
 
 
@@ -448,7 +509,7 @@ void blinkingEyes() {
   */
   else if (currentView == 8) {
     drawXbm565(0, 0, 24, 16, slanteyes, dma_display->color565(255, 255, 255));
-    drawXbm565(104, 0, 24, 16, slanteyes, dma_display->color565(255, 255, 255));
+    drawXbm565(104, 0, 24, 16, slanteyesL, dma_display->color565(255, 255, 255));
   }
   else if (currentView == 9) {
   //  drawXbm565(15, 0, 25, 25, spiral, dma_display->color565(255, 255, 255));
@@ -463,9 +524,6 @@ void blinkingEyes() {
     dma_display->fillRect(0, 0, 32, boxHeight, 0);     // Cover the right eye
     dma_display->fillRect(96, 0, 32, boxHeight, 0);    // Cover the left eye
   }
-  
-  // Flip DMA buffer to update the display
-  //dma_display->flipDMABuffer(); // Update the display
 }
 
 void drawBlush() {
@@ -482,26 +540,21 @@ void drawBlush() {
       blushBrightness = 255; // Max brightness reached
       isBlushFadingIn = false; // Stop fading
     }
-
-  //dma_display->flipDMABuffer(); // Update the display
   }
 
   // Set blush color based on brightness
   uint16_t blushColor = dma_display->color565(blushBrightness, 0, blushBrightness);
 
   // Clear only the blush area to prevent artifacts
-  dma_display->fillRect(25, 12, 18, 13, 0); // Clear right blush area
-  dma_display->fillRect(82, 12, 18, 13, 0); // Clear left blush area
+  dma_display->fillRect(45, 1, 18, 13, 0); // Clear right blush area
+  dma_display->fillRect(72, 1, 18, 13, 0); // Clear left blush area
 
-     drawXbm565(35, 12, 11, 13, blush, blushColor);
-     drawXbm565(30, 12, 11, 13, blush, blushColor);
-     drawXbm565(25, 12, 11, 13, blush, blushColor);
-     drawXbm565(82, 12, 11, 13, blushL, blushColor);
-     drawXbm565(87, 12, 11, 13, blushL, blushColor);
-     drawXbm565(92, 12, 11, 13, blushL, blushColor);
-
-// Flip the DMA buffer after completing all rendering
-//dma_display->flipDMABuffer(); // Update the display
+     drawXbm565(45, 1, 11, 13, blush, blushColor);
+     drawXbm565(40, 1, 11, 13, blush, blushColor);
+     drawXbm565(35, 1, 11, 13, blush, blushColor);
+     drawXbm565(72, 1, 11, 13, blushL, blushColor);
+     drawXbm565(77, 1, 11, 13, blushL, blushColor);
+     drawXbm565(82, 1, 11, 13, blushL, blushColor);
 }
 
 void drawTransFlag() {
@@ -520,41 +573,35 @@ dma_display->clearScreen(); // Clear the display
   dma_display->fillRect(0, stripeHeight * 2, dma_display->width(), stripeHeight, white); // Middle white stripe
   dma_display->fillRect(0, stripeHeight * 3, dma_display->width(), stripeHeight, pink);  // Pink stripe
   dma_display->fillRect(0, stripeHeight * 4, dma_display->width(), stripeHeight, lightBlue); // Bottom light blue stripe
-  
-  //dma_display->flipDMABuffer();
 }
 
 void protoFaceTest() {
   dma_display->clearScreen(); // Clear the display
-   drawXbm565(56, 10, 8, 8, nose, dma_display->color565(255, 255, 255));
-   drawXbm565(64, 10, 8, 8, noseL, dma_display->color565(255, 255, 255));
+   drawXbm565(56, 2, 8, 8, nose, dma_display->color565(255, 255, 255));
+   drawXbm565(64, 2, 8, 8, noseL, dma_display->color565(255, 255, 255));
 
    // Draw blinking eyes
    blinkingEyes();
 
    // Draw mouth
-   drawXbm565(0, 16, 64, 16, maw, dma_display->color565(255, 255, 255));
-   drawXbm565(64, 16, 64, 16, mawL, dma_display->color565(255, 255, 255));
+   //drawXbm565(0, 16, 64, 16, maw, dma_display->color565(255, 255, 255));
+   //(64, 16, 64, 16, mawL, dma_display->color565(255, 255, 255));
    //drawXbm565(0, 0, Eye, 32, 16, dma_display->color565(255, 255, 255));
    //drawXbm565(96, 0, EyeL, 32, 16, dma_display->color565(255, 255, 255));
-
+   drawXbm565(0, 10, 64, 22, maw2Closed, dma_display->color565(255, 255, 255));
+   drawXbm565(64, 10, 64, 22, maw2ClosedL, dma_display->color565(255, 255, 255));
     /*
-     drawXbm565(35, 12, blush, 11, 13, dma_display->color565(255, 0, 255));
-     drawXbm565(30, 12, blush, 11, 13, dma_display->color565(255, 0, 255));
-     drawXbm565(25, 12, blush, 11, 13, dma_display->color565(255, 0, 255));
-     drawXbm565(82, 12, blushL, 11, 13, dma_display->color565(255, 0, 255));
-     drawXbm565(87, 12, blushL, 11, 13, dma_display->color565(255, 0, 255));
-     drawXbm565(92, 12, blushL, 11, 13, dma_display->color565(255, 0, 255));
+     drawXbm565(35, 1, blush, 11, 13, dma_display->color565(255, 0, 255));
+     drawXbm565(30, 1, blush, 11, 13, dma_display->color565(255, 0, 255));
+     drawXbm565(25, 1, blush, 11, 13, dma_display->color565(255, 0, 255));
+     drawXbm565(82, 1, blushL, 11, 13, dma_display->color565(255, 0, 255));
+     drawXbm565(87, 1, blushL, 11, 13, dma_display->color565(255, 0, 255));
+     drawXbm565(92, 1, blushL, 11, 13, dma_display->color565(255, 0, 255));
      */
-    //dma_display->flipDMABuffer(); // Update the display
    // Draw the blush (with fading effect in view 2)
    if (currentView == 5) {
    drawBlush();
-   //dma_display->flipDMABuffer(); // Update the display
-}
-
-   //dma_display->flipDMABuffer(); // Update the display
-   //dma_display->show(); // Update the matrix display
+   }
 }
 
 void patternPlasma() {
@@ -582,9 +629,6 @@ void patternPlasma() {
     cycles = 0;
     currentPalette = palettes[random(0, sizeof(palettes) / sizeof(palettes[0]))];
   }
-
-  // Refresh display
-  //dma_display->flipDMABuffer();
 }
 
 void setup() {
@@ -661,6 +705,28 @@ randomSeed(analogRead(0)); // Seed the random number generator for randomized ey
 
 uint8_t wheelval = 0;
 
+void displayCurrentMaw() {
+  switch (currentMaw) {
+    case 0:
+  //dma_display->clearScreen();
+  Serial.println("Displaying Closed maw");
+  drawXbm565(0, 10, 64, 22, maw2Closed, dma_display->color565(255, 255, 255));
+  drawXbm565(64, 10, 64, 22, maw2ClosedL, dma_display->color565(255, 255, 255));
+  //dma_display->flipDMABuffer();
+  break;
+
+  case 1:
+  //dma_display->clearScreen();
+  Serial.println("Displaying open maw");
+  drawXbm565(0, 10, 64, 22, maw2, dma_display->color565(255, 255, 255));
+  drawXbm565(64, 10, 64, 22, maw2L, dma_display->color565(255, 255, 255));
+  break;
+
+  default:
+  Serial.println("Unknown Maw State");
+  break;
+}
+}
 void displayCurrentView(int view) {
   static unsigned long lastFrameTime = 0; // Track the last frame time
   const unsigned long frameInterval = 11; // Consistent 30 FPS
@@ -769,9 +835,16 @@ if (view != previousView) { // Check if the view has changed
     break;
 
   case 9: // Spiral eyes
-    updateRotatingSpiral();
     protoFaceTest();
+    updateRotatingSpiral();
+    //protoFaceTest();
 //  updateBlinkAnimation(); // Update blink animation progress
+    break;
+
+  case 10: //Plasma bitmap test
+    drawPlasmaFace();
+    updatePlasmaFace();
+    updateBlinkAnimation();
     break;
 /*
   case 10: // Slant eyes
@@ -791,7 +864,8 @@ if (view != previousView) { // Check if the view has changed
   }
 
   // Only flip buffer if not spiral view (spiral handles its own flip)
-  if (view != 9) dma_display->flipDMABuffer();
+  //if (view != 9) 
+  dma_display->flipDMABuffer();
 }
 
 
