@@ -19,7 +19,7 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #endif
 #include "main.h"
-//#include <FastLED.h>
+
 // HUB75E pinout
 // R1 | G1
 // B1 | GND
@@ -196,7 +196,7 @@ uint16_t time_counter = 0, cycles = 0, fps = 0;
 unsigned long fps_timer;
 
 CRGB currentColor;
-CRGBPalette16 palettes[] = {ForestColors_p, LavaColors_p, HeatColors_p, RainbowColors_p, RainbowStripeColors_p, CloudColors_p};
+CRGBPalette16 palettes[] = {ForestColors_p, LavaColors_p, HeatColors_p, RainbowColors_p, CloudColors_p};
 CRGBPalette16 currentPalette = palettes[0];
 
 CRGB ColorFromCurrentPalette(uint8_t index = 0, uint8_t brightness = 255, TBlendType blendType = LINEARBLEND) {
@@ -394,6 +394,19 @@ return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 dma_display->flipDMABuffer();
 }
 
+float easeInQuad(float t) {
+  return t * t;
+}
+
+float easeOutQuad(float t) {
+  return 1 - (1 - t) * (1 - t);
+}
+
+// Blink animation control variables
+unsigned long closeDuration;
+unsigned long holdDuration;
+unsigned long openDuration;
+
 void updateBlinkAnimation() {
   unsigned long currentTime = millis();
 
@@ -401,22 +414,49 @@ void updateBlinkAnimation() {
     unsigned long elapsed = currentTime - lastEyeBlinkTime;
 
     if (elapsed >= blinkDuration) {
-      // End the blink animation
+      // End blink animation
       isBlinking = false;
       lastEyeBlinkTime = currentTime;
-      nextBlinkDelay = random(minBlinkDelay, maxBlinkDelay); // Set random delay for the next blink
+      nextBlinkDelay = random(minBlinkDelay, maxBlinkDelay);
     } else {
-      // Update non-linear blink progress (0 to 100%)
-      float normalizedProgress = float(elapsed) / blinkDuration;
-      blinkProgress = 100 * easeInOutQuad(normalizedProgress); // Using ease-in-out for natural acceleration and deceleration
+      // Calculate animation progress through phases
+      if (elapsed < closeDuration) {
+        // Closing phase: accelerate down
+        float phaseProgress = (float)elapsed / closeDuration;
+        blinkProgress = 100 * easeInQuad(phaseProgress);
+      } else if (elapsed < closeDuration + holdDuration) {
+        // Hold phase: maintain full closure
+        blinkProgress = 100;
+      } else {
+        // Opening phase: slow return
+        unsigned long phaseElapsed = elapsed - (closeDuration + holdDuration);
+        float phaseProgress = (float)phaseElapsed / openDuration;
+        blinkProgress = 100 * (1 - easeOutQuad(phaseProgress));
+      }
     }
   } else {
-    // Start a new blink after the random delay
+    // Check if it's time to start a new blink
     if (currentTime - lastEyeBlinkTime >= nextBlinkDelay) {
       isBlinking = true;
       blinkProgress = 0;
       lastEyeBlinkTime = currentTime;
-      blinkDuration = random(minBlinkDuration, maxBlinkDuration); // Randomize blink duration for variety
+      
+      // Randomize blink parameters
+      blinkDuration = random(minBlinkDuration, maxBlinkDuration);
+      
+      // Calculate phase durations (with variability)
+      int closePercent = random(25, 35);    // 25-35% of total duration
+      int holdPercent = random(5, 15);      // 5-15% of total duration
+      closePercent = min(closePercent, 95 - holdPercent); // Ensure room for open phase
+      
+      closeDuration = (blinkDuration * closePercent) / 100;
+      holdDuration = (blinkDuration * holdPercent) / 100;
+      openDuration = blinkDuration - closeDuration - holdDuration;
+
+      // Ensure minimum phase durations of 1ms
+      if (closeDuration == 0) closeDuration = 1;
+      if (holdDuration == 0) holdDuration = 1;
+      if (openDuration == 0) openDuration = 1;
     }
   }
 }
@@ -486,16 +526,22 @@ void blinkingEyes() {
 
   // Draw  eyes
   if (currentView == 4 || currentView == 5) {
-  drawXbm565(0, 0, 32, 16, Eye, dma_display->color565(255, 255, 255));
-  drawXbm565(96, 0, 32, 16, EyeL, dma_display->color565(255, 255, 255));
+    //drawXbm565(0, 0, 32, 16, Eye, dma_display->color565(255, 255, 255));
+    //drawXbm565(96, 0, 32, 16, EyeL, dma_display->color565(255, 255, 255));
+    drawPlasmaXbm(0, 0, 32, 16, Eye, 0, 1.0);     // Right eye
+    drawPlasmaXbm(96, 0, 32, 16, EyeL, 128, 1.0); // Left eye (phase offset)
   }
   else if (currentView == 6) {
-    drawXbm565(0, 0, 32, 12, semicircleeyes, dma_display->color565(255, 255, 255));
-    drawXbm565(96, 0, 32, 12, semicircleeyes, dma_display->color565(255, 255, 255));
+    //drawXbm565(0, 0, 32, 12, semicircleeyes, dma_display->color565(255, 255, 255));
+    //drawXbm565(96, 0, 32, 12, semicircleeyes, dma_display->color565(255, 255, 255));
+    drawPlasmaXbm(0, 0, 32, 12, semicircleeyes, 0, 1.0);     // Right eye
+    drawPlasmaXbm(96, 0, 32, 12, semicircleeyes, 128, 1.0); // Left eye (phase offset)
   }
   else if (currentView == 7) {
-    drawXbm565(0, 0, 31, 15, x_eyes, dma_display->color565(255, 255, 255));
-    drawXbm565(96, 0, 31, 15, x_eyes, dma_display->color565(255, 255, 255));
+    //drawXbm565(0, 0, 31, 15, x_eyes, dma_display->color565(255, 255, 255));
+    //drawXbm565(96, 0, 31, 15, x_eyes, dma_display->color565(255, 255, 255));
+    drawPlasmaXbm(0, 0, 31, 15, x_eyes, 0, 1.0);     // Right eye
+    drawPlasmaXbm(96, 0, 31, 15, x_eyes, 128, 1.0); // Left eye (phase offset)
   }
   /*
   if (currentView == 8) {
@@ -508,8 +554,10 @@ void blinkingEyes() {
   }
   */
   else if (currentView == 8) {
-    drawXbm565(0, 0, 24, 16, slanteyes, dma_display->color565(255, 255, 255));
-    drawXbm565(104, 0, 24, 16, slanteyesL, dma_display->color565(255, 255, 255));
+    //drawXbm565(0, 0, 24, 16, slanteyes, dma_display->color565(255, 255, 255));
+    //drawXbm565(104, 0, 24, 16, slanteyesL, dma_display->color565(255, 255, 255));
+    drawPlasmaXbm(0, 0, 24, 16, slanteyes, 0, 1.0);     // Right eye
+    drawPlasmaXbm(104, 0, 24, 16, slanteyesL, 128, 1.0); // Left eye (phase offset)
   }
   else if (currentView == 9) {
   //  drawXbm565(15, 0, 25, 25, spiral, dma_display->color565(255, 255, 255));
@@ -577,9 +625,12 @@ dma_display->clearScreen(); // Clear the display
 
 void protoFaceTest() {
   dma_display->clearScreen(); // Clear the display
-   drawXbm565(56, 2, 8, 8, nose, dma_display->color565(255, 255, 255));
-   drawXbm565(64, 2, 8, 8, noseL, dma_display->color565(255, 255, 255));
 
+   // Draw Nose
+   //drawXbm565(56, 2, 8, 8, nose, dma_display->color565(255, 255, 255));
+   //drawXbm565(64, 2, 8, 8, noseL, dma_display->color565(255, 255, 255));
+   drawPlasmaXbm(56, 10, 8, 8, nose, 64, 2.0);
+   drawPlasmaXbm(64, 10, 8, 8, noseL, 64, 2.0);
    // Draw blinking eyes
    blinkingEyes();
 
@@ -588,17 +639,15 @@ void protoFaceTest() {
    //(64, 16, 64, 16, mawL, dma_display->color565(255, 255, 255));
    //drawXbm565(0, 0, Eye, 32, 16, dma_display->color565(255, 255, 255));
    //drawXbm565(96, 0, EyeL, 32, 16, dma_display->color565(255, 255, 255));
-   drawXbm565(0, 10, 64, 22, maw2Closed, dma_display->color565(255, 255, 255));
-   drawXbm565(64, 10, 64, 22, maw2ClosedL, dma_display->color565(255, 255, 255));
-    /*
-     drawXbm565(35, 1, blush, 11, 13, dma_display->color565(255, 0, 255));
-     drawXbm565(30, 1, blush, 11, 13, dma_display->color565(255, 0, 255));
-     drawXbm565(25, 1, blush, 11, 13, dma_display->color565(255, 0, 255));
-     drawXbm565(82, 1, blushL, 11, 13, dma_display->color565(255, 0, 255));
-     drawXbm565(87, 1, blushL, 11, 13, dma_display->color565(255, 0, 255));
-     drawXbm565(92, 1, blushL, 11, 13, dma_display->color565(255, 0, 255));
-     */
-   // Draw the blush (with fading effect in view 2)
+
+   //drawXbm565(0, 10, 64, 22, maw2Closed, dma_display->color565(255, 255, 255));
+   //drawXbm565(64, 10, 64, 22, maw2ClosedL, dma_display->color565(255, 255, 255));
+   drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 0, 1.0);     // Right eye
+   drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0); // Left eye (phase offset)
+
+   drawPlasmaXbm(56, 10, 8, 8, nose, 64, 2.0);
+   drawPlasmaXbm(64, 10, 8, 8, noseL, 64, 2.0);
+
    if (currentView == 5) {
    drawBlush();
    }
@@ -804,33 +853,38 @@ if (view != previousView) { // Check if the view has changed
   case 3:
     dma_display->clearScreen(); // Clear the display
     drawTransFlag();
-    delay(20);
+    //delay(20);
     //dma_display->flipDMABuffer();
     break;
 
   case 4: // Normal
     protoFaceTest();
+    updatePlasmaFace();
     updateBlinkAnimation(); // Update blink animation progress
-    delay(20);              // Short delay for smoother animation
+    //delay(20);              // Short delay for smoother animation
     break;
 
   case 5: // Blush with fade in effect
     protoFaceTest();
+    updatePlasmaFace();
     updateBlinkAnimation(); // Update blink animation progress
     break;
 
   case 6: // Dialated pupils
     protoFaceTest();
+    updatePlasmaFace();
     updateBlinkAnimation(); // Update blink animation progress
     break;
 
   case 7: // X eyes
     protoFaceTest();
+    updatePlasmaFace();
     updateBlinkAnimation(); // Update blink animation progress
     break;
 
   case 8: // Slant eyes
     protoFaceTest();
+    updatePlasmaFace();
     updateBlinkAnimation(); // Update blink animation progress
     break;
 
