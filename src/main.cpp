@@ -394,69 +394,105 @@ return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 dma_display->flipDMABuffer();
 }
 
+// Easing functions with bounds checking
 float easeInQuad(float t) {
-  return t * t;
+  return (t >= 1.0f) ? 1.0f : t * t;
 }
 
 float easeOutQuad(float t) {
-  return 1 - (1 - t) * (1 - t);
+  return (t <= 0.0f) ? 0.0f : 1.0f - (1.0f - t) * (1.0f - t);
 }
 
-// Blink animation control variables
-unsigned long closeDuration;
-unsigned long holdDuration;
-unsigned long openDuration;
+// Blink animation control with initialization
+struct {
+  unsigned long startTime = 0;
+  unsigned long durationMs = 200;  // Default duration
+  unsigned long closeDuration = 50;
+  unsigned long holdDuration = 20;
+  unsigned long openDuration = 50;
+} blinkState;
+
+void initBlinkState() {
+  blinkState.startTime = 0;
+  blinkState.durationMs = 200;
+  blinkState.closeDuration = 50;
+  blinkState.holdDuration = 20;
+  blinkState.openDuration = 50;
+}
 
 void updateBlinkAnimation() {
-  unsigned long currentTime = millis();
+  static bool initialized = false;
+  if (!initialized) {
+    initBlinkState();
+    initialized = true;
+  }
 
+  const unsigned long currentTime = millis();
+  
   if (isBlinking) {
-    unsigned long elapsed = currentTime - lastEyeBlinkTime;
-
-    if (elapsed >= blinkDuration) {
-      // End blink animation
+    const unsigned long elapsed = currentTime - blinkState.startTime;
+    
+    // Safety check for time overflow
+    if (elapsed > blinkState.durationMs * 2) {
       isBlinking = false;
-      lastEyeBlinkTime = currentTime;
-      nextBlinkDelay = random(minBlinkDelay, maxBlinkDelay);
-    } else {
-      // Calculate animation progress through phases
-      if (elapsed < closeDuration) {
-        // Closing phase: accelerate down
-        float phaseProgress = (float)elapsed / closeDuration;
-        blinkProgress = 100 * easeInQuad(phaseProgress);
-      } else if (elapsed < closeDuration + holdDuration) {
-        // Hold phase: maintain full closure
-        blinkProgress = 100;
-      } else {
-        // Opening phase: slow return
-        unsigned long phaseElapsed = elapsed - (closeDuration + holdDuration);
-        float phaseProgress = (float)phaseElapsed / openDuration;
-        blinkProgress = 100 * (1 - easeOutQuad(phaseProgress));
-      }
+      return;
     }
-  } else {
-    // Check if it's time to start a new blink
-    if (currentTime - lastEyeBlinkTime >= nextBlinkDelay) {
-      isBlinking = true;
+
+    // Phase calculations with duration safeguards
+    const unsigned long totalDuration = blinkState.closeDuration + 
+                                      blinkState.holdDuration + 
+                                      blinkState.openDuration;
+    if (totalDuration == 0) {
+      isBlinking = false;
+      return;
+    }
+
+    if (elapsed < blinkState.closeDuration) {
+      // Closing phase
+      const float progress = (float)elapsed / blinkState.closeDuration;
+      blinkProgress = 100 * easeInQuad(progress);
+    } 
+    else if (elapsed < blinkState.closeDuration + blinkState.holdDuration) {
+      // Hold phase
+      blinkProgress = 100;
+    } 
+    else if (elapsed < totalDuration) {
+      // Opening phase
+      const unsigned long openElapsed = elapsed - 
+                                      (blinkState.closeDuration + 
+                                       blinkState.holdDuration);
+      const float progress = (float)openElapsed / blinkState.openDuration;
+      blinkProgress = 100 * (1.0f - easeOutQuad(progress));
+    } 
+    else {
+      // End blink
+      isBlinking = false;
       blinkProgress = 0;
       lastEyeBlinkTime = currentTime;
+      nextBlinkDelay = random(minBlinkDelay, maxBlinkDelay);
+    }
+  } 
+  else {
+    if (currentTime - lastEyeBlinkTime >= nextBlinkDelay) {
+      // Initialize new blink with validated durations
+      isBlinking = true;
+      blinkState.startTime = currentTime;
       
-      // Randomize blink parameters
-      blinkDuration = random(minBlinkDuration, maxBlinkDuration);
+      // Constrain durations to safe ranges
+      blinkState.durationMs = constrain(random(minBlinkDuration, maxBlinkDuration), 
+                                      50, 1000);
       
-      // Calculate phase durations (with variability)
-      int closePercent = random(25, 35);    // 25-35% of total duration
-      int holdPercent = random(5, 15);      // 5-15% of total duration
-      closePercent = min(closePercent, 95 - holdPercent); // Ensure room for open phase
-      
-      closeDuration = (blinkDuration * closePercent) / 100;
-      holdDuration = (blinkDuration * holdPercent) / 100;
-      openDuration = blinkDuration - closeDuration - holdDuration;
+      // Calculate phases as percentages of total duration
+      blinkState.closeDuration = blinkState.durationMs * random(25, 35) / 100;
+      blinkState.holdDuration = blinkState.durationMs * random(5, 15) / 100;
+      blinkState.openDuration = blinkState.durationMs - 
+                              blinkState.closeDuration - 
+                              blinkState.holdDuration;
 
-      // Ensure minimum phase durations of 1ms
-      if (closeDuration == 0) closeDuration = 1;
-      if (holdDuration == 0) holdDuration = 1;
-      if (openDuration == 0) openDuration = 1;
+      // Ensure minimum durations of 1 frame (16ms @60Hz)
+      blinkState.closeDuration = max(blinkState.closeDuration, 16UL);
+      blinkState.holdDuration = max(blinkState.holdDuration, 16UL);
+      blinkState.openDuration = max(blinkState.openDuration, 16UL);
     }
   }
 }
@@ -522,7 +558,7 @@ void updateRotatingSpiral() {
 // Draw the blinking eyes
 void blinkingEyes() {
 
-  dma_display->clearScreen(); // Clear the display
+  //dma_display->clearScreen(); // Clear the display
 
   // Draw  eyes
   if (currentView == 4 || currentView == 5) {
@@ -566,7 +602,7 @@ void blinkingEyes() {
 
   if (isBlinking) {
     // Calculate the height of the black box
-    int boxHeight = map(blinkProgress, 0, 100, 0, 16); // Adjust height of blink. DEFAULT: From 0 to 16 pixels
+    int boxHeight = map(blinkProgress, 0, 100, 0, 20); // Adjust height of blink. DEFAULT: From 0 to 16 pixels
 
     // Draw black boxes over the eyes
     dma_display->fillRect(0, 0, 32, boxHeight, 0);     // Cover the right eye
