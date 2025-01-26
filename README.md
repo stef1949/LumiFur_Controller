@@ -20,13 +20,16 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
   
 ## Hardware Requirements 🛠️
 - ESP32 development board
-- 14 x MAX7219 8x8 LED matrix modules
+- 2 x Hub75 64x32 LED matrix displays
 - Connecting wires and power supply
   
 ## Software Requirements 💻
 - VSCode with PlatformIO Extension 
-- MD_MAX72XX library
+- MatrixPanel-DMA library
+- FastLED Library
 - NimBLE-Arduino library
+- Adafruit GFX Library
+- Adafruit NeoPixel Library
 
 ## Installation ⚙️
 
@@ -68,7 +71,7 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 
 1. Power on the device.
 2. The mask will display the default idle face with animations.
-3. Use the LumiFur app to connect to 'LumiFur_BLE'.
+3. Use the LumiFur app to connect to 'LumiFur_Controller'.
 4. Send values between 1 and 8 to change facial expressions.
 
 ### Facial Expressions 😃
