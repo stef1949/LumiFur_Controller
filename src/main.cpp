@@ -7,6 +7,9 @@
 #include "sdkconfig.h"
 #endif
 
+#define DEBUG_BLE
+#define DEBUG_VIEWS
+
 #include <Arduino.h>
 #include "xtensa/core-macros.h"
 #include "bitmaps.h"
@@ -19,6 +22,18 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #endif
 #include "main.h"
+
+//BLE Libraries
+#include <NimBLEDevice.h>
+
+// BLE UUIDs
+#define SERVICE_UUID        "01931c44-3867-7740-9867-c822cb7df308"
+#define CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09fe"
+#define TEMPERATURE_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9774-18350e3e27db"  // Unique UUID for temperature data
+#define ULTRASOUND_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9732-12460e3a35db"
+
+//#define DESC_USER_DESC_UUID  0x2901  // User Description descriptor
+//#define DESC_FORMAT_UUID     0x2904  // Presentation Format descriptor
 
 // HUB75E pinout
 // R1 | G1
@@ -66,11 +81,14 @@
   #define LAT_PIN 47
   #define OE_PIN  14
   #define CLK_PIN 2
+  #define PIN_E 21 // E pin for 64px high panels
   // Button pins
   #define BUTTON_UP 6
   #define BUTTON_DOWN 7
   //#include <Adafruit_LIS3DH.h>      // Library for built-in For accelerometer
-  #define PIN_E 21
+  #include <Adafruit_NeoPixel.h>    // Library for built-in NeoPixel
+  #define STATUS_LED_PIN 4
+  Adafruit_NeoPixel statusPixel(1, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
 
 #elif defined(__SAMD51__) // M4 Metro Variants (Express, AirLift)
   //
@@ -140,7 +158,9 @@ MatrixPanel_I2S_DMA *dma_display = nullptr;
 
 // gradient buffer
 CRGB *ledbuff;
-//
+
+// LED array
+CRGB leds[1];
 
 unsigned long t1, t2, s1=0, s2=0, s3=0;
 uint32_t ccount1, ccount2;
@@ -159,9 +179,8 @@ const char *message = "* ESP32 I2S DMA *";
 // LumiFur Global Variables ---------------------------------------------------
 
 // View switching
-int currentView = 4; // Current & initial view being displayed
+uint8_t currentView = 4; // Current & initial view being displayed
 const int totalViews = 11; // Total number of views to cycle through
-
 //Maw switching
 int currentMaw = 1; // Current & initial maw being displayed
 const int totalMaws = 2; // Total number of maws to cycle through
@@ -213,6 +232,210 @@ bool debounceButton(int pin) {
     return true;
   }
   return false;
+}
+
+
+////////////////////////////////////////////
+/////////////////BLE CONFIG/////////////////
+////////////////////////////////////////////
+
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+
+// BLE Server pointers
+NimBLEServer* pServer = nullptr;
+NimBLECharacteristic* pCharacteristic = nullptr;
+NimBLECharacteristic* pTemperatureCharacteristic = nullptr;
+NimBLECharacteristic* pFaceCharacteristic = nullptr;
+
+// Class to handle BLE server callbacks
+class ServerCallbacks : public NimBLEServerCallbacks {
+    void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
+        deviceConnected = true;
+        Serial.printf("Client connected: %s\n", connInfo.getAddress().toString().c_str());
+
+        /**
+         *  We can use the connection handle here to ask for different connection parameters.
+         *  Args: connection handle, min connection interval, max connection interval
+         *  latency, supervision timeout.
+         *  Units; Min/Max Intervals: 1.25 millisecond increments.
+         *  Latency: number of intervals allowed to skip.
+         *  Timeout: 10 millisecond increments.
+         */
+        pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 180);
+    }
+
+    void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
+        deviceConnected = false;
+        Serial.println("Client disconnected - advertising");
+        NimBLEDevice::startAdvertising();
+    }
+
+    void onMTUChange(uint16_t MTU, NimBLEConnInfo& connInfo) override {
+        Serial.printf("MTU updated: %u for connection ID: %u\n", MTU, connInfo.getConnHandle());
+    }
+
+    /********************* Security handled here *********************/
+    uint32_t onPassKeyDisplay() override {
+        Serial.printf("Server Passkey Display\n");
+        /**
+         * This should return a random 6 digit number for security
+         *  or make your own static passkey as done here.
+         */
+        return 123456;
+    }
+
+    void onConfirmPassKey(NimBLEConnInfo& connInfo, uint32_t pass_key) override {
+        Serial.printf("The passkey YES/NO number: %" PRIu32 "\n", pass_key);
+        /** Inject false if passkeys don't match. */
+        NimBLEDevice::injectConfirmPasskey(connInfo, true);
+    }
+
+    void onAuthenticationComplete(NimBLEConnInfo& connInfo) override {
+        /** Check that encryption was successful, if not we disconnect the client */
+        if (!connInfo.isEncrypted()) {
+            NimBLEDevice::getServer()->disconnect(connInfo.getConnHandle());
+            Serial.printf("Encrypt connection failed - disconnecting client\n");
+            return;
+        }
+
+        Serial.printf("Secured connection to: %s\n", connInfo.getAddress().toString().c_str());
+    }
+
+} serverCallbacks;
+
+void displayCurrentView(int view);
+
+// Class to handle characteristic callbacks
+class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
+  void onRead(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+        uint8_t viewValue = static_cast<uint8_t>(currentView);
+        pCharacteristic->setValue(&viewValue, 1);
+        Serial.printf("Read request - returned view: %d\n", viewValue);
+    }
+
+  void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) {
+        std::string value = pCharacteristic->getValue();
+        if(value.length() > 0) {
+            uint8_t newView = value[0];
+            if (newView >= 1 && newView <=12 != currentView) {
+                currentView = newView;
+                //viewChanged = true;
+                Serial.printf("Write request - new view: %d\n", currentView);
+                pCharacteristic->notify();
+            }
+        }
+    }
+
+    void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
+        Serial.printf("Notification/Indication return code: %d, %s\n", code, NimBLEUtils::returnCodeToString(code));
+    }
+    void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) override {
+        std::string str  = "Client ID: ";
+        str             += connInfo.getConnHandle();
+        str             += " Address: ";
+        str             += connInfo.getAddress().toString();
+        if (subValue == 0) {
+            str += " Unsubscribed to ";
+        } else if (subValue == 1) {
+            str += " Subscribed to notifications for ";
+        } else if (subValue == 2) {
+            str += " Subscribed to indications for ";
+        } else if (subValue == 3) {
+            str += " Subscribed to notifications and indications for ";
+        }
+        str += std::string(pCharacteristic->getUUID());
+
+        Serial.printf("%s\n", str.c_str());
+    }
+} chrCallbacks; 
+
+class DescriptorCallbacks : public NimBLEDescriptorCallbacks {
+    void onWrite(NimBLEDescriptor* pDescriptor, NimBLEConnInfo& connInfo) override {
+        std::string dscVal = pDescriptor->getValue();
+        Serial.printf("Descriptor written value: %s\n", dscVal.c_str());
+    }
+
+    void onRead(NimBLEDescriptor* pDescriptor, NimBLEConnInfo& connInfo) override {
+        Serial.printf("%s Descriptor read\n", pDescriptor->getUUID().toString().c_str());
+    }
+} dscCallbacks;
+
+////////////////////////////////////////////
+//////////////////BLE SETUP/////////////////
+////////////////////////////////////////////
+
+// Initializes the BLE (Bluetooth Low Energy) functionality, sets up the BLE server, characteristics, and starts advertising.
+void setupBLE() {
+  
+}
+
+//non-blocking LED status functions (Neopixel)
+void fadeInAndOutLED(uint8_t r, uint8_t g, uint8_t b) {
+    static int brightness = 0;
+    static int step = 5;
+    static unsigned long lastUpdate = 0;
+    const uint8_t delayTime = 5;
+
+    if (millis() - lastUpdate < delayTime) return;
+    lastUpdate = millis();
+
+    brightness += step;
+    if (brightness >= 255 || brightness <= 0) step *= -1;
+    
+    statusPixel.setPixelColor(0, 
+        (r * brightness) / 255,
+        (g * brightness) / 255,
+        (b * brightness) / 255);
+    statusPixel.show();
+}
+
+void handleBLEConnection() {
+    if (deviceConnected != oldDeviceConnected) {
+        if (deviceConnected) {
+            statusPixel.setPixelColor(0, 0, 255, 0); // Green when connected
+        } else {
+            statusPixel.setPixelColor(0, 0, 0, 0); // Off when disconnected
+            NimBLEDevice::startAdvertising();
+        }
+        statusPixel.show();
+        oldDeviceConnected = deviceConnected;
+    }
+    
+    if (!deviceConnected) {
+        fadeInAndOutLED(0, 0, 255); // Blue fade when disconnected
+    }
+}
+
+void fadeBlueLED() {
+    fadeInAndOutLED(0, 0, 255); // Blue color
+}
+
+//Temp Non-Blocking Variables
+unsigned long temperatureMillis = 0;
+const unsigned long temperatureInterval = 1000; // 1 second interval for temperature update
+
+void updateTemperature() {
+  unsigned long currentMillis = millis();
+
+  // Check if enough time has passed to update temperature
+  if (currentMillis - temperatureMillis >= temperatureInterval) {
+    temperatureMillis = currentMillis;
+
+    if (deviceConnected) {
+      // Read the ESP32's internal temperature
+      float temperature = temperatureRead();  // Temperature in Celsius
+
+      // Convert temperature to string and send over BLE
+      char tempStr[12];
+      snprintf(tempStr, sizeof(tempStr), "%.1f°C", temperature);
+      pTemperatureCharacteristic->setValue(tempStr);
+
+      // Optional: Debug output to serial
+      Serial.print("Internal Temperature: ");
+      Serial.println(tempStr);
+    }
+  }
 }
 
 // Bitmap Drawing Functions ------------------------------------------------
@@ -719,14 +942,75 @@ void patternPlasma() {
 void setup() {
 
   Serial.begin(BAUD_RATE);
-  Serial.println(F("*****************************************************"));
-  Serial.println(F("*                      LumiFur                      *"));
-  Serial.println(F("*****************************************************"));
+  Serial.print(F("*****************************************************"));
+  Serial.print(F("*                      LumiFur                      *"));
+  Serial.print(F("*****************************************************"));
+    
+    Serial.print("Initializing BLE...");
+    NimBLEDevice::init("LumiFur_Controller");
+    NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
+    NimBLEDevice::setSecurityAuth(/*BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_MITM |*/ BLE_SM_PAIR_AUTHREQ_SC);
+    pServer = NimBLEDevice::createServer();
+    pServer->setCallbacks(&serverCallbacks);
+
+    NimBLEService* pService = pServer->createService(SERVICE_UUID);
+    
+     // Face control characteristic with encryption
+    NimBLECharacteristic* pFaceCharacteristic =
+      pService->createCharacteristic(
+        CHARACTERISTIC_UUID,
+        NIMBLE_PROPERTY::READ |
+        NIMBLE_PROPERTY::WRITE |
+        NIMBLE_PROPERTY::NOTIFY |
+        NIMBLE_PROPERTY::READ_ENC | // only allow reading if paired / encrypted
+        NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
+    );
+    
+    // Set initial view value
+    uint8_t viewValue = static_cast<uint8_t>(currentView);
+    pFaceCharacteristic->setValue(&viewValue, 1);
+    pFaceCharacteristic->setCallbacks(&chrCallbacks);
+
+    // Temperature characteristic with encryption
+    pTemperatureCharacteristic = 
+      pService->createCharacteristic(
+        TEMPERATURE_CHARACTERISTIC_UUID,
+        NIMBLE_PROPERTY::READ |
+        NIMBLE_PROPERTY::NOTIFY |
+        NIMBLE_PROPERTY::READ_ENC
+    );
+
+    // Set up descriptors
+    NimBLE2904* pFormat2904 = pFaceCharacteristic->create2904();
+    pFormat2904->setFormat(NimBLE2904::FORMAT_UINT8);
+    pFormat2904->setUnit(0x2700); // Unit-less number
+    pFormat2904->setCallbacks(&dscCallbacks);
+
+    // Add user description descriptor
+    NimBLEDescriptor* pDesc = 
+        pFaceCharacteristic->createDescriptor(
+            "2901",
+            NIMBLE_PROPERTY::READ,
+            20
+        );
+    pDesc->setValue("Face Control");
+
+    //nimBLEService* pBaadService = pServer->createService("BAAD");
+    pService->start();
+
+    /** Create an advertising instance and add the services to the advertised data */
+    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+    pAdvertising->setName("LumiFur_Controller");
+    pAdvertising->addServiceUUID(pService->getUUID());
+    pAdvertising->enableScanResponse(true);
+    pAdvertising->start();
+
+    Serial.println("BLE setup complete - advertising started");
+
 
   // redefine pins if required
   //HUB75_I2S_CFG::i2s_pins _pins={R1, G1, BL1, R2, G2, BL2, CH_A, CH_B, CH_C, CH_D, CH_E, LAT, OE, CLK};
   //HUB75_I2S_CFG mxconfig(PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER);
-
   HUB75_I2S_CFG::i2s_pins _pins={R1_PIN, G1_PIN, B1_PIN, R2_PIN, G2_PIN, B2_PIN, A_PIN, B_PIN, C_PIN, D_PIN, E_PIN, LAT_PIN, OE_PIN, CLK_PIN};
 
   // Module configuration
@@ -767,7 +1051,10 @@ dma_display->flipDMABuffer();
 // Initialize accelerometer if MATRIXPORTAL_ESP32S3 is used
 #if defined (ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
   //Adafruit_LIS3DH accel = Adafruit_LIS3DH();
+  statusPixel.begin(); // Initialize NeoPixel status light
 #endif
+
+//setupBLE();
 
 randomSeed(analogRead(0)); // Seed the random number generator for randomized eye blinking
 
@@ -872,7 +1159,7 @@ if (view != previousView) { // Check if the view has changed
     {
       displayLoadingBar(); // Update the loading bar
       loadingProgress++;   // Increment progress
-      delay(50);           // Adjust speed of loading animation
+      //delay(50);           // Adjust speed of loading animation
     } else {
       // Reset or transition to another view
       loadingProgress = 0;
@@ -960,26 +1247,51 @@ if (view != previousView) { // Check if the view has changed
 
 
 void loop(void) {
-  // Non-blocking display update for the current view
+  
+  bool isConnected = NimBLEDevice::getServer()->getConnectedCount() > 0;
+  
+  // Always handle BLE and temperature updates first
+  handleBLEConnection();
+  updateTemperature();
+
+  // Handle view changes from any source (BLE/buttons)
+  static int lastView = -1;
+  bool viewChanged = false;
+
+  // Check button presses (outside frame timing)
+  if (debounceButton(BUTTON_UP)) {
+  currentView = (currentView + 1) % totalViews;
+  viewChanged = true;
+  }
+  if (debounceButton(BUTTON_DOWN)) {
+  currentView = (currentView - 1 + totalViews) % totalViews;
+  viewChanged = true;
+  }
+
+  if(viewChanged && isConnected) {
+  uint8_t viewValue = static_cast<uint8_t>(currentView);
+  pFaceCharacteristic->setValue(&viewValue, 1);
+  pFaceCharacteristic->notify();
+  }
+
+  // Frame rate controlled updates
   static unsigned long lastFrameTime = 0;
-  unsigned long currentTime = millis();
-
-  // Target frame duration (e.g., 30 FPS = ~33ms per frame)
-  const unsigned long frameDuration = 11;
-
-// Check if it's time for the next frame
-  if (currentTime - lastFrameTime >= frameDuration) {
-    lastFrameTime = currentTime;
-
-    if (debounceButton(BUTTON_UP)) {
-      currentView = (currentView + 1) % totalViews;
-    }
-    if (debounceButton(BUTTON_DOWN)) {
-      currentView = (currentView - 1 + totalViews) % totalViews;
-    }
+  const unsigned long frameInterval = 11; // ~90 FPS
+  
+  if(millis() - lastFrameTime >= frameInterval) {
+  lastFrameTime = millis();
+  
+  // Only update if view needs animation refresh
+  switch(currentView) {
+    case 0:  // Scrolling text
+    case 1:  // Loading bar
+    case 2:  // Plasma
+    case 4:  // Normal face
+    case 5:  // Blush face
+    case 9:  // Spiral eyes
+    case 10: // Plasma test
     displayCurrentView(currentView);
-
-    dma_display->clearScreen();
-    //dma_display->flipDMABuffer();
+    break;
+  }
   }
 }
