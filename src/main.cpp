@@ -29,13 +29,14 @@
 // BLE UUIDs
 #define SERVICE_UUID        "01931c44-3867-7740-9867-c822cb7df308"
 #define CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09fe"
+#define CONFIG_CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09ff"
 #define TEMPERATURE_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9774-18350e3e27db"  // Unique UUID for temperature data
 #define ULTRASOUND_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9732-12460e3a35db"
 
 //#define DESC_USER_DESC_UUID  0x2901  // User Description descriptor
 //#define DESC_FORMAT_UUID     0x2904  // Presentation Format descriptor
 
-// HUB75E pinout
+// HUB75E port pinout
 // R1 | G1
 // B1 | GND
 // R2 | G2
@@ -89,7 +90,22 @@
   #include <Adafruit_NeoPixel.h>    // Library for built-in NeoPixel
   #define STATUS_LED_PIN 4
   Adafruit_NeoPixel statusPixel(1, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
-
+#elif defined(ARDUINO_ADAFRUIT_METRO_ESP32S3) //Metro ESP32-S3
+  #define R1_PIN 2
+  #define G1_PIN 3
+  #define B1_PIN 4
+  #define R2_PIN 5
+  #define G2_PIN 6
+  #define B2_PIN 7
+  #define A_PIN  A0
+  #define B_PIN  A1
+  #define C_PIN  A2
+  #define D_PIN  A3
+  #define E_PIN  21 
+  #define LAT_PIN 10
+  #define OE_PIN  9
+  #define CLK_PIN 8
+  #define PIN_E 9 // E pin for 64px high panels
 #elif defined(__SAMD51__) // M4 Metro Variants (Express, AirLift)
   //
 #elif defined(_SAMD21_) // Feather M0 variants
@@ -108,6 +124,23 @@
   // 25, 26 (A0, A1)
   // 18, 5, 9 (MOSI, SCK, MISO)
   // 22, 23 (SCL, SDA)
+#elif defined (FREENOVE_ESP32_S3_WROOM)
+// 'Safe' pins, not overlapping any peripherals:
+  #define R1_PIN 2
+  #define G1_PIN 3
+  #define B1_PIN 4
+  #define R2_PIN 5
+  #define G2_PIN 6
+  #define B2_PIN 7
+  #define A_PIN  A0
+  #define B_PIN  A1
+  #define C_PIN  A2
+  #define D_PIN  A3
+  #define E_PIN  21 
+  #define LAT_PIN 10
+  #define OE_PIN  9
+  #define CLK_PIN 8
+  #define PIN_E 9 // E pin for 64px high panels
 #elif defined(ARDUINO_TEENSY40)
   //
 #elif defined(ARDUINO_TEENSY41)
@@ -245,8 +278,9 @@ bool oldDeviceConnected = false;
 // BLE Server pointers
 NimBLEServer* pServer = nullptr;
 NimBLECharacteristic* pCharacteristic = nullptr;
-NimBLECharacteristic* pTemperatureCharacteristic = nullptr;
 NimBLECharacteristic* pFaceCharacteristic = nullptr;
+NimBLECharacteristic* pTemperatureCharacteristic = nullptr;
+NimBLECharacteristic* pConfigCharacteristic = nullptr;
 
 // Class to handle BLE server callbacks
 class ServerCallbacks : public NimBLEServerCallbacks {
@@ -318,7 +352,7 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
         std::string value = pCharacteristic->getValue();
         if(value.length() > 0) {
             uint8_t newView = value[0];
-            if (newView >= 1 && newView <=12 != currentView) {
+            if (newView >= 1 && newView <=12 && newView != currentView) {
                 currentView = newView;
                 //viewChanged = true;
                 Serial.printf("Write request - new view: %d\n", currentView);
@@ -747,7 +781,7 @@ void drawRotatedBitmap(int16_t x, int16_t y, const uint8_t *bitmap,
 void updateRotatingSpiral() {
   static unsigned long lastUpdate = 0;
   static float currentAngle = 0;
-  const unsigned long frameInterval = 11; // ~30 FPS (33ms per frame)
+  const unsigned long frameInterval = 11; // ~90 FPS (11ms per frame)
   unsigned long currentTime = millis();
 
   if (currentTime - lastUpdate < frameInterval) return;
@@ -978,6 +1012,16 @@ void setup() {
         NIMBLE_PROPERTY::READ |
         NIMBLE_PROPERTY::NOTIFY |
         NIMBLE_PROPERTY::READ_ENC
+    );
+    
+    // Config characteristic with encryption
+    pConfigCharacteristic = pService->createCharacteristic(
+        CONFIG_CHARACTERISTIC_UUID,
+        NIMBLE_PROPERTY::READ |
+        NIMBLE_PROPERTY::WRITE |
+        NIMBLE_PROPERTY::NOTIFY |
+        NIMBLE_PROPERTY::READ_ENC |
+        NIMBLE_PROPERTY::WRITE_ENC
     );
 
     // Set up descriptors
@@ -1214,7 +1258,6 @@ if (view != previousView) { // Check if the view has changed
   case 9: // Spiral eyes
     protoFaceTest();
     updateRotatingSpiral();
-    //protoFaceTest();
 //  updateBlinkAnimation(); // Update blink animation progress
     break;
 
@@ -1224,15 +1267,11 @@ if (view != previousView) { // Check if the view has changed
     updateBlinkAnimation();
     break;
 /*
-  case 10: // Slant eyes
+  case 10: // UwU eyes
     protoFaceTest();
     updateBlinkAnimation(); // Update blink animation progress
     break;
   
-  case 11: // Spiral eyes
-    protoFaceTest();
-    updateBlinkAnimation(); // Update blink animation progress
-    break;
 */
   default:
       // Optional: Handle unsupported views
