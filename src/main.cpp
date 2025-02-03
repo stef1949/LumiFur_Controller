@@ -399,10 +399,6 @@ class DescriptorCallbacks : public NimBLEDescriptorCallbacks {
 //////////////////BLE SETUP/////////////////
 ////////////////////////////////////////////
 
-// Initializes the BLE (Bluetooth Low Energy) functionality, sets up the BLE server, characteristics, and starts advertising.
-void setupBLE() {
-  
-}
 
 //non-blocking LED status functions (Neopixel)
 void fadeInAndOutLED(uint8_t r, uint8_t g, uint8_t b) {
@@ -464,6 +460,7 @@ void updateTemperature() {
       char tempStr[12];
       snprintf(tempStr, sizeof(tempStr), "%.1f°C", temperature);
       pTemperatureCharacteristic->setValue(tempStr);
+      pTemperatureCharacteristic->notify();
 
       // Optional: Debug output to serial
       Serial.print("Internal Temperature: ");
@@ -922,8 +919,8 @@ void protoFaceTest() {
    // Draw Nose
    //drawXbm565(56, 2, 8, 8, nose, dma_display->color565(255, 255, 255));
    //drawXbm565(64, 2, 8, 8, noseL, dma_display->color565(255, 255, 255));
-   drawPlasmaXbm(56, 10, 8, 8, nose, 64, 2.0);
-   drawPlasmaXbm(64, 10, 8, 8, noseL, 64, 2.0);
+   //drawPlasmaXbm(56, 10, 8, 8, nose, 64, 2.0);
+   //drawPlasmaXbm(64, 10, 8, 8, noseL, 64, 2.0);
    // Draw blinking eyes
    blinkingEyes();
 
@@ -1098,8 +1095,6 @@ dma_display->flipDMABuffer();
   statusPixel.begin(); // Initialize NeoPixel status light
 #endif
 
-//setupBLE();
-
 randomSeed(analogRead(0)); // Seed the random number generator for randomized eye blinking
 
   // Set initial plasma color palette
@@ -1197,7 +1192,7 @@ if (view != previousView) { // Check if the view has changed
     break;
 
   case 1: // Loading bar effect
-  dma_display->clearScreen();
+  //dma_display->clearScreen();
     displayLoadingBar();
     if (loadingProgress <= loadingMax)
     {
@@ -1218,7 +1213,7 @@ if (view != previousView) { // Check if the view has changed
     break;
 
   case 3:
-    dma_display->clearScreen(); // Clear the display
+    //dma_display->clearScreen(); // Clear the display
     drawTransFlag();
     //delay(20);
     //dma_display->flipDMABuffer();
