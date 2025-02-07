@@ -914,7 +914,7 @@ dma_display->clearScreen(); // Clear the display
 }
 
 void protoFaceTest() {
-  dma_display->clearScreen(); // Clear the display
+  //dma_display->clearScreen(); // Clear the display
 
    // Draw Nose
    //drawXbm565(56, 2, 8, 8, nose, dma_display->color565(255, 255, 255));
@@ -935,12 +935,13 @@ void protoFaceTest() {
    drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 0, 1.0);     // Right eye
    drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0); // Left eye (phase offset)
 
+  if (currentView == 5) { // Moved before drawing nose to prevent clipping of partial pixel clearing
+   drawBlush();
+   }
+
    drawPlasmaXbm(56, 10, 8, 8, nose, 64, 2.0);
    drawPlasmaXbm(64, 10, 8, 8, noseL, 64, 2.0);
 
-   if (currentView == 5) {
-   drawBlush();
-   }
 }
 
 void patternPlasma() {
@@ -1314,7 +1315,7 @@ void loop(void) {
   
   if(millis() - lastFrameTime >= frameInterval) {
   lastFrameTime = millis();
-  
+  /*
   // Only update if view needs animation refresh
   switch(currentView) {
     case 0:  // Scrolling text
@@ -1327,5 +1328,7 @@ void loop(void) {
     displayCurrentView(currentView);
     break;
   }
+  */
+  displayCurrentView(currentView);
   }
 }
