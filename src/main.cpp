@@ -11,9 +11,10 @@
 #define DEBUG_VIEWS
 
 #include <Arduino.h>
+#include <Adafruit_GFX.h>
 #include "xtensa/core-macros.h"
 #include "bitmaps.h"
-#include "fonts/lequahyper20pt7b.h"       // Stylized font
+#include "customFonts/lequahyper20pt7b.h"       // Stylized font
 #include <fonts/FreeSansBold18pt7b.h>     // Larger font
 //#include <Wire.h>                       // For I2C sensors
 #ifdef VIRTUAL_PANE
