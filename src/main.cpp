@@ -983,7 +983,6 @@ void setup() {
     NimBLEDevice::init("LumiFur_Controller");
     NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
     NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
-    NimBLEDevice::setBondStore(new NimBLEPrefsBondStore()); // Use persistent storage for bonds
     pServer = NimBLEDevice::createServer();
     pServer->setCallbacks(&serverCallbacks);
 
