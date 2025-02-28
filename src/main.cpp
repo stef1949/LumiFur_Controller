@@ -28,11 +28,11 @@
 #include <NimBLEDevice.h>
 
 // BLE UUIDs
-#define SERVICE_UUID        "01931c44-3867-7740-9867-c822cb7df308"
-#define CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09fe"
-#define CONFIG_CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09ff"
-#define TEMPERATURE_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9774-18350e3e27db"  // Unique UUID for temperature data
-#define ULTRASOUND_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9732-12460e3a35db"
+#define SERVICE_UUID                    "01931c44-3867-7740-9867-c822cb7df308"
+#define CHARACTERISTIC_UUID             "01931c44-3867-7427-96ab-8d7ac0ae09fe"
+#define CONFIG_CHARACTERISTIC_UUID      "01931c44-3867-7427-96ab-8d7ac0ae09ff"
+#define TEMPERATURE_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9774-18350e3e27db"
+#define ULTRASOUND_CHARACTERISTIC_UUID  "01931c44-3867-7b5d-9732-12460e3a35db"
 
 //#define DESC_USER_DESC_UUID  0x2901  // User Description descriptor
 //#define DESC_FORMAT_UUID     0x2904  // Presentation Format descriptor
@@ -463,10 +463,10 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
         }
     }
 
-    void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
+  void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
         Serial.printf("Notification/Indication return code: %d, %s\n", code, NimBLEUtils::returnCodeToString(code));
     }
-    void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) override {
+  void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) override {
         std::string str  = "Client ID: ";
         str             += connInfo.getConnHandle();
         str             += " Address: ";
@@ -1200,7 +1200,7 @@ void setup() {
     Serial.println("BLE setup complete - advertising started");
 
 
-  // redefine pins if required
+  //Redefine pins if required
   //HUB75_I2S_CFG::i2s_pins _pins={R1, G1, BL1, R2, G2, BL2, CH_A, CH_B, CH_C, CH_D, CH_E, LAT, OE, CLK};
   //HUB75_I2S_CFG mxconfig(PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER);
   HUB75_I2S_CFG::i2s_pins _pins={R1_PIN, G1_PIN, B1_PIN, R2_PIN, G2_PIN, B2_PIN, A_PIN, B_PIN, C_PIN, D_PIN, E_PIN, LAT_PIN, OE_PIN, CLK_PIN};
