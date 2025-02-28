@@ -87,7 +87,9 @@
   // Button pins
   #define BUTTON_UP 6
   #define BUTTON_DOWN 7
-  //#include <Adafruit_LIS3DH.h>      // Library for built-in For accelerometer
+  #include <Wire.h>                 // For I2C sensors
+  //#include <SPI.h>                  // For SPI sensors
+  #include <Adafruit_LIS3DH.h>      // Library for built-in For accelerometer
   #include <Adafruit_NeoPixel.h>    // Library for built-in NeoPixel
   #define STATUS_LED_PIN 4
   Adafruit_NeoPixel statusPixel(1, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
@@ -268,6 +270,19 @@ bool debounceButton(int pin) {
   return false;
 }
 
+// Sleep mode variables
+#define SLEEP_TIMEOUT_MS 300000  // 5 minutes (300,000 ms)
+bool sleepModeActive = false;
+unsigned long lastActivityTime = 0;
+float prevAccelX = 0, prevAccelY = 0, prevAccelZ = 0;
+const float MOVEMENT_THRESHOLD = 0.15; // Adjust based on sensitivity needed
+uint8_t preSleepView = 4;  // Store the view before sleep
+uint8_t sleepBrightness = 15; // Brightness level during sleep (0-255)
+uint8_t normalBrightness = 100; // Normal brightness level
+unsigned long sleepFrameInterval = 11; // Frame interval in ms (will be changed during sleep)
+
+// Accelerometer object declaration
+Adafruit_LIS3DH accel;
 
 ////////////////////////////////////////////
 /////////////////BLE CONFIG/////////////////
@@ -339,7 +354,85 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
 } serverCallbacks;
 
+// Power management scopes
+void reduceCPUSpeed() {
+  // Set CPU frequency to lowest setting (80MHz vs 240MHz default)
+  setCpuFrequencyMhz(80);
+  Serial.println("CPU frequency reduced to 80MHz for power saving");
+}
+
+void restoreNormalCPUSpeed() {
+  // Set CPU frequency back to default (240MHz)
+  setCpuFrequencyMhz(240);
+  Serial.println("CPU frequency restored to 240MHz");
+}
+
 void displayCurrentView(int view);
+
+//Temp Non-Blocking Variables
+unsigned long temperatureMillis = 0;
+const unsigned long temperatureInterval = 1000; // 1 second interval for temperature update
+
+void updateTemperature() {
+  unsigned long currentMillis = millis();
+
+  // Check if enough time has passed to update temperature
+  if (currentMillis - temperatureMillis >= temperatureInterval) {
+    temperatureMillis = currentMillis;
+
+    if (deviceConnected) {
+      // Read the ESP32's internal temperature
+      float temperature = temperatureRead();  // Temperature in Celsius
+
+      // Convert temperature to string and send over BLE
+      char tempStr[12];
+      snprintf(tempStr, sizeof(tempStr), "%.1f°C", temperature);
+      pTemperatureCharacteristic->setValue(tempStr);
+      pTemperatureCharacteristic->notify();
+
+      // Optional: Debug output to serial
+      Serial.print("Internal Temperature: ");
+      Serial.println(tempStr);
+    }
+  }
+}
+
+void wakeFromSleepMode() {
+  if (!sleepModeActive) return; // Already awake
+  
+  Serial.println("Waking from sleep mode");
+  sleepModeActive = false;
+  currentView = preSleepView;  // Restore previous view
+  
+  // Restore normal CPU speed
+  restoreNormalCPUSpeed();
+  
+  // Restore normal frame rate
+  sleepFrameInterval = 11; // Back to ~90 FPS
+  
+  // Restore normal brightness
+  dma_display->setBrightness8(normalBrightness);
+  
+  lastActivityTime = millis(); // Reset activity timer
+  
+  // Notify all clients if connected
+  if (deviceConnected) {
+    // Also send current view back to the app
+    uint8_t viewValue = static_cast<uint8_t>(currentView);
+    pFaceCharacteristic->setValue(&viewValue, 1);
+    pFaceCharacteristic->notify();
+    
+    // Send a temperature update
+    updateTemperature();
+  }
+  
+  // Restore normal BLE advertising if not connected
+  if (!deviceConnected) {
+    NimBLEDevice::getAdvertising()->setMinInterval(160); // 100 ms (default)
+    NimBLEDevice::getAdvertising()->setMaxInterval(240); // 150 ms (default)
+    NimBLEDevice::startAdvertising();
+  }
+}
 
 // Class to handle characteristic callbacks
 class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
@@ -353,11 +446,19 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
         std::string value = pCharacteristic->getValue();
         if(value.length() > 0) {
             uint8_t newView = value[0];
-            if (newView >= 1 && newView <=12 && newView != currentView) {
-                currentView = newView;
-                //viewChanged = true;
-                Serial.printf("Write request - new view: %d\n", currentView);
-                pCharacteristic->notify();
+
+          // Command to wake from sleep mode (e.g., sending 255)
+          if (newView == 255 && sleepModeActive) {
+            sleepModeActive = false;
+            wakeFromSleepMode();
+            return;
+          }
+          // Normal view change
+          if (newView >= 1 && newView <=12 && newView != currentView) {
+              currentView = newView;
+              lastActivityTime = millis(); // BLE command counts as activity
+              Serial.printf("Write request - new view: %d\n", currentView);
+              pCharacteristic->notify();
             }
         }
     }
@@ -440,34 +541,6 @@ void handleBLEConnection() {
 
 void fadeBlueLED() {
     fadeInAndOutLED(0, 0, 255); // Blue color
-}
-
-//Temp Non-Blocking Variables
-unsigned long temperatureMillis = 0;
-const unsigned long temperatureInterval = 1000; // 1 second interval for temperature update
-
-void updateTemperature() {
-  unsigned long currentMillis = millis();
-
-  // Check if enough time has passed to update temperature
-  if (currentMillis - temperatureMillis >= temperatureInterval) {
-    temperatureMillis = currentMillis;
-
-    if (deviceConnected) {
-      // Read the ESP32's internal temperature
-      float temperature = temperatureRead();  // Temperature in Celsius
-
-      // Convert temperature to string and send over BLE
-      char tempStr[12];
-      snprintf(tempStr, sizeof(tempStr), "%.1f°C", temperature);
-      pTemperatureCharacteristic->setValue(tempStr);
-      pTemperatureCharacteristic->notify();
-
-      // Optional: Debug output to serial
-      Serial.print("Internal Temperature: ");
-      Serial.println(tempStr);
-    }
-  }
 }
 
 // Bitmap Drawing Functions ------------------------------------------------
@@ -972,6 +1045,82 @@ void patternPlasma() {
   }
 }
 
+void displaySleepMode() {
+  static unsigned long lastBlinkTime = 0;
+  static bool eyesOpen = false;
+  static float animationPhase = 0;
+  static unsigned long lastAnimTime = 0;
+  
+  // Apply brightness adjustment for breathing effect
+  static unsigned long lastBreathTime = 0;
+  static float brightness = 0;
+  static float breathingDirection = 1;  // 1 for increasing, -1 for decreasing
+  
+  // Update breathing effect
+  if (millis() - lastBreathTime >= 50) {
+    lastBreathTime = millis();
+    
+    // Update breathing brightness
+    brightness += breathingDirection * 0.01;  // Slow breathing effect
+    
+    // Reverse direction at limits
+    if (brightness >= 1.0) {
+      brightness = 1.0;
+      breathingDirection = -1;
+    } else if (brightness <= 0.1) {  // Keep a minimum brightness
+      brightness = 0.1;
+      breathingDirection = 1;
+    }
+    
+    // Apply breathing effect to overall brightness
+    uint8_t currentBrightness = sleepBrightness * brightness;
+    dma_display->setBrightness8(currentBrightness);
+  }
+  
+  dma_display->clearScreen();
+  
+  // Simple animation for floating Zs
+  if (millis() - lastAnimTime > 100) {
+    animationPhase += 0.1;
+    lastAnimTime = millis();
+  }
+  
+  // Draw animated ZZZs with offset based on animation phase
+  int offset1 = sin8(animationPhase * 20) / 16;
+  int offset2 = sin8((animationPhase + 0.3) * 20) / 16;
+  int offset3 = sin8((animationPhase + 0.6) * 20) / 16;
+  
+  drawXbm565(45, 2 + offset1, 8, 8, sleepZ1, dma_display->color565(100, 100, 255));
+  drawXbm565(60, 0 + offset2, 8, 8, sleepZ2, dma_display->color565(150, 150, 255));
+  drawXbm565(75, 1 + offset3, 8, 8, sleepZ3, dma_display->color565(200, 200, 255));
+  
+  // Draw closed or slightly open eyes
+  if (millis() - lastBlinkTime > 4000) {  // Occasional slow blink
+    eyesOpen = !eyesOpen;
+    lastBlinkTime = millis();
+  }
+  
+  // Draw nose
+  drawXbm565(56, 15, 8, 8, nose, dma_display->color565(100, 100, 100));
+  drawXbm565(64, 15, 8, 8, noseL, dma_display->color565(100, 100, 100));
+  
+  if (eyesOpen) {
+    // Draw slightly open eyes - just a small slit
+    dma_display->fillRect(20, 12, 20, 2, dma_display->color565(150, 150, 150));
+    dma_display->fillRect(90, 12, 20, 2, dma_display->color565(150, 150, 150));
+  } else {
+    // Draw closed eyes
+    dma_display->drawLine(15, 12, 40, 12, dma_display->color565(150, 150, 150));
+    dma_display->drawLine(88, 12, 113, 12, dma_display->color565(150, 150, 150));
+  }
+  
+  // Draw sleeping mouth (slight curve)
+  drawXbm565(0, 20, 64, 8, maw2Closed, dma_display->color565(120, 120, 120));
+  drawXbm565(64, 20, 64, 8, maw2ClosedL, dma_display->color565(120, 120, 120));
+  
+  dma_display->flipDMABuffer();
+}
+
 void setup() {
 
   Serial.begin(BAUD_RATE);
@@ -1088,16 +1237,28 @@ dma_display->flipDMABuffer();
   if (ledbuff == nullptr) {
     Serial.println("Memory allocation for ledbuff failed!");
     while (1); // Stop execution
-  }
-*/
-
 // Initialize accelerometer if MATRIXPORTAL_ESP32S3 is used
 #if defined (ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
-  //Adafruit_LIS3DH accel = Adafruit_LIS3DH();
+  accel = Adafruit_LIS3DH(); // Initialize the previously declared object
+  statusPixel.begin(); // Initialize NeoPixel status light
+#endif
+  Adafruit_LIS3DH accel = Adafruit_LIS3DH();
   statusPixel.begin(); // Initialize NeoPixel status light
 #endif
 
-randomSeed(analogRead(0)); // Seed the random number generator for randomized eye blinking
+if (!accel.begin(0x19)) {  // Default I2C address for LIS3DH on MatrixPortal
+  Serial.println("Could not find accelerometer, check wiring!");
+  err(250);  // Fast bink = I2C error
+} else {
+  Serial.println("Accelerometer found!");
+  accel.setRange(LIS3DH_RANGE_2_G);  // 2G range is sufficient for motion detection
+}
+lastActivityTime = millis(); // Initialize the activity timer
+
+normalBrightness = 100; // or whatever your default is
+dma_display->setBrightness8(normalBrightness);
+
+randomSeed(analogRead(0)); // Seed the random number generator for randomized eye blinking, I dont remember why this is here...
 
   // Set initial plasma color palette
   currentPalette = RainbowColors_p;
@@ -1145,6 +1306,12 @@ void displayCurrentView(int view) {
   const unsigned long frameInterval = 11; // Consistent 30 FPS
   static int previousView = -1; // Track the last active view
 
+  // If we're in sleep mode, don't display the normal view
+  if (sleepModeActive) {
+    displaySleepMode();
+    return;
+  }
+  
    if (millis() - lastFrameTime < frameInterval) return; // Skip frame if not time yet
   lastFrameTime = millis(); // Update last frame time
 
@@ -1281,6 +1448,90 @@ if (view != previousView) { // Check if the view has changed
   dma_display->flipDMABuffer();
 }
 
+// Add with your other utility functions
+bool detectMotion() {
+  accel.read();
+  
+  float x = accel.x / 1000.0;  // Convert to G
+  float y = accel.y / 1000.0;
+  float z = accel.z / 1000.0;
+  
+  // Calculate the movement delta from last reading
+  float deltaX = fabs(x - prevAccelX);
+  float deltaY = fabs(y - prevAccelY);
+  float deltaZ = fabs(z - prevAccelZ);
+  
+  // Store current values for next comparison
+  prevAccelX = x;
+  prevAccelY = y;
+  prevAccelZ = z;
+  
+  // Check if movement exceeds threshold
+  if (deltaX > MOVEMENT_THRESHOLD || 
+      deltaY > MOVEMENT_THRESHOLD || 
+      deltaZ > MOVEMENT_THRESHOLD) {
+    return true;
+  }
+  
+  return false;
+}
+
+void enterSleepMode() {
+  Serial.println("Entering sleep mode");
+  sleepModeActive = true;
+  preSleepView = currentView;  // Save current view
+  
+  // Lower display brightness
+  dma_display->setBrightness8(sleepBrightness);
+  
+  // Reduce CPU speed for power saving
+  reduceCPUSpeed();
+  
+  // Reduce the update rate during sleep
+  sleepFrameInterval = 100; // 10 FPS during sleep to save power
+  
+  // Notify all clients of sleep mode if connected
+  if (deviceConnected) {
+    // Send a message through the temperature characteristic
+    char sleepMsg[] = "Sleep Mode Active";
+    pTemperatureCharacteristic->setValue(sleepMsg);
+    pTemperatureCharacteristic->notify();
+  }
+  
+  // Additional sleep actions
+  if (!deviceConnected) {
+    // Increase BLE advertising interval to save power during sleep
+    NimBLEDevice::getAdvertising()->setMinInterval(1600); // 1000 ms (units of 0.625 ms)
+    NimBLEDevice::getAdvertising()->setMaxInterval(2000); // 1250 ms (units of 0.625 ms)
+    NimBLEDevice::startAdvertising();
+  }
+}
+
+void checkSleepMode() {
+  static unsigned long lastAccelCheck = 0;
+  const unsigned long accelCheckInterval = 1000; // Check motion once per second to save power
+  
+  // Only check accelerometer periodically to save power
+  if (millis() - lastAccelCheck >= accelCheckInterval) {
+    lastAccelCheck = millis();
+    
+    // Check for motion
+    if (detectMotion()) {
+      lastActivityTime = millis();
+      
+      // If we were in sleep mode, wake up
+      if (sleepModeActive) {
+        wakeFromSleepMode();
+      }
+    } 
+    else {
+      // Check if it's time to enter sleep mode
+      if (!sleepModeActive && (millis() - lastActivityTime > SLEEP_TIMEOUT_MS)) {
+        enterSleepMode();
+      }
+    }
+  }
+}
 
 void loop(void) {
   
@@ -1290,10 +1541,17 @@ void loop(void) {
   handleBLEConnection();
   updateTemperature();
 
+  // Check for sleep mode (only on MatrixPortal ESP32-S3)
+  #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
+    checkSleepMode();
+  #endif
+
   // Handle view changes from any source (BLE/buttons)
   static int lastView = -1;
   bool viewChanged = false;
 
+  // Only check buttons if not in sleep mode
+  if (!sleepModeActive) {
   // Check button presses (outside frame timing)
   if (debounceButton(BUTTON_UP)) {
   currentView = (currentView + 1) % totalViews;
@@ -1309,13 +1567,20 @@ void loop(void) {
   pFaceCharacteristic->setValue(&viewValue, 1);
   pFaceCharacteristic->notify();
   }
+}
 
   // Frame rate controlled updates
   static unsigned long lastFrameTime = 0;
-  const unsigned long frameInterval = 11; // ~90 FPS
+  const unsigned long currentFrameInterval = sleepModeActive ? sleepFrameInterval : 11;
   
-  if(millis() - lastFrameTime >= frameInterval) {
+  if(millis() - lastFrameTime >= currentFrameInterval) {
   lastFrameTime = millis();
+  // If in sleep mode, display the sleep screen instead of the normal view
+  if (sleepModeActive) {
+    displaySleepMode();
+  } else {
+    displayCurrentView(currentView);
+  }
   /*
   // Only update if view needs animation refresh
   switch(currentView) {
@@ -1330,6 +1595,5 @@ void loop(void) {
     break;
   }
   */
-  displayCurrentView(currentView);
   }
 }
