@@ -1141,8 +1141,8 @@ void setup() {
     NimBLECharacteristic* pFaceCharacteristic =
       pService->createCharacteristic(
         CHARACTERISTIC_UUID,
-        NIMBLE_PROPERTY::READ |
-        NIMBLE_PROPERTY::WRITE |
+        //NIMBLE_PROPERTY::READ |
+        //NIMBLE_PROPERTY::WRITE |
         NIMBLE_PROPERTY::NOTIFY |
         NIMBLE_PROPERTY::READ_ENC | // only allow reading if paired / encrypted
         NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
@@ -1165,8 +1165,8 @@ void setup() {
     // Config characteristic with encryption
     pConfigCharacteristic = pService->createCharacteristic(
         CONFIG_CHARACTERISTIC_UUID,
-        NIMBLE_PROPERTY::READ |
-        NIMBLE_PROPERTY::WRITE |
+        //NIMBLE_PROPERTY::READ |
+        //NIMBLE_PROPERTY::WRITE |
         NIMBLE_PROPERTY::NOTIFY |
         NIMBLE_PROPERTY::READ_ENC |
         NIMBLE_PROPERTY::WRITE_ENC
