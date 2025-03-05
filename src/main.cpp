@@ -371,7 +371,7 @@ void displayCurrentView(int view);
 
 //Temp Non-Blocking Variables
 unsigned long temperatureMillis = 0;
-const unsigned long temperatureInterval = 1000; // 1 second interval for temperature update
+const unsigned long temperatureInterval = 5000; // 1 second interval for temperature update
 
 void updateTemperature() {
   unsigned long currentMillis = millis();
@@ -1157,9 +1157,9 @@ void setup() {
     pTemperatureCharacteristic = 
       pService->createCharacteristic(
         TEMPERATURE_CHARACTERISTIC_UUID,
-        NIMBLE_PROPERTY::READ |
+        //NIMBLE_PROPERTY::READ |
         NIMBLE_PROPERTY::NOTIFY |
-        NIMBLE_PROPERTY::READ_ENC
+        //NIMBLE_PROPERTY::READ_ENC
     );
     
     // Config characteristic with encryption
