@@ -1,5 +1,6 @@
-![LumiFur Controller](https://raw.githubusercontent.com/stef1949/LumiFur_Controller/refs/heads/main/docs/IMG_8739.png)
-
+<p align="center">
+<img width="300" alt="LumiFur Controller" src="https://raw.githubusercontent.com/stef1949/LumiFur_Controller/refs/heads/main/docs/IMG_8739.png">
+</p>
 <h1 align="center">
   LumiFur Controller 
 </h1>
