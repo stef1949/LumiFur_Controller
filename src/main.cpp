@@ -88,6 +88,10 @@
   #define BUTTON_DOWN 7
   #include <Wire.h>                 // For I2C sensors
   //#include <SPI.h>                  // For SPI sensors
+  #include "Adafruit_APDS9960.h"    // Library for built-in gesture sensor
+  //the pin that the interrupt is attached to
+  #define INT_PIN 3
+  Adafruit_APDS9960 apds;
   #include <Adafruit_LIS3DH.h>      // Library for built-in For accelerometer
   #include <Adafruit_NeoPixel.h>    // Library for built-in NeoPixel
   #define STATUS_LED_PIN 4
@@ -155,6 +159,10 @@
   // Pin numbers here are GP## numbers, which may be different than
   // the pins printed on some boards' top silkscreen.
 #endif
+
+////////////////////// DEBUG MODE //////////////////////
+bool debugMode = true; // Set to true to enable debug outputs
+
 
 
 // Configure for your panel(s) as appropriate!
@@ -239,11 +247,30 @@ const int maxBlinkDuration = 500;   // Maximum time for a full blink (ms)
 const int minBlinkDelay = 1000;     // Minimum time between blinks (ms)
 const int maxBlinkDelay = 5000;     // Maximum time between blinks (ms)
 
-//Blushing effect variables
-unsigned long blushFadeStartTime = 0;
-const unsigned long blushFadeDuration = 2000; // 2 seconds for full fade-in
-bool isBlushFadingIn = true;                  // Whether the blush is currently fading in
-uint8_t blushBrightness = 0;                  // Current blush brightness (0-255)
+// Define blush state using an enum
+enum BlushState {
+  BLUSH_INACTIVE,
+  BLUSH_FADE_IN,
+  BLUSH_FULL,
+  BLUSH_FADE_OUT
+};
+BlushState blushState = BLUSH_INACTIVE;
+
+// Blush effect variables
+unsigned long blushStateStartTime = 0;
+const unsigned long fadeInDuration = 2000;  // Duration for fade-in (2 seconds)
+const unsigned long fullDuration = 6000;      // Full brightness time after fade-in (6 seconds)
+// Total time from trigger to start fade-out is fadeInDuration + fullDuration = 8 seconds.
+const unsigned long fadeOutDuration = 2000;   // Duration for fade-out (2 seconds)
+bool isBlushFadingIn = false;    // Flag to indicate we are in the fade‑in phase
+
+// Blush brightness variable (0-255)
+uint8_t blushBrightness = 0;
+
+// Non-blocking sensor read interval
+unsigned long lastSensorReadTime = 0;
+const unsigned long sensorInterval = 50;  // sensor read every 50 ms
+
 
 // Variables for plasma effect
 uint16_t time_counter = 0, cycles = 0, fps = 0;
@@ -270,11 +297,14 @@ bool debounceButton(int pin) {
 }
 
 // Sleep mode variables
-#define SLEEP_TIMEOUT_MS 300000  // 5 minutes (300,000 ms)
+// Define both timeout values and select the appropriate one in setup()
+const unsigned long SLEEP_TIMEOUT_MS_DEBUG = 15000;    // 15 seconds (15,000 ms)
+const unsigned long SLEEP_TIMEOUT_MS_NORMAL = 300000; // 5 minutes (300,000 ms)
+unsigned long SLEEP_TIMEOUT_MS; // Will be set in setup() based on debugMode
 bool sleepModeActive = false;
 unsigned long lastActivityTime = 0;
 float prevAccelX = 0, prevAccelY = 0, prevAccelZ = 0;
-const float MOVEMENT_THRESHOLD = 0.15; // Adjust based on sensitivity needed
+const float MOVEMENT_THRESHOLD = 2; // Adjust based on sensitivity needed
 uint8_t preSleepView = 4;  // Store the view before sleep
 uint8_t sleepBrightness = 15; // Brightness level during sleep (0-255)
 uint8_t normalBrightness = 100; // Normal brightness level
@@ -950,21 +980,59 @@ void blinkingEyes() {
   }
 }
 
-void drawBlush() {
-  //dma_display->clearScreen();
-  // Calculate blush brightness
-  if (isBlushFadingIn) {
-    unsigned long currentTime = millis();
-    unsigned long elapsedTime = currentTime - blushFadeStartTime;
+// Function to disable/clear the blush display when the effect is over
+void disableBlush() {
+  Serial.println("Blush disabled!");
+  // Clear the blush area to ensure the effect is removed
+  dma_display->fillRect(45, 1, 18, 13, 0); // Clear right blush area
+  dma_display->fillRect(72, 1, 18, 13, 0); // Clear left blush area
+}
+
+// Update the blush effect state (non‑blocking)
+void updateBlush() {
+  unsigned long now = millis();
+  unsigned long elapsed = now - blushStateStartTime;
   
-  // Calculate blush brightness
-  if (elapsedTime <= blushFadeDuration) {
-    blushBrightness = map(elapsedTime, 0, blushFadeDuration, 0, 255); // Gradual fade-in
-  } else {
-      blushBrightness = 255; // Max brightness reached
-      isBlushFadingIn = false; // Stop fading
-    }
+  switch (blushState) {
+    case BLUSH_FADE_IN:
+      if (elapsed < fadeInDuration) {
+        // Gradually increase brightness from 0 to 255
+        blushBrightness = map(elapsed, 0, fadeInDuration, 0, 255);
+      } else {
+        blushBrightness = 255;
+        blushState = BLUSH_FULL;
+        blushStateStartTime = now;  // Restart timer for full brightness phase
+      }
+      break;
+      
+    case BLUSH_FULL:
+      if (elapsed >= fullDuration) {
+        // After 6 seconds at full brightness, start fading out
+        blushState = BLUSH_FADE_OUT;
+        blushStateStartTime = now;  // Restart timer for fade‑out
+      }
+      // Brightness remains at 255 during this phase.
+      break;
+      
+    case BLUSH_FADE_OUT:
+      if (elapsed < fadeOutDuration) {
+        // Decrease brightness gradually from 255 to 0
+        blushBrightness = map(elapsed, 0, fadeOutDuration, 255, 0);
+      } else {
+        blushBrightness = 0;
+        blushState = BLUSH_INACTIVE;
+        disableBlush();
+      }
+      break;
+      
+    default:
+      break;
   }
+}
+
+void drawBlush() {
+  Serial.print("Blush brightness: ");
+  Serial.println(blushBrightness);
 
   // Set blush color based on brightness
   uint16_t blushColor = dma_display->color565(blushBrightness, 0, blushBrightness);
@@ -1137,9 +1205,9 @@ void setup() {
 
   Serial.begin(BAUD_RATE);
  //delay(100); // Delay for serial monitor to start
-  Serial.printf("*****************************************************");
-  Serial.printf("********                LumiFur              ********");
-  Serial.printf("*****************************************************");
+  Serial.print("*****************************************************");
+  Serial.print("********                LumiFur              ********");
+  Serial.print("*****************************************************");
     
   Serial.println("Initializing BLE...");
   NimBLEDevice::init("LumiFur_Controller");
@@ -1269,10 +1337,13 @@ void setup() {
   dma_display->setBrightness8(normalBrightness);
 
   randomSeed(analogRead(0)); // Seed the random number generator
+  //randomSeed(analogRead(0)); // Seed the random number generator
+  
+  // Set sleep timeout based on debug mode
+  SLEEP_TIMEOUT_MS = debugMode ? SLEEP_TIMEOUT_MS_DEBUG : SLEEP_TIMEOUT_MS_NORMAL;
 
   // Set initial plasma color palette
   currentPalette = RainbowColors_p;
-
   // Set up buttons if present
   /* ----------------------------------------------------------------------
   Use internal pull-up resistor, as the up and down buttons 
@@ -1285,6 +1356,17 @@ void setup() {
   #ifdef BUTTON_DOWN
     pinMode(BUTTON_DOWN, INPUT_PULLUP);
   #endif
+
+// Initialize APDS9960 proximity sensor
+if(!apds.begin()){
+  Serial.println("failed to initialize proximity sensor! Please check your wiring.");
+  while(1);
+}
+ Serial.println("Proximity sensor initialized!");
+  apds.enableProximity(true); //enable proximity mode
+  apds.setProximityInterruptThreshold(0, 175); //set the interrupt threshold to fire when proximity reading goes above 175
+  apds.enableProximityInterrupt(); //enable the proximity interrupt
+
 }
 
 uint8_t wheelval = 0;
@@ -1311,6 +1393,7 @@ void displayCurrentMaw() {
   break;
 }
 }
+
 void displayCurrentView(int view) {
   static unsigned long lastFrameTime = 0; // Track the last frame time
   const unsigned long frameInterval = 11; // Consistent 30 FPS
@@ -1330,8 +1413,10 @@ void displayCurrentView(int view) {
 if (view != previousView) { // Check if the view has changed
     if (view == 5) {
       // Reset fade logic when entering the blush view
-      blushFadeStartTime = millis();
+      blushStateStartTime = millis();
       isBlushFadingIn = true;
+      blushState = BLUSH_FADE_IN;  // Start fade‑in state
+      Serial.println("Entered blush view, resetting fade logic");
     }
     previousView = view; // Update the last active view
   }
@@ -1455,8 +1540,30 @@ if (view != previousView) { // Check if the view has changed
 
   // Only flip buffer if not spiral view (spiral handles its own flip)
   //if (view != 9) 
+
+  if (debugMode) {
+    // --- Begin FPS counter overlay ---
+    static unsigned long lastFpsTime = 0;
+    static int frameCount = 0;
+    frameCount++;
+    unsigned long currentTime = millis();
+    if (currentTime - lastFpsTime >= 1000) {
+        fps = frameCount;
+        frameCount = 0;
+        lastFpsTime = currentTime;
+    }
+    char fpsText[16];
+    sprintf(fpsText, "FPS: %d", fps);
+    dma_display->setTextColor(dma_display->color565(255, 255, 0)); // Yellow text
+    // Position the counter at a corner (adjust as needed)
+    dma_display->setCursor((dma_display->width() / 4) + 5 , 1);
+    dma_display->print(fpsText);
+    // --- End FPS counter overlay ---
+  }
+
   dma_display->flipDMABuffer();
 }
+
 
 // Add with your other utility functions
 bool detectMotion() {
@@ -1543,8 +1650,11 @@ void checkSleepMode() {
   }
 }
 
+
+
 void loop(void) {
-  
+  unsigned long now = millis();
+
   bool isConnected = NimBLEDevice::getServer()->getConnectedCount() > 0;
   
   // Always handle BLE and temperature updates first
@@ -1571,12 +1681,35 @@ void loop(void) {
   currentView = (currentView - 1 + totalViews) % totalViews;
   viewChanged = true;
   }
-
+// If view changed and BLE is connected, notify the new view
   if(viewChanged && isConnected) {
   uint8_t viewValue = static_cast<uint8_t>(currentView);
   pFaceCharacteristic->setValue(&viewValue, 1);
   pFaceCharacteristic->notify();
   }
+
+// --- Sensor reading and blush trigger ---
+if (now - lastSensorReadTime >= sensorInterval) {
+  lastSensorReadTime = now;
+  uint8_t proximity = apds.readProximity();
+  Serial.print("Proximity: ");
+  Serial.println(proximity);
+
+// Trigger blush if the proximity condition is met, and no blush is active.
+if (proximity >= 15 && blushState == BLUSH_INACTIVE) {
+  Serial.println("Blush triggered by proximity!");
+  blushState = BLUSH_FADE_IN;
+  blushStateStartTime = now;
+}
+lastView = currentView;  // Update the last active view
+}
+
+// --- Update and draw blush effect if active ---
+if (blushState != BLUSH_INACTIVE) {
+  updateBlush();
+  drawBlush();
+}
+
 }
 
   // Frame rate controlled updates
@@ -1591,19 +1724,5 @@ void loop(void) {
   } else {
     displayCurrentView(currentView);
   }
-  /*
-  // Only update if view needs animation refresh
-  switch(currentView) {
-    case 0:  // Scrolling text
-    case 1:  // Loading bar
-    case 2:  // Plasma
-    case 4:  // Normal face
-    case 5:  // Blush face
-    case 9:  // Spiral eyes
-    case 10: // Plasma test
-    displayCurrentView(currentView);
-    break;
-  }
-  */
   }
 }
