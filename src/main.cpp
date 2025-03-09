@@ -1089,9 +1089,10 @@ void protoFaceTest() {
    drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 0, 1.0);     // Right eye
    drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0); // Left eye (phase offset)
 
-  if (currentView == 5) { // Moved before drawing nose to prevent clipping of partial pixel clearing
-   drawBlush();
-   }
+   
+  if (currentView > 3) { // Only draw blush effect for face views, not utility views
+    drawBlush();
+  }
 
    drawPlasmaXbm(56, 10, 8, 8, nose, 64, 2.0);
    drawPlasmaXbm(64, 10, 8, 8, noseL, 64, 2.0);
