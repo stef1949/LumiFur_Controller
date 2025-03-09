@@ -1,4 +1,3 @@
-
 #ifdef IDF_BUILD
 #include <stdio.h>
 #include <freertos/FreeRTOS.h>
@@ -15,7 +14,7 @@
 #include "xtensa/core-macros.h"
 #include "bitmaps.h"
 #include "customFonts/lequahyper20pt7b.h"       // Stylized font
-#include <fonts/FreeSansBold18pt7b.h>     // Larger font
+#include <Fonts/FreeSansBold18pt7b.h>     // Larger font
 //#include <Wire.h>                       // For I2C sensors
 #ifdef VIRTUAL_PANE
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
@@ -32,7 +31,7 @@
 #define CHARACTERISTIC_UUID             "01931c44-3867-7427-96ab-8d7ac0ae09fe"
 #define CONFIG_CHARACTERISTIC_UUID      "01931c44-3867-7427-96ab-8d7ac0ae09ff"
 #define TEMPERATURE_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9774-18350e3e27db"
-#define ULTRASOUND_CHARACTERISTIC_UUID  "01931c44-3867-7b5d-9732-12460e3a35db"
+//#define ULTRASOUND_CHARACTERISTIC_UUID  "01931c44-3867-7b5d-9732-12460e3a35db"
 
 //#define DESC_USER_DESC_UUID  0x2901  // User Description descriptor
 //#define DESC_FORMAT_UUID     0x2904  // Presentation Format descriptor
@@ -547,19 +546,34 @@ void fadeBlueLED() {
 void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t color = 0xffff) {
     // Ensure width is padded to the nearest byte boundary
     int byteWidth = (width + 7) / 8;
-
-    for (int j = 0; j < height; j++) {
-        for (int i = 0; i < width; i++) {
-            // Calculate byte and bit positions
-            int byteIndex = j * byteWidth + (i / 8);
-            int bitIndex = 7 - (i % 8); // Bits are stored MSB first
-
+    
+    // Pre-check if entire bitmap is out of bounds
+    if (x >= dma_display->width() || y >= dma_display->height() || 
+        x + width <= 0 || y + height <= 0) {
+        return; // Completely out of bounds, nothing to draw
+    }
+    
+    // Calculate visible region to avoid per-pixel boundary checks
+    int startX = max(0, -x);
+    int startY = max(0, -y);
+    int endX = min(width, dma_display->width() - x);
+    int endY = min(height, dma_display->height() - y);
+    
+    for (int j = startY; j < endY; j++) {
+        uint8_t bitMask = 0x80 >> (startX & 7); // Start with the correct bit position
+        int byteIndex = j * byteWidth + (startX >> 3); // Integer division by 8
+        
+        for (int i = startX; i < endX; i++) {
             // Check if the bit is set
-            if (pgm_read_byte(&xbm[byteIndex]) & (1 << bitIndex)) {
-                // Draw the pixel only if within display boundaries
-                if (x + i >= 0 && y + j >= 0 && x + i < dma_display->width() && y + j < dma_display->height()) {
-                    dma_display->drawPixel(x + i, y + j, color);
-                }
+            if (pgm_read_byte(&xbm[byteIndex]) & bitMask) {
+                dma_display->drawPixel(x + i, y + j, color);
+            }
+            
+            // Move to the next bit
+            bitMask >>= 1;
+            if (bitMask == 0) { // We've used all bits in this byte
+                bitMask = 0x80; // Reset to the first bit of the next byte
+                byteIndex++;     // Move to the next byte
             }
         }
     }
@@ -717,9 +731,7 @@ void displayLoadingBar() {
 
 // Helper function for ease-in-out quadratic easing
 float easeInOutQuad(float t) {
-return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-
-dma_display->flipDMABuffer();
+  return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 }
 
 // Easing functions with bounds checking
@@ -1124,82 +1136,82 @@ void displaySleepMode() {
 void setup() {
 
   Serial.begin(BAUD_RATE);
-  Serial.print(F("*****************************************************"));
-  Serial.print(F("*                      LumiFur                      *"));
-  Serial.print(F("*****************************************************"));
+ //delay(100); // Delay for serial monitor to start
+  Serial.printf("*****************************************************");
+  Serial.printf("********                LumiFur              ********");
+  Serial.printf("*****************************************************");
     
-    Serial.print("Initializing BLE...");
-    NimBLEDevice::init("LumiFur_Controller");
-    NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
-    NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
-    pServer = NimBLEDevice::createServer();
-    pServer->setCallbacks(&serverCallbacks);
+  Serial.println("Initializing BLE...");
+  NimBLEDevice::init("LumiFur_Controller");
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
+  NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
+  pServer = NimBLEDevice::createServer();
+  pServer->setCallbacks(&serverCallbacks);
 
-    NimBLEService* pService = pServer->createService(SERVICE_UUID);
-    
-     // Face control characteristic with encryption
-    NimBLECharacteristic* pFaceCharacteristic =
-      pService->createCharacteristic(
-        CHARACTERISTIC_UUID,
-        //NIMBLE_PROPERTY::READ |
-        //NIMBLE_PROPERTY::WRITE |
-        NIMBLE_PROPERTY::NOTIFY |
-        NIMBLE_PROPERTY::READ_ENC | // only allow reading if paired / encrypted
-        NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
-    );
-    
-    // Set initial view value
-    uint8_t viewValue = static_cast<uint8_t>(currentView);
-    pFaceCharacteristic->setValue(&viewValue, 1);
-    pFaceCharacteristic->setCallbacks(&chrCallbacks);
+  NimBLEService* pService = pServer->createService(SERVICE_UUID);
+  
+  // Face control characteristic with encryption
+  pFaceCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_UUID,
+    //NIMBLE_PROPERTY::READ |
+    //NIMBLE_PROPERTY::WRITE |
+    NIMBLE_PROPERTY::NOTIFY |
+    NIMBLE_PROPERTY::READ_ENC | // only allow reading if paired / encrypted
+    NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
+  );
+  
+  // Set initial view value
+  uint8_t viewValue = static_cast<uint8_t>(currentView);
+  pFaceCharacteristic->setValue(&viewValue, 1);
+  pFaceCharacteristic->setCallbacks(&chrCallbacks);
 
-    // Temperature characteristic with encryption
-    pTemperatureCharacteristic = 
-      pService->createCharacteristic(
-        TEMPERATURE_CHARACTERISTIC_UUID,
-        //NIMBLE_PROPERTY::READ |
-        NIMBLE_PROPERTY::NOTIFY |
-        //NIMBLE_PROPERTY::READ_ENC
-    );
-    
-    // Config characteristic with encryption
-    pConfigCharacteristic = pService->createCharacteristic(
-        CONFIG_CHARACTERISTIC_UUID,
-        //NIMBLE_PROPERTY::READ |
-        //NIMBLE_PROPERTY::WRITE |
-        NIMBLE_PROPERTY::NOTIFY |
-        NIMBLE_PROPERTY::READ_ENC |
-        NIMBLE_PROPERTY::WRITE_ENC
-    );
+  // Temperature characteristic with encryption
+  pTemperatureCharacteristic = 
+    pService->createCharacteristic(
+      TEMPERATURE_CHARACTERISTIC_UUID,
+      NIMBLE_PROPERTY::READ |
+      NIMBLE_PROPERTY::NOTIFY 
+      //NIMBLE_PROPERTY::READ_ENC
+  );
+  
+  // Config characteristic with encryption
+  pConfigCharacteristic = pService->createCharacteristic(
+      CONFIG_CHARACTERISTIC_UUID,
+      //NIMBLE_PROPERTY::READ |
+      //NIMBLE_PROPERTY::WRITE |
+      NIMBLE_PROPERTY::NOTIFY |
+      NIMBLE_PROPERTY::READ_ENC |
+      NIMBLE_PROPERTY::WRITE_ENC
+  );
 
-    // Set up descriptors
-    NimBLE2904* pFormat2904 = pFaceCharacteristic->create2904();
-    pFormat2904->setFormat(NimBLE2904::FORMAT_UINT8);
-    pFormat2904->setUnit(0x2700); // Unit-less number
-    pFormat2904->setCallbacks(&dscCallbacks);
+  // Set up descriptors
+  NimBLE2904* pFormat2904 = pFaceCharacteristic->create2904();
+  pFormat2904->setFormat(NimBLE2904::FORMAT_UINT8);
+  pFormat2904->setUnit(0x2700); // Unit-less number
+  pFormat2904->setCallbacks(&dscCallbacks);
 
-    // Add user description descriptor
-    NimBLEDescriptor* pDesc = 
-        pFaceCharacteristic->createDescriptor(
-            "2901",
-            NIMBLE_PROPERTY::READ,
-            20
-        );
-    pDesc->setValue("Face Control");
+  // Add user description descriptor
+  NimBLEDescriptor* pDesc = 
+      pFaceCharacteristic->createDescriptor(
+          "2901",
+          NIMBLE_PROPERTY::READ,
+          20
+      );
+  pDesc->setValue("Face Control");
 
-    //nimBLEService* pBaadService = pServer->createService("BAAD");
-    pService->start();
+  //nimBLEService* pBaadService = pServer->createService("BAAD");
+  pService->start();
 
-    /** Create an advertising instance and add the services to the advertised data */
-    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
-    pAdvertising->setName("LumiFur_Controller");
-    pAdvertising->addServiceUUID(pService->getUUID());
-    pAdvertising->enableScanResponse(true);
-    pAdvertising->start();
+  /** Create an advertising instance and add the services to the advertised data */
+  NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+  pAdvertising->setName("LumiFur_Controller");
+  pAdvertising->addServiceUUID(pService->getUUID());
+  pAdvertising->enableScanResponse(true);
+  pAdvertising->start();
 
-    Serial.println("BLE setup complete - advertising started");
+  Serial.println("BLE setup complete - advertising started");
 
-
+  
   //Redefine pins if required
   //HUB75_I2S_CFG::i2s_pins _pins={R1, G1, BL1, R2, G2, BL2, CH_A, CH_B, CH_C, CH_D, CH_E, LAT, OE, CLK};
   //HUB75_I2S_CFG mxconfig(PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER);
@@ -1229,36 +1241,34 @@ void setup() {
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
 #endif
 
-dma_display->clearScreen();
-dma_display->flipDMABuffer();
+  dma_display->clearScreen();
+  dma_display->flipDMABuffer();
 
-/*
-  ledbuff = (CRGB *)malloc(NUM_LEDS * sizeof(CRGB));  // allocate buffer for some tests
+  // Memory allocation for LED buffer
+  ledbuff = (CRGB *)malloc(NUM_LEDS * sizeof(CRGB));
   if (ledbuff == nullptr) {
     Serial.println("Memory allocation for ledbuff failed!");
-    while (1); // Stop execution
-// Initialize accelerometer if MATRIXPORTAL_ESP32S3 is used
-#if defined (ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
-  accel = Adafruit_LIS3DH(); // Initialize the previously declared object
+    err(250);  // Call error handler
+  }
+
+#if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
+  // Initialize onboard components for MatrixPortal ESP32-S3
   statusPixel.begin(); // Initialize NeoPixel status light
+  
+  if (!accel.begin(0x19)) {  // Default I2C address for LIS3DH on MatrixPortal
+    Serial.println("Could not find accelerometer, check wiring!");
+    err(250);  // Fast blink = I2C error
+  } else {
+    Serial.println("Accelerometer found!");
+    accel.setRange(LIS3DH_RANGE_2_G);  // 2G range is sufficient for motion detection
+  }
 #endif
-  Adafruit_LIS3DH accel = Adafruit_LIS3DH();
-  statusPixel.begin(); // Initialize NeoPixel status light
-#endif
 
-if (!accel.begin(0x19)) {  // Default I2C address for LIS3DH on MatrixPortal
-  Serial.println("Could not find accelerometer, check wiring!");
-  err(250);  // Fast bink = I2C error
-} else {
-  Serial.println("Accelerometer found!");
-  accel.setRange(LIS3DH_RANGE_2_G);  // 2G range is sufficient for motion detection
-}
-lastActivityTime = millis(); // Initialize the activity timer
+  lastActivityTime = millis(); // Initialize the activity timer
+  normalBrightness = 100; // or whatever your default is
+  dma_display->setBrightness8(normalBrightness);
 
-normalBrightness = 100; // or whatever your default is
-dma_display->setBrightness8(normalBrightness);
-
-randomSeed(analogRead(0)); // Seed the random number generator for randomized eye blinking, I dont remember why this is here...
+  randomSeed(analogRead(0)); // Seed the random number generator
 
   // Set initial plasma color palette
   currentPalette = RainbowColors_p;
