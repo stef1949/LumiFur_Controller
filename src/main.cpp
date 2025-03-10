@@ -14,8 +14,8 @@
 #include "xtensa/core-macros.h"
 #include "bitmaps.h"
 #include "customFonts/lequahyper20pt7b.h"       // Stylized font
-#include <Fonts/FreeSansBold18pt7b.h>     // Larger font
-//#include <Wire.h>                       // For I2C sensors
+#include <Fonts/FreeSansBold18pt7b.h>           // Larger font
+//#include <Wire.h>                             // For I2C sensors
 #ifdef VIRTUAL_PANE
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
 #else
