@@ -224,7 +224,8 @@ const char *message = "* ESP32 I2S DMA *";
 // View switching
 uint8_t currentView = 4; // Current & initial view being displayed
 const int totalViews = 11; // Total number of views to cycle through
-int defaultBrightness = 20; // Default brightness level (0-255)
+int userBrightness = 20; // Default brightness level (0-255)
+
 //Maw switching
 int currentMaw = 1; // Current & initial maw being displayed
 const int totalMaws = 2; // Total number of maws to cycle through
@@ -1302,11 +1303,11 @@ void setup() {
 #ifndef VIRTUAL_PANE
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   dma_display->begin();
-  dma_display->setBrightness8(defaultBrightness);
+  dma_display->setBrightness8(userBrightness);
 #else
   chain = new MatrixPanel_I2S_DMA(mxconfig);
   chain->begin();
-  chain->setBrightness8(defaultBrightness);
+  chain->setBrightness8(userBrightness);
   // create VirtualDisplay object based on our newly created dma_display object
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
 #endif
