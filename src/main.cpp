@@ -22,6 +22,8 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #endif
 #include "main.h"
+//#include <Preferences.h>
+#include "userPreferences.h"
 
 //BLE Libraries
 #include <NimBLEDevice.h>
@@ -160,6 +162,60 @@
   // the pins printed on some boards' top silkscreen.
 #endif
 
+/*
+// Returns a reference to a static Preferences instance.
+Preferences& getPrefs() {
+  static Preferences prefs;
+  return prefs;
+}
+
+// Initializes the Preferences system; call this in setup().
+void initPreferences() {
+  // Open the "LumiFur" namespace in read/write mode.
+  getPrefs().begin("LumiFur", false);
+}
+
+// Debug mode functions
+bool getDebugMode() {
+  return getPrefs().getBool("debug", true);
+}
+void setDebugMode(bool debugMode) {
+  getPrefs().putBool("debug", debugMode);
+}
+
+// Brightness functions
+int getUserBrightness() {
+  return getPrefs().getInt("brightness", 20);
+}
+void setUserBrightness(int brightness) {
+  getPrefs().putInt("brightness", brightness);
+}
+
+// Blink mode functions
+bool getBlinkMode() {
+  return getPrefs().getBool("blinkmode", true);
+}
+void setBlinkMode(bool blinkMode) {
+  getPrefs().putBool("blinkmode", blinkMode);
+}
+
+// Sleep mode functions
+bool getSleepMode() {
+  return getPrefs().getBool("sleepmode", true);
+}
+void setSleepMode(bool sleepMode) {
+  getPrefs().putBool("sleepmode", sleepMode);
+}
+
+// Dizzy mode functions
+bool getDizzyMode() {
+  return getPrefs().getBool("dizzymode", true);
+}
+void setDizzyMode(bool dizzyMode) {
+  getPrefs().putBool("dizzymode", dizzyMode);
+}
+*/
+
 ////////////////////// DEBUG MODE //////////////////////
 bool debugMode = true; // Set to true to enable debug outputs
 
@@ -217,14 +273,28 @@ const char *message = "* ESP32 I2S DMA *";
 //#include "EffectsLayer.hpp" // FastLED CRGB Pixel Buffer for which the patterns are drawn
 //EffectsLayer effects(VPANEL_W, VPANEL_H);
 
+// ----------------------------------------------------------------
+// ----------------------------------------------------------------
+// ------------------- LumiFur Global Variables -------------------
+// ----------------------------------------------------------------
+// ----------------------------------------------------------------
 
-
-// LumiFur Global Variables ---------------------------------------------------
+//Brightness control
+// Retrieve the brightness value from preferences
+int userBrightness = getUserBrightness(); // e.g., default 204 (80%)
+// Map userBrightness (1-100) to hardware brightness (1-255).
+int hwBrightness = map(userBrightness, 1, 100, 1, 255);
+// Convert the userBrightness into a scale factor (0.0 to 1.0)
+// Here, we simply divide by 100.0 to get a proportion.
+float globalBrightnessScale = userBrightness / 100.0;
 
 // View switching
 uint8_t currentView = 4; // Current & initial view being displayed
 const int totalViews = 11; // Total number of views to cycle through
-int userBrightness = 20; // Default brightness level (0-255)
+//int userBrightness = 20; // Default brightness level (0-255)
+
+unsigned long spiralStartTime = 0; // Global variable to record when spiral view started
+int previousView = 0;              // Global variable to store the view before spiral
 
 //Maw switching
 int currentMaw = 1; // Current & initial maw being displayed
@@ -245,9 +315,15 @@ bool isBlinking = false;            // Whether a blink is in progress
 int blinkDuration = 300;            // Initial time for a full blink (milliseconds)
 const int minBlinkDuration = 100;   // Minimum time for a full blink (ms)
 const int maxBlinkDuration = 500;   // Maximum time for a full blink (ms)
-
 const int minBlinkDelay = 1000;     // Minimum time between blinks (ms)
 const int maxBlinkDelay = 5000;     // Maximum time between blinks (ms)
+
+// Global constants for each sensitivity level
+const float SLEEP_THRESHOLD = 2.0;  // for sleep mode detection
+const float SHAKE_THRESHOLD = 20.0;  // for shake detection
+// Global flag to control which threshold to use
+bool useShakeSensitivity = true;
+
 
 // Define blush state using an enum
 enum BlushState {
@@ -306,10 +382,9 @@ unsigned long SLEEP_TIMEOUT_MS; // Will be set in setup() based on debugMode
 bool sleepModeActive = false;
 unsigned long lastActivityTime = 0;
 float prevAccelX = 0, prevAccelY = 0, prevAccelZ = 0;
-const float MOVEMENT_THRESHOLD = 2; // Adjust based on sensitivity needed
 uint8_t preSleepView = 4;  // Store the view before sleep
 uint8_t sleepBrightness = 15; // Brightness level during sleep (0-255)
-uint8_t normalBrightness = 100; // Normal brightness level
+uint8_t normalBrightness = userBrightness; // Normal brightness level
 unsigned long sleepFrameInterval = 11; // Frame interval in ms (will be changed during sleep)
 
 // Accelerometer object declaration
@@ -528,10 +603,6 @@ class DescriptorCallbacks : public NimBLEDescriptorCallbacks {
     }
 } dscCallbacks;
 
-////////////////////////////////////////////
-//////////////////BLE SETUP/////////////////
-////////////////////////////////////////////
-
 
 //non-blocking LED status functions (Neopixel)
 void fadeInAndOutLED(uint8_t r, uint8_t g, uint8_t b) {
@@ -626,8 +697,12 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
           sin8((x + i + y + j) * scale * 0.5 + time_counter/3);
         
         CRGB color = ColorFromPalette(currentPalette, v + time_offset);
+        // Apply global brightness control from preferences
+        color.r = (uint8_t)(color.r * globalBrightnessScale);
+        color.g = (uint8_t)(color.g * globalBrightnessScale);
+        color.b = (uint8_t)(color.b * globalBrightnessScale);
+
         uint16_t rgb565 = dma_display->color565(color.r, color.g, color.b);
-        
         dma_display->drawPixel(x + i, y + j, rgb565);
       }
     }
@@ -1173,9 +1248,13 @@ void displaySleepMode() {
   int offset2 = sin8((animationPhase + 0.3) * 20) / 16;
   int offset3 = sin8((animationPhase + 0.6) * 20) / 16;
   
-  drawXbm565(45, 2 + offset1, 8, 8, sleepZ1, dma_display->color565(100, 100, 255));
-  drawXbm565(60, 0 + offset2, 8, 8, sleepZ2, dma_display->color565(150, 150, 255));
-  drawXbm565(75, 1 + offset3, 8, 8, sleepZ3, dma_display->color565(200, 200, 255));
+  drawXbm565(27, 2 + offset1, 8, 8, sleepZ1, dma_display->color565(150, 150, 150));
+  drawXbm565(37, 0 + offset2, 8, 8, sleepZ2, dma_display->color565(100, 100, 100));
+  drawXbm565(47, 1 + offset3, 8, 8, sleepZ3, dma_display->color565(50, 50, 50));
+
+  drawXbm565(71, 2 + offset1, 8, 8, sleepZ1, dma_display->color565(50, 50, 50));
+  drawXbm565(81, 0 + offset2, 8, 8, sleepZ2, dma_display->color565(100, 100, 100));
+  drawXbm565(91, 1 + offset3, 8, 8, sleepZ3, dma_display->color565(150, 150, 150));
   
   // Draw closed or slightly open eyes
   if (millis() - lastBlinkTime > 4000) {  // Occasional slow blink
@@ -1189,12 +1268,12 @@ void displaySleepMode() {
   
   if (eyesOpen) {
     // Draw slightly open eyes - just a small slit
-    dma_display->fillRect(20, 12, 20, 2, dma_display->color565(150, 150, 150));
-    dma_display->fillRect(90, 12, 20, 2, dma_display->color565(150, 150, 150));
+    dma_display->fillRect(5, 5, 20, 2, dma_display->color565(150, 150, 150));
+    dma_display->fillRect(103, 5, 20, 2, dma_display->color565(150, 150, 150));
   } else {
     // Draw closed eyes
-    dma_display->drawLine(15, 12, 40, 12, dma_display->color565(150, 150, 150));
-    dma_display->drawLine(88, 12, 113, 12, dma_display->color565(150, 150, 150));
+    dma_display->drawLine(5, 10, 40, 12, dma_display->color565(150, 150, 150));
+    dma_display->drawLine(83, 10, 40, 12, dma_display->color565(150, 150, 150));
   }
   
   // Draw sleeping mouth (slight curve)
@@ -1207,11 +1286,22 @@ void displaySleepMode() {
 void setup() {
 
   Serial.begin(BAUD_RATE);
- //delay(100); // Delay for serial monitor to start
-  Serial.print("*****************************************************");
-  Serial.print("********                LumiFur              ********");
-  Serial.print("*****************************************************");
-    
+  delay(1000); // Delay for serial monitor to start
+  Serial.println(" ");
+  Serial.println("*****************************************************");
+  Serial.println("*******************    LumiFur    *******************");
+  Serial.println("*****************************************************");
+  
+  // Initialize Preferences
+  initPreferences();
+  
+  // Retrieve and print stored brightness value.
+  int userBrightness = getUserBrightness();
+  // Map userBrightness (1-100) to hardware brightness (1-255).
+  int hwBrightness = map(userBrightness, 1, 100, 1, 255);
+  Serial.printf("Stored brightness: %d\n", userBrightness);
+ 
+
   Serial.println("Initializing BLE...");
   NimBLEDevice::init("LumiFur_Controller");
   NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
@@ -1303,11 +1393,11 @@ void setup() {
 #ifndef VIRTUAL_PANE
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   dma_display->begin();
-  dma_display->setBrightness8(userBrightness);
+  dma_display->setBrightness8(hwBrightness);
 #else
   chain = new MatrixPanel_I2S_DMA(mxconfig);
   chain->begin();
-  chain->setBrightness8(userBrightness);
+  chain->setBrightness8(hwBrightness);
   // create VirtualDisplay object based on our newly created dma_display object
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
 #endif
@@ -1397,7 +1487,7 @@ void displayCurrentMaw() {
 
 void displayCurrentView(int view) {
   static unsigned long lastFrameTime = 0; // Track the last frame time
-  const unsigned long frameInterval = 11; // Consistent 30 FPS
+  const unsigned long frameInterval = 5; // Consistent 30 FPS
   static int previousView = -1; // Track the last active view
 
   // If we're in sleep mode, don't display the normal view
@@ -1553,11 +1643,11 @@ if (view != previousView) { // Check if the view has changed
         frameCount = 0;
         lastFpsTime = currentTime;
     }
-    char fpsText[16];
+    char fpsText[8];
     sprintf(fpsText, "FPS: %d", fps);
     dma_display->setTextColor(dma_display->color565(255, 255, 0)); // Yellow text
     // Position the counter at a corner (adjust as needed)
-    dma_display->setCursor((dma_display->width() / 4) + 5 , 1);
+    dma_display->setCursor((dma_display->width() / 4) + 10 , 1);
     dma_display->print(fpsText);
     // --- End FPS counter overlay ---
   }
@@ -1565,6 +1655,10 @@ if (view != previousView) { // Check if the view has changed
   dma_display->flipDMABuffer();
 }
 
+// Helper function to get the current threshold value
+float getCurrentThreshold() {
+  return useShakeSensitivity ? SHAKE_THRESHOLD : SLEEP_THRESHOLD;
+}
 
 // Add with your other utility functions
 bool detectMotion() {
@@ -1584,10 +1678,13 @@ bool detectMotion() {
   prevAccelY = y;
   prevAccelZ = z;
   
+  // Use the current threshold based on the context
+  float threshold = getCurrentThreshold();
+
   // Check if movement exceeds threshold
-  if (deltaX > MOVEMENT_THRESHOLD || 
-      deltaY > MOVEMENT_THRESHOLD || 
-      deltaZ > MOVEMENT_THRESHOLD) {
+  if (deltaX > threshold || 
+      deltaY > threshold || 
+      deltaZ > threshold) {
     return true;
   }
   
@@ -1655,75 +1752,91 @@ void checkSleepMode() {
 
 void loop(void) {
   unsigned long now = millis();
-
   bool isConnected = NimBLEDevice::getServer()->getConnectedCount() > 0;
   
-  // Always handle BLE and temperature updates first
+  // Always handle BLE and temperature updates first.
   handleBLEConnection();
   updateTemperature();
 
-  // Check for sleep mode (only on MatrixPortal ESP32-S3)
+  // Check for sleep mode (only on MatrixPortal ESP32-S3).
   #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
     checkSleepMode();
   #endif
 
-  // Handle view changes from any source (BLE/buttons)
-  static int lastView = -1;
-  bool viewChanged = false;
-
-  // Only check buttons if not in sleep mode
-  if (!sleepModeActive) {
-  // Check button presses (outside frame timing)
-  if (debounceButton(BUTTON_UP)) {
-  currentView = (currentView + 1) % totalViews;
-  viewChanged = true;
-  }
-  if (debounceButton(BUTTON_DOWN)) {
-  currentView = (currentView - 1 + totalViews) % totalViews;
-  viewChanged = true;
-  }
-// If view changed and BLE is connected, notify the new view
-  if(viewChanged && isConnected) {
-  uint8_t viewValue = static_cast<uint8_t>(currentView);
-  pFaceCharacteristic->setValue(&viewValue, 1);
-  pFaceCharacteristic->notify();
-  }
-
-// --- Sensor reading and blush trigger ---
-if (now - lastSensorReadTime >= sensorInterval) {
-  lastSensorReadTime = now;
-  uint8_t proximity = apds.readProximity();
-  Serial.print("Proximity: ");
-  Serial.println(proximity);
-
-// Trigger blush if the proximity condition is met, and no blush is active.
-if (proximity >= 15 && blushState == BLUSH_INACTIVE) {
-  Serial.println("Blush triggered by proximity!");
-  blushState = BLUSH_FADE_IN;
-  blushStateStartTime = now;
-}
-lastView = currentView;  // Update the last active view
-}
-
-// --- Update and draw blush effect if active ---
-if (blushState != BLUSH_INACTIVE) {
-  updateBlush();
-  drawBlush();
-}
-
-}
-
-  // Frame rate controlled updates
-  static unsigned long lastFrameTime = 0;
-  const unsigned long currentFrameInterval = sleepModeActive ? sleepFrameInterval : 11;
-  
-  if(millis() - lastFrameTime >= currentFrameInterval) {
-  lastFrameTime = millis();
-  // If in sleep mode, display the sleep screen instead of the normal view
+  // If the device is in sleep mode, use low-sensitivity motion detection to wake it.
   if (sleepModeActive) {
-    displaySleepMode();
-  } else {
-    displayCurrentView(currentView);
+    // Ensure low sensitivity (useShakeSensitivity = false).
+    useShakeSensitivity = false;
+    if (detectMotion()) {
+      // Motion detected with the low threshold – wake up the device.
+      wakeFromSleepMode();
+    }
   }
+  else {
+    // Device is active—handle button input, sensor reading, blush effect,
+    // and strong motion detection (shake) to trigger spiral eyes.
+
+    // --- Handle button inputs for view changes ---
+    static int lastView = -1;
+    bool viewChanged = false;
+    if (debounceButton(BUTTON_UP)) {
+      currentView = (currentView + 1) % totalViews;
+      viewChanged = true;
+    }
+    if (debounceButton(BUTTON_DOWN)) {
+      currentView = (currentView - 1 + totalViews) % totalViews;
+      viewChanged = true;
+    }
+    if (viewChanged && isConnected) {
+      uint8_t viewValue = static_cast<uint8_t>(currentView);
+      pFaceCharacteristic->setValue(&viewValue, 1);
+      pFaceCharacteristic->notify();
+    }
+
+    // --- Sensor reading and blush trigger ---
+    if (now - lastSensorReadTime >= sensorInterval) {
+      lastSensorReadTime = now;
+      uint8_t proximity = apds.readProximity();
+      Serial.print("Proximity: ");
+      Serial.println(proximity);
+      // Trigger blush if the proximity condition is met and no blush is active.
+      if (proximity >= 15 && blushState == BLUSH_INACTIVE) {
+        Serial.println("Blush triggered by proximity!");
+        blushState = BLUSH_FADE_IN;
+        blushStateStartTime = now;
+      }
+      lastView = currentView;  // Update the last active view.
+    }
+    if (blushState != BLUSH_INACTIVE) {
+      updateBlush();
+      drawBlush();
+    }
+
+    // --- Check for a strong shake to trigger spiral eyes ---
+    // Temporarily set high sensitivity.
+    useShakeSensitivity = true;
+    if (detectMotion() && currentView != 9) {
+      previousView = currentView;   // Save the current view.
+      currentView = 9;              // Switch to spiral eyes view (assumed view 9).
+      spiralStartTime = millis();   // Record the trigger time.
+    }
+    // Reset sensitivity back to the low (sleep mode) threshold.
+    useShakeSensitivity = false;
+    // If spiral eyes view is active, revert back after 5 seconds.
+    if (currentView == 9 && (millis() - spiralStartTime >= 5000)) {
+      currentView = previousView;   // Return to the previous view.
+    }
+  }
+  
+  // --- Frame rate controlled display updates ---
+  static unsigned long lastFrameTime = 0;
+  const unsigned long currentFrameInterval = sleepModeActive ? sleepFrameInterval : 5;
+  if (millis() - lastFrameTime >= currentFrameInterval) {
+    lastFrameTime = millis();
+    if (sleepModeActive) {
+      displaySleepMode();
+    } else {
+      displayCurrentView(currentView);
+    }
   }
 }
