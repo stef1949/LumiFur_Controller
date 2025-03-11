@@ -22,27 +22,29 @@ jobs:
       fail-fast: false
       matrix:
         include:
-        - language: c-cpp
-          build-mode: manual   # Changed to 'manual' for custom build steps
+          - language: c-cpp
+            build-mode: manual  # Changed from 'autobuild' to 'manual'
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Install PlatformIO
-      run: pip install platformio
+      # Install PlatformIO if not already available
+      - name: Install PlatformIO
+        run: pip install platformio
 
-    - name: Initialize CodeQL
-      uses: github/codeql-action/init@v3
-      with:
-        languages: ${{ matrix.language }}
-        build-mode: ${{ matrix.build-mode }}
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
 
-    - name: Build with PlatformIO
-      run: |
-        pio run
+      # Build the project using PlatformIO
+      - name: Build with PlatformIO
+        run: |
+          pio run
 
-    - name: Perform CodeQL Analysis
-      uses: github/codeql-action/analyze@v3
-      with:
-        category: "/language:${{matrix.language}}"
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
