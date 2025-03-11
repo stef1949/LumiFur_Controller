@@ -682,10 +682,12 @@ void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t c
     }
 }
 
+uint16_t plasmaSpeed = 1; // Lower = slower animation
+
 void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm, 
-                 uint8_t time_offset = 0, float scale = 1.0) {
+                 uint8_t time_offset = 0, float scale = 5.0) {
   int byteWidth = (width + 7) / 8;
-  uint16_t plasmaSpeed = 10; // Lower = slower animation
+
   
   for (int j = 0; j < height; j++) {
     for (int i = 0; i < width; i++) {
@@ -693,8 +695,8 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
         // Plasma calculation specific to pixel position
         uint8_t v = 
           sin8((x + i) * scale + time_counter) + 
-          cos8((y + j) * scale + time_counter/2) + 
-          sin8((x + i + y + j) * scale * 0.5 + time_counter/3);
+          cos8((y + j) * scale + time_counter / 2) + 
+          sin8((x + i + y + j) * scale * 0.5 + time_counter / 3);
         
         CRGB color = ColorFromPalette(currentPalette, v + time_offset);
         // Apply global brightness control from preferences
@@ -727,11 +729,11 @@ void drawPlasmaFace() {
 
 void updatePlasmaFace() {
   static unsigned long lastUpdate = 0;
-  const uint16_t frameDelay = 50; // Slower update for smoother transition
+  const uint16_t frameDelay = 5; // Low delay for smoother transition
   
   if (millis() - lastUpdate > frameDelay) {
     lastUpdate = millis();
-    time_counter += 5; // Speed of plasma animation
+    time_counter += plasmaSpeed; // Speed of plasma animation
     
     // Cycle palette every 10 seconds
     if (millis() % 10000 < frameDelay) {
