@@ -1184,8 +1184,8 @@ void displaySleepMode() {
   }
   
   // Draw nose
-  drawXbm565(56, 15, 8, 8, nose, dma_display->color565(100, 100, 100));
-  drawXbm565(64, 15, 8, 8, noseL, dma_display->color565(100, 100, 100));
+  drawXbm565(56, 10, 8, 8, nose, dma_display->color565(100, 100, 100));
+  drawXbm565(64, 10, 8, 8, noseL, dma_display->color565(100, 100, 100));
   
   if (eyesOpen) {
     // Draw slightly open eyes - just a small slit
