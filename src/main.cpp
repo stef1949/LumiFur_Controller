@@ -21,9 +21,8 @@
 #else
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #endif
+
 #include "main.h"
-//#include <Preferences.h>
-#include "userPreferences.h"
 
 //BLE Libraries
 #include <NimBLEDevice.h>
@@ -37,237 +36,6 @@
 
 //#define DESC_USER_DESC_UUID  0x2901  // User Description descriptor
 //#define DESC_FORMAT_UUID     0x2904  // Presentation Format descriptor
-
-// HUB75E port pinout
-// R1 | G1
-// B1 | GND
-// R2 | G2
-// B2 | E
-//  A | B
-//  C | D
-// CLK| LAT
-// OE | GND
-
-/*  Default library pin configuration for the reference
-  you can redefine only ones you need later on object creation
-#define R1 25
-#define G1 26
-#define BL1 27
-#define R2 14
-#define G2 12
-#define BL2 13
-#define CH_A 23
-#define CH_B 19
-#define CH_C 5
-#define CH_D 17
-#define CH_E -1 // assign to any available pin if using panels with 1/32 scan
-#define CLK 16
-#define LAT 4
-#define OE 15
-*/
-
-#if defined(_VARIANT_MATRIXPORTAL_M4_) // MatrixPortal M4
-  #define BUTTON_UP 2
-  #define BUTTON_DOWN 3
-#elif defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) // MatrixPortal ESP32-S3
-  #define R1_PIN 42
-  #define G1_PIN 41
-  #define B1_PIN 40
-  #define R2_PIN 38
-  #define G2_PIN 39
-  #define B2_PIN 37
-  #define A_PIN  45
-  #define B_PIN  36
-  #define C_PIN  48
-  #define D_PIN  35
-  #define E_PIN  21 
-  #define LAT_PIN 47
-  #define OE_PIN  14
-  #define CLK_PIN 2
-  #define PIN_E 21 // E pin for 64px high panels
-  // Button pins
-  #define BUTTON_UP 6
-  #define BUTTON_DOWN 7
-  #include <Wire.h>                 // For I2C sensors
-  //#include <SPI.h>                  // For SPI sensors
-  #include "Adafruit_APDS9960.h"    // Library for built-in gesture sensor
-  //the pin that the interrupt is attached to
-  #define INT_PIN 3
-  Adafruit_APDS9960 apds;
-  #include <Adafruit_LIS3DH.h>      // Library for built-in For accelerometer
-  #include <Adafruit_NeoPixel.h>    // Library for built-in NeoPixel
-  #define STATUS_LED_PIN 4
-  Adafruit_NeoPixel statusPixel(1, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
-#elif defined(ARDUINO_ADAFRUIT_METRO_ESP32S3) //Metro ESP32-S3
-  #define R1_PIN 2
-  #define G1_PIN 3
-  #define B1_PIN 4
-  #define R2_PIN 5
-  #define G2_PIN 6
-  #define B2_PIN 7
-  #define A_PIN  A0
-  #define B_PIN  A1
-  #define C_PIN  A2
-  #define D_PIN  A3
-  #define E_PIN  21 
-  #define LAT_PIN 10
-  #define OE_PIN  9
-  #define CLK_PIN 8
-  #define PIN_E 9 // E pin for 64px high panels
-#elif defined(__SAMD51__) // M4 Metro Variants (Express, AirLift)
-  //
-#elif defined(_SAMD21_) // Feather M0 variants
-  //
-#elif defined(NRF52_SERIES) // Special nRF52840 FeatherWing pinout
-  //
-#elif USB_VID == 0x239A && USB_PID == 0x8113 // Feather ESP32-S3 No PSRAM
-  // M0/M4/RP2040 Matrix FeatherWing compatible:
-#elif USB_VID == 0x239A && USB_PID == 0x80EB // Feather ESP32-S2
-  // M0/M4/RP2040 Matrix FeatherWing compatible:
-#elif defined(ESP32)
-  // 'Safe' pins, not overlapping any peripherals:
-  // GPIO.out: 4, 12, 13, 14, 15, 21, 27, GPIO.out1: 32, 33
-  // Peripheral-overlapping pins, sorted from 'most expendible':
-  // 16, 17 (RX, TX)
-  // 25, 26 (A0, A1)
-  // 18, 5, 9 (MOSI, SCK, MISO)
-  // 22, 23 (SCL, SDA)
-#elif defined (FREENOVE_ESP32_S3_WROOM)
-// 'Safe' pins, not overlapping any peripherals:
-  #define R1_PIN 2
-  #define G1_PIN 3
-  #define B1_PIN 4
-  #define R2_PIN 5
-  #define G2_PIN 6
-  #define B2_PIN 7
-  #define A_PIN  A0
-  #define B_PIN  A1
-  #define C_PIN  A2
-  #define D_PIN  A3
-  #define E_PIN  21 
-  #define LAT_PIN 10
-  #define OE_PIN  9
-  #define CLK_PIN 8
-  #define PIN_E 9 // E pin for 64px high panels
-#elif defined(ARDUINO_TEENSY40)
-  //
-#elif defined(ARDUINO_TEENSY41)
-  //
-#elif defined(ARDUINO_ADAFRUIT_FEATHER_RP2040)
-  // RP2040 support requires the Earle Philhower board support package;
-  // will not compile with the Arduino Mbed OS board package.
-  // The following pinout works with the Adafruit Feather RP2040 and
-  // original RGB Matrix FeatherWing (M0/M4/RP2040, not nRF version).
-  // Pin numbers here are GP## numbers, which may be different than
-  // the pins printed on some boards' top silkscreen.
-#endif
-
-/*
-// Returns a reference to a static Preferences instance.
-Preferences& getPrefs() {
-  static Preferences prefs;
-  return prefs;
-}
-
-// Initializes the Preferences system; call this in setup().
-void initPreferences() {
-  // Open the "LumiFur" namespace in read/write mode.
-  getPrefs().begin("LumiFur", false);
-}
-
-// Debug mode functions
-bool getDebugMode() {
-  return getPrefs().getBool("debug", true);
-}
-void setDebugMode(bool debugMode) {
-  getPrefs().putBool("debug", debugMode);
-}
-
-// Brightness functions
-int getUserBrightness() {
-  return getPrefs().getInt("brightness", 20);
-}
-void setUserBrightness(int brightness) {
-  getPrefs().putInt("brightness", brightness);
-}
-
-// Blink mode functions
-bool getBlinkMode() {
-  return getPrefs().getBool("blinkmode", true);
-}
-void setBlinkMode(bool blinkMode) {
-  getPrefs().putBool("blinkmode", blinkMode);
-}
-
-// Sleep mode functions
-bool getSleepMode() {
-  return getPrefs().getBool("sleepmode", true);
-}
-void setSleepMode(bool sleepMode) {
-  getPrefs().putBool("sleepmode", sleepMode);
-}
-
-// Dizzy mode functions
-bool getDizzyMode() {
-  return getPrefs().getBool("dizzymode", true);
-}
-void setDizzyMode(bool dizzyMode) {
-  getPrefs().putBool("dizzymode", dizzyMode);
-}
-*/
-
-////////////////////// DEBUG MODE //////////////////////
-bool debugMode = true; // Set to true to enable debug outputs
-
-
-
-// Configure for your panel(s) as appropriate!
-#define PANEL_WIDTH 64
-#define PANEL_HEIGHT 32         // Panel height of 64 will required PIN_E to be defined.
-
-#ifdef VIRTUAL_PANE
- #define PANELS_NUMBER 4         // Number of chained panels, if just a single panel, obviously set to 1
-#else
- #define PANELS_NUMBER 2         // Number of chained panels, if just a single panel, obviously set to 1
-#endif
-
-#define PANE_WIDTH PANEL_WIDTH * PANELS_NUMBER
-#define PANE_HEIGHT PANEL_HEIGHT
-#define NUM_LEDS PANE_WIDTH*PANE_HEIGHT
-
-#ifdef VIRTUAL_PANE
- #define NUM_ROWS 2 // Number of rows of chained INDIVIDUAL PANELS
- #define NUM_COLS 2 // Number of INDIVIDUAL PANELS per ROW
- #define PANEL_CHAIN NUM_ROWS*NUM_COLS    // total number of panels chained one to another
- // Change this to your needs, for details on VirtualPanel pls read the PDF!
- #define SERPENT true
- #define TOPDOWN false
-#endif
-
-
-#ifdef VIRTUAL_PANE
-VirtualMatrixPanel *matrix = nullptr;
-MatrixPanel_I2S_DMA *chain = nullptr;
-#else
-MatrixPanel_I2S_DMA *dma_display = nullptr;
-#endif
-
-// patten change delay
-#define PATTERN_DELAY 2000
-
-// gradient buffer
-CRGB *ledbuff;
-
-// LED array
-CRGB leds[1];
-
-unsigned long t1, t2, s1=0, s2=0, s3=0;
-uint32_t ccount1, ccount2;
-
-uint8_t color1 = 0, color2 = 0, color3 = 0;
-uint16_t x,y;
-
-const char *message = "* ESP32 I2S DMA *";
 
 
 //#include "EffectsLayer.hpp" // FastLED CRGB Pixel Buffer for which the patterns are drawn
@@ -390,76 +158,6 @@ unsigned long sleepFrameInterval = 11; // Frame interval in ms (will be changed 
 // Accelerometer object declaration
 Adafruit_LIS3DH accel;
 
-////////////////////////////////////////////
-/////////////////BLE CONFIG/////////////////
-////////////////////////////////////////////
-
-bool deviceConnected = false;
-bool oldDeviceConnected = false;
-
-// BLE Server pointers
-NimBLEServer* pServer = nullptr;
-NimBLECharacteristic* pCharacteristic = nullptr;
-NimBLECharacteristic* pFaceCharacteristic = nullptr;
-NimBLECharacteristic* pTemperatureCharacteristic = nullptr;
-NimBLECharacteristic* pConfigCharacteristic = nullptr;
-
-// Class to handle BLE server callbacks
-class ServerCallbacks : public NimBLEServerCallbacks {
-    void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
-        deviceConnected = true;
-        Serial.printf("Client connected: %s\n", connInfo.getAddress().toString().c_str());
-
-        /**
-         *  We can use the connection handle here to ask for different connection parameters.
-         *  Args: connection handle, min connection interval, max connection interval
-         *  latency, supervision timeout.
-         *  Units; Min/Max Intervals: 1.25 millisecond increments.
-         *  Latency: number of intervals allowed to skip.
-         *  Timeout: 10 millisecond increments.
-         */
-        pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 180);
-    }
-
-    void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
-        deviceConnected = false;
-        Serial.println("Client disconnected - advertising");
-        NimBLEDevice::startAdvertising();
-    }
-
-    void onMTUChange(uint16_t MTU, NimBLEConnInfo& connInfo) override {
-        Serial.printf("MTU updated: %u for connection ID: %u\n", MTU, connInfo.getConnHandle());
-    }
-
-    /********************* Security handled here *********************/
-    uint32_t onPassKeyDisplay() override {
-        Serial.printf("Server Passkey Display\n");
-        /**
-         * This should return a random 6 digit number for security
-         *  or make your own static passkey as done here.
-         */
-        return 123456;
-    }
-
-    void onConfirmPassKey(NimBLEConnInfo& connInfo, uint32_t pass_key) override {
-        Serial.printf("The passkey YES/NO number: %" PRIu32 "\n", pass_key);
-        /** Inject false if passkeys don't match. */
-        NimBLEDevice::injectConfirmPasskey(connInfo, true);
-    }
-
-    void onAuthenticationComplete(NimBLEConnInfo& connInfo) override {
-        /** Check that encryption was successful, if not we disconnect the client */
-        if (!connInfo.isEncrypted()) {
-            NimBLEDevice::getServer()->disconnect(connInfo.getConnHandle());
-            Serial.printf("Encrypt connection failed - disconnecting client\n");
-            return;
-        }
-
-        Serial.printf("Secured connection to: %s\n", connInfo.getAddress().toString().c_str());
-    }
-
-} serverCallbacks;
-
 // Power management scopes
 void reduceCPUSpeed() {
   // Set CPU frequency to lowest setting (80MHz vs 240MHz default)
@@ -475,33 +173,6 @@ void restoreNormalCPUSpeed() {
 
 void displayCurrentView(int view);
 
-//Temp Non-Blocking Variables
-unsigned long temperatureMillis = 0;
-const unsigned long temperatureInterval = 5000; // 1 second interval for temperature update
-
-void updateTemperature() {
-  unsigned long currentMillis = millis();
-
-  // Check if enough time has passed to update temperature
-  if (currentMillis - temperatureMillis >= temperatureInterval) {
-    temperatureMillis = currentMillis;
-
-    if (deviceConnected) {
-      // Read the ESP32's internal temperature
-      float temperature = temperatureRead();  // Temperature in Celsius
-
-      // Convert temperature to string and send over BLE
-      char tempStr[12];
-      snprintf(tempStr, sizeof(tempStr), "%.1f°C", temperature);
-      pTemperatureCharacteristic->setValue(tempStr);
-      pTemperatureCharacteristic->notify();
-
-      // Optional: Debug output to serial
-      Serial.print("Internal Temperature: ");
-      Serial.println(tempStr);
-    }
-  }
-}
 
 void wakeFromSleepMode() {
   if (!sleepModeActive) return; // Already awake
@@ -627,7 +298,7 @@ void fadeInAndOutLED(uint8_t r, uint8_t g, uint8_t b) {
 void handleBLEConnection() {
     if (deviceConnected != oldDeviceConnected) {
         if (deviceConnected) {
-            statusPixel.setPixelColor(0, 0, 255, 0); // Green when connected
+            statusPixel.setPixelColor(0, 0, 100, 0); // Green when connected
         } else {
             statusPixel.setPixelColor(0, 0, 0, 0); // Off when disconnected
             NimBLEDevice::startAdvertising();
@@ -637,12 +308,12 @@ void handleBLEConnection() {
     }
     
     if (!deviceConnected) {
-        fadeInAndOutLED(0, 0, 255); // Blue fade when disconnected
+        fadeInAndOutLED(0, 0, 100); // Blue fade when disconnected
     }
 }
 
 void fadeBlueLED() {
-    fadeInAndOutLED(0, 0, 255); // Blue color
+    fadeInAndOutLED(0, 0, 100); // Blue color
 }
 
 // Bitmap Drawing Functions ------------------------------------------------
@@ -827,15 +498,6 @@ void displayLoadingBar() {
   dma_display->fillRect(barX + 1, (barY * 2) + 1, progressWidth, barHeight - 2, dma_display->color565(255, 255, 255));
   dma_display->fillRect((barX + 1) + 64, (barY * 2) + 1, progressWidth, barHeight - 2, dma_display->color565(255, 255, 255));
 
-/*
-  // Display percentage text
-  char progressText[16];
-  sprintf(progressText, "%d%%", loadingProgress);
-  dma_display->setTextColor(dma_display->color565(255, 255, 255));
-  dma_display->setCursor(barX - 8, barY + 14); // Position above the bar
-  dma_display->print(progressText);
-*/
-  //delay(10);     // Short delay for smoother animation
 }
 
 // Helper function for ease-in-out quadratic easing
@@ -1011,42 +673,28 @@ void blinkingEyes() {
 
   // Draw  eyes
   if (currentView == 4 || currentView == 5) {
-    //drawXbm565(0, 0, 32, 16, Eye, dma_display->color565(255, 255, 255));
-    //drawXbm565(96, 0, 32, 16, EyeL, dma_display->color565(255, 255, 255));
+
     drawPlasmaXbm(0, 0, 32, 16, Eye, 0, 1.0);     // Right eye
     drawPlasmaXbm(96, 0, 32, 16, EyeL, 128, 1.0); // Left eye (phase offset)
   }
   else if (currentView == 6) {
-    //drawXbm565(0, 0, 32, 12, semicircleeyes, dma_display->color565(255, 255, 255));
-    //drawXbm565(96, 0, 32, 12, semicircleeyes, dma_display->color565(255, 255, 255));
+
     drawPlasmaXbm(0, 0, 32, 12, semicircleeyes, 0, 1.0);     // Right eye
     drawPlasmaXbm(96, 0, 32, 12, semicircleeyes, 128, 1.0); // Left eye (phase offset)
   }
   else if (currentView == 7) {
-    //drawXbm565(0, 0, 31, 15, x_eyes, dma_display->color565(255, 255, 255));
-    //drawXbm565(96, 0, 31, 15, x_eyes, dma_display->color565(255, 255, 255));
+
     drawPlasmaXbm(0, 0, 31, 15, x_eyes, 0, 1.0);     // Right eye
     drawPlasmaXbm(96, 0, 31, 15, x_eyes, 128, 1.0); // Left eye (phase offset)
   }
-  /*
-  if (currentView == 8) {
-    drawXbm565(0, 0, Angry, 16, 8, dma_display->color565(255, 255, 255));
-    drawXbm565(96, 0, AngryL, 16, 8, dma_display->color565(255, 255, 255));
-  }
-  if (currentView == 9) {
-    drawXbm565(0, 0, Spooked, 16, 8, dma_display->color565(255, 255, 255));
-    drawXbm565(96, 0, SpookedL, 16, 8, dma_display->color565(255, 255, 255));
-  }
-  */
+
   else if (currentView == 8) {
-    //drawXbm565(0, 0, 24, 16, slanteyes, dma_display->color565(255, 255, 255));
-    //drawXbm565(104, 0, 24, 16, slanteyesL, dma_display->color565(255, 255, 255));
+
     drawPlasmaXbm(0, 0, 24, 16, slanteyes, 0, 1.0);     // Right eye
     drawPlasmaXbm(104, 0, 24, 16, slanteyesL, 128, 1.0); // Left eye (phase offset)
   }
   else if (currentView == 9) {
-  //  drawXbm565(15, 0, 25, 25, spiral, dma_display->color565(255, 255, 255));
-  //  drawXbm565(88, 0, 25, 25, spiralL, dma_display->color565(255, 255, 255));
+
   }
 
   if (isBlinking) {
@@ -1110,8 +758,8 @@ void updateBlush() {
 }
 
 void drawBlush() {
-  Serial.print("Blush brightness: ");
-  Serial.println(blushBrightness);
+  //Serial.print("Blush brightness: ");
+  //Serial.println(blushBrightness);
 
   // Set blush color based on brightness
   uint16_t blushColor = dma_display->color565(blushBrightness, 0, blushBrightness);
@@ -1147,24 +795,9 @@ dma_display->clearScreen(); // Clear the display
 }
 
 void protoFaceTest() {
-  //dma_display->clearScreen(); // Clear the display
 
-   // Draw Nose
-   //drawXbm565(56, 2, 8, 8, nose, dma_display->color565(255, 255, 255));
-   //drawXbm565(64, 2, 8, 8, noseL, dma_display->color565(255, 255, 255));
-   //drawPlasmaXbm(56, 10, 8, 8, nose, 64, 2.0);
-   //drawPlasmaXbm(64, 10, 8, 8, noseL, 64, 2.0);
-   // Draw blinking eyes
    blinkingEyes();
 
-   // Draw mouth
-   //drawXbm565(0, 16, 64, 16, maw, dma_display->color565(255, 255, 255));
-   //(64, 16, 64, 16, mawL, dma_display->color565(255, 255, 255));
-   //drawXbm565(0, 0, Eye, 32, 16, dma_display->color565(255, 255, 255));
-   //drawXbm565(96, 0, EyeL, 32, 16, dma_display->color565(255, 255, 255));
-
-   //drawXbm565(0, 10, 64, 22, maw2Closed, dma_display->color565(255, 255, 255));
-   //drawXbm565(64, 10, 64, 22, maw2ClosedL, dma_display->color565(255, 255, 255));
    drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 0, 1.0);     // Right eye
    drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0); // Left eye (phase offset)
 
@@ -1291,7 +924,11 @@ void setup() {
   delay(1000); // Delay for serial monitor to start
   Serial.println(" ");
   Serial.println("*****************************************************");
+  Serial.println("*****************************************************");
+  Serial.println("*****************************************************");
   Serial.println("*******************    LumiFur    *******************");
+  Serial.println("*****************************************************");
+  Serial.println("*****************************************************");
   Serial.println("*****************************************************");
   
   // Initialize Preferences
@@ -1340,8 +977,6 @@ void setup() {
   // Config characteristic with encryption
   pConfigCharacteristic = pService->createCharacteristic(
       CONFIG_CHARACTERISTIC_UUID,
-      //NIMBLE_PROPERTY::READ |
-      //NIMBLE_PROPERTY::WRITE |
       NIMBLE_PROPERTY::NOTIFY |
       NIMBLE_PROPERTY::READ_ENC |
       NIMBLE_PROPERTY::WRITE_ENC
@@ -1799,8 +1434,8 @@ void loop(void) {
     if (now - lastSensorReadTime >= sensorInterval) {
       lastSensorReadTime = now;
       uint8_t proximity = apds.readProximity();
-      Serial.print("Proximity: ");
-      Serial.println(proximity);
+      //Serial.print("Proximity: ");
+      //Serial.println(proximity);
       // Trigger blush if the proximity condition is met and no blush is active.
       if (proximity >= 15 && blushState == BLUSH_INACTIVE) {
         Serial.println("Blush triggered by proximity!");
