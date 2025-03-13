@@ -1,4 +1,3 @@
-
 #ifdef IDF_BUILD
 #include <stdio.h>
 #include <freertos/FreeRTOS.h>
@@ -15,206 +14,56 @@
 #include "xtensa/core-macros.h"
 #include "bitmaps.h"
 #include "customFonts/lequahyper20pt7b.h"       // Stylized font
-#include <Fonts/FreeSansBold18pt7b.h>     // Larger font
-//#include <Wire.h>                       // For I2C sensors
+#include <Fonts/FreeSansBold18pt7b.h>           // Larger font
+//#include <Wire.h>                             // For I2C sensors
 #ifdef VIRTUAL_PANE
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
 #else
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #endif
+
 #include "main.h"
 
 //BLE Libraries
 #include <NimBLEDevice.h>
 
 // BLE UUIDs
-#define SERVICE_UUID        "01931c44-3867-7740-9867-c822cb7df308"
-#define CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09fe"
-#define CONFIG_CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09ff"
-#define TEMPERATURE_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9774-18350e3e27db"  // Unique UUID for temperature data
-#define ULTRASOUND_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9732-12460e3a35db"
+#define SERVICE_UUID                    "01931c44-3867-7740-9867-c822cb7df308"
+#define CHARACTERISTIC_UUID             "01931c44-3867-7427-96ab-8d7ac0ae09fe"
+#define CONFIG_CHARACTERISTIC_UUID      "01931c44-3867-7427-96ab-8d7ac0ae09ff"
+#define TEMPERATURE_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9774-18350e3e27db"
+//#define ULTRASOUND_CHARACTERISTIC_UUID  "01931c44-3867-7b5d-9732-12460e3a35db"
 
 //#define DESC_USER_DESC_UUID  0x2901  // User Description descriptor
 //#define DESC_FORMAT_UUID     0x2904  // Presentation Format descriptor
-
-// HUB75E port pinout
-// R1 | G1
-// B1 | GND
-// R2 | G2
-// B2 | E
-//  A | B
-//  C | D
-// CLK| LAT
-// OE | GND
-
-/*  Default library pin configuration for the reference
-  you can redefine only ones you need later on object creation
-#define R1 25
-#define G1 26
-#define BL1 27
-#define R2 14
-#define G2 12
-#define BL2 13
-#define CH_A 23
-#define CH_B 19
-#define CH_C 5
-#define CH_D 17
-#define CH_E -1 // assign to any available pin if using panels with 1/32 scan
-#define CLK 16
-#define LAT 4
-#define OE 15
-*/
-
-#if defined(_VARIANT_MATRIXPORTAL_M4_) // MatrixPortal M4
-  #define BUTTON_UP 2
-  #define BUTTON_DOWN 3
-#elif defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) // MatrixPortal ESP32-S3
-  #define R1_PIN 42
-  #define G1_PIN 41
-  #define B1_PIN 40
-  #define R2_PIN 38
-  #define G2_PIN 39
-  #define B2_PIN 37
-  #define A_PIN  45
-  #define B_PIN  36
-  #define C_PIN  48
-  #define D_PIN  35
-  #define E_PIN  21 
-  #define LAT_PIN 47
-  #define OE_PIN  14
-  #define CLK_PIN 2
-  #define PIN_E 21 // E pin for 64px high panels
-  // Button pins
-  #define BUTTON_UP 6
-  #define BUTTON_DOWN 7
-  //#include <Adafruit_LIS3DH.h>      // Library for built-in For accelerometer
-  #include <Adafruit_NeoPixel.h>    // Library for built-in NeoPixel
-  #define STATUS_LED_PIN 4
-  Adafruit_NeoPixel statusPixel(1, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
-#elif defined(ARDUINO_ADAFRUIT_METRO_ESP32S3) //Metro ESP32-S3
-  #define R1_PIN 2
-  #define G1_PIN 3
-  #define B1_PIN 4
-  #define R2_PIN 5
-  #define G2_PIN 6
-  #define B2_PIN 7
-  #define A_PIN  A0
-  #define B_PIN  A1
-  #define C_PIN  A2
-  #define D_PIN  A3
-  #define E_PIN  21 
-  #define LAT_PIN 10
-  #define OE_PIN  9
-  #define CLK_PIN 8
-  #define PIN_E 9 // E pin for 64px high panels
-#elif defined(__SAMD51__) // M4 Metro Variants (Express, AirLift)
-  //
-#elif defined(_SAMD21_) // Feather M0 variants
-  //
-#elif defined(NRF52_SERIES) // Special nRF52840 FeatherWing pinout
-  //
-#elif USB_VID == 0x239A && USB_PID == 0x8113 // Feather ESP32-S3 No PSRAM
-  // M0/M4/RP2040 Matrix FeatherWing compatible:
-#elif USB_VID == 0x239A && USB_PID == 0x80EB // Feather ESP32-S2
-  // M0/M4/RP2040 Matrix FeatherWing compatible:
-#elif defined(ESP32)
-  // 'Safe' pins, not overlapping any peripherals:
-  // GPIO.out: 4, 12, 13, 14, 15, 21, 27, GPIO.out1: 32, 33
-  // Peripheral-overlapping pins, sorted from 'most expendible':
-  // 16, 17 (RX, TX)
-  // 25, 26 (A0, A1)
-  // 18, 5, 9 (MOSI, SCK, MISO)
-  // 22, 23 (SCL, SDA)
-#elif defined (FREENOVE_ESP32_S3_WROOM)
-// 'Safe' pins, not overlapping any peripherals:
-  #define R1_PIN 2
-  #define G1_PIN 3
-  #define B1_PIN 4
-  #define R2_PIN 5
-  #define G2_PIN 6
-  #define B2_PIN 7
-  #define A_PIN  A0
-  #define B_PIN  A1
-  #define C_PIN  A2
-  #define D_PIN  A3
-  #define E_PIN  21 
-  #define LAT_PIN 10
-  #define OE_PIN  9
-  #define CLK_PIN 8
-  #define PIN_E 9 // E pin for 64px high panels
-#elif defined(ARDUINO_TEENSY40)
-  //
-#elif defined(ARDUINO_TEENSY41)
-  //
-#elif defined(ARDUINO_ADAFRUIT_FEATHER_RP2040)
-  // RP2040 support requires the Earle Philhower board support package;
-  // will not compile with the Arduino Mbed OS board package.
-  // The following pinout works with the Adafruit Feather RP2040 and
-  // original RGB Matrix FeatherWing (M0/M4/RP2040, not nRF version).
-  // Pin numbers here are GP## numbers, which may be different than
-  // the pins printed on some boards' top silkscreen.
-#endif
-
-
-// Configure for your panel(s) as appropriate!
-#define PANEL_WIDTH 64
-#define PANEL_HEIGHT 32         // Panel height of 64 will required PIN_E to be defined.
-
-#ifdef VIRTUAL_PANE
- #define PANELS_NUMBER 4         // Number of chained panels, if just a single panel, obviously set to 1
-#else
- #define PANELS_NUMBER 2         // Number of chained panels, if just a single panel, obviously set to 1
-#endif
-
-#define PANE_WIDTH PANEL_WIDTH * PANELS_NUMBER
-#define PANE_HEIGHT PANEL_HEIGHT
-#define NUM_LEDS PANE_WIDTH*PANE_HEIGHT
-
-#ifdef VIRTUAL_PANE
- #define NUM_ROWS 2 // Number of rows of chained INDIVIDUAL PANELS
- #define NUM_COLS 2 // Number of INDIVIDUAL PANELS per ROW
- #define PANEL_CHAIN NUM_ROWS*NUM_COLS    // total number of panels chained one to another
- // Change this to your needs, for details on VirtualPanel pls read the PDF!
- #define SERPENT true
- #define TOPDOWN false
-#endif
-
-
-#ifdef VIRTUAL_PANE
-VirtualMatrixPanel *matrix = nullptr;
-MatrixPanel_I2S_DMA *chain = nullptr;
-#else
-MatrixPanel_I2S_DMA *dma_display = nullptr;
-#endif
-
-// patten change delay
-#define PATTERN_DELAY 2000
-
-// gradient buffer
-CRGB *ledbuff;
-
-// LED array
-CRGB leds[1];
-
-unsigned long t1, t2, s1=0, s2=0, s3=0;
-uint32_t ccount1, ccount2;
-
-uint8_t color1 = 0, color2 = 0, color3 = 0;
-uint16_t x,y;
-
-const char *message = "* ESP32 I2S DMA *";
 
 
 //#include "EffectsLayer.hpp" // FastLED CRGB Pixel Buffer for which the patterns are drawn
 //EffectsLayer effects(VPANEL_W, VPANEL_H);
 
+// ----------------------------------------------------------------
+// ----------------------------------------------------------------
+// ------------------- LumiFur Global Variables -------------------
+// ----------------------------------------------------------------
+// ----------------------------------------------------------------
 
-
-// LumiFur Global Variables ---------------------------------------------------
+//Brightness control
+// Retrieve the brightness value from preferences
+int userBrightness = getUserBrightness(); // e.g., default 204 (80%)
+// Map userBrightness (1-100) to hardware brightness (1-255).
+int hwBrightness = map(userBrightness, 1, 100, 1, 255);
+// Convert the userBrightness into a scale factor (0.0 to 1.0)
+// Here, we simply divide by 100.0 to get a proportion.
+float globalBrightnessScale = userBrightness / 100.0;
 
 // View switching
 uint8_t currentView = 4; // Current & initial view being displayed
 const int totalViews = 11; // Total number of views to cycle through
+//int userBrightness = 20; // Default brightness level (0-255)
+
+unsigned long spiralStartTime = 0; // Global variable to record when spiral view started
+int previousView = 0;              // Global variable to store the view before spiral
+
 //Maw switching
 int currentMaw = 1; // Current & initial maw being displayed
 const int totalMaws = 2; // Total number of maws to cycle through
@@ -234,15 +83,40 @@ bool isBlinking = false;            // Whether a blink is in progress
 int blinkDuration = 300;            // Initial time for a full blink (milliseconds)
 const int minBlinkDuration = 100;   // Minimum time for a full blink (ms)
 const int maxBlinkDuration = 500;   // Maximum time for a full blink (ms)
-
 const int minBlinkDelay = 1000;     // Minimum time between blinks (ms)
 const int maxBlinkDelay = 5000;     // Maximum time between blinks (ms)
 
-//Blushing effect variables
-unsigned long blushFadeStartTime = 0;
-const unsigned long blushFadeDuration = 2000; // 2 seconds for full fade-in
-bool isBlushFadingIn = true;                  // Whether the blush is currently fading in
-uint8_t blushBrightness = 0;                  // Current blush brightness (0-255)
+// Global constants for each sensitivity level
+const float SLEEP_THRESHOLD = 2.0;  // for sleep mode detection
+const float SHAKE_THRESHOLD = 20.0;  // for shake detection
+// Global flag to control which threshold to use
+bool useShakeSensitivity = true;
+
+
+// Define blush state using an enum
+enum BlushState {
+  BLUSH_INACTIVE,
+  BLUSH_FADE_IN,
+  BLUSH_FULL,
+  BLUSH_FADE_OUT
+};
+BlushState blushState = BLUSH_INACTIVE;
+
+// Blush effect variables
+unsigned long blushStateStartTime = 0;
+const unsigned long fadeInDuration = 2000;  // Duration for fade-in (2 seconds)
+const unsigned long fullDuration = 6000;      // Full brightness time after fade-in (6 seconds)
+// Total time from trigger to start fade-out is fadeInDuration + fullDuration = 8 seconds.
+const unsigned long fadeOutDuration = 2000;   // Duration for fade-out (2 seconds)
+bool isBlushFadingIn = false;    // Flag to indicate we are in the fade‑in phase
+
+// Blush brightness variable (0-255)
+uint8_t blushBrightness = 0;
+
+// Non-blocking sensor read interval
+unsigned long lastSensorReadTime = 0;
+const unsigned long sensorInterval = 50;  // sensor read every 50 ms
+
 
 // Variables for plasma effect
 uint16_t time_counter = 0, cycles = 0, fps = 0;
@@ -268,78 +142,74 @@ bool debounceButton(int pin) {
   return false;
 }
 
+// Sleep mode variables
+// Define both timeout values and select the appropriate one in setup()
+const unsigned long SLEEP_TIMEOUT_MS_DEBUG = 15000;    // 15 seconds (15,000 ms)
+const unsigned long SLEEP_TIMEOUT_MS_NORMAL = 300000; // 5 minutes (300,000 ms)
+unsigned long SLEEP_TIMEOUT_MS; // Will be set in setup() based on debugMode
+bool sleepModeActive = false;
+unsigned long lastActivityTime = 0;
+float prevAccelX = 0, prevAccelY = 0, prevAccelZ = 0;
+uint8_t preSleepView = 4;  // Store the view before sleep
+uint8_t sleepBrightness = 15; // Brightness level during sleep (0-255)
+uint8_t normalBrightness = userBrightness; // Normal brightness level
+unsigned long sleepFrameInterval = 11; // Frame interval in ms (will be changed during sleep)
 
-////////////////////////////////////////////
-/////////////////BLE CONFIG/////////////////
-////////////////////////////////////////////
+// Accelerometer object declaration
+Adafruit_LIS3DH accel;
 
-bool deviceConnected = false;
-bool oldDeviceConnected = false;
+// Power management scopes
+void reduceCPUSpeed() {
+  // Set CPU frequency to lowest setting (80MHz vs 240MHz default)
+  setCpuFrequencyMhz(80);
+  Serial.println("CPU frequency reduced to 80MHz for power saving");
+}
 
-// BLE Server pointers
-NimBLEServer* pServer = nullptr;
-NimBLECharacteristic* pCharacteristic = nullptr;
-NimBLECharacteristic* pFaceCharacteristic = nullptr;
-NimBLECharacteristic* pTemperatureCharacteristic = nullptr;
-NimBLECharacteristic* pConfigCharacteristic = nullptr;
-
-// Class to handle BLE server callbacks
-class ServerCallbacks : public NimBLEServerCallbacks {
-    void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
-        deviceConnected = true;
-        Serial.printf("Client connected: %s\n", connInfo.getAddress().toString().c_str());
-
-        /**
-         *  We can use the connection handle here to ask for different connection parameters.
-         *  Args: connection handle, min connection interval, max connection interval
-         *  latency, supervision timeout.
-         *  Units; Min/Max Intervals: 1.25 millisecond increments.
-         *  Latency: number of intervals allowed to skip.
-         *  Timeout: 10 millisecond increments.
-         */
-        pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 180);
-    }
-
-    void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
-        deviceConnected = false;
-        Serial.println("Client disconnected - advertising");
-        NimBLEDevice::startAdvertising();
-    }
-
-    void onMTUChange(uint16_t MTU, NimBLEConnInfo& connInfo) override {
-        Serial.printf("MTU updated: %u for connection ID: %u\n", MTU, connInfo.getConnHandle());
-    }
-
-    /********************* Security handled here *********************/
-    uint32_t onPassKeyDisplay() override {
-        Serial.printf("Server Passkey Display\n");
-        /**
-         * This should return a random 6 digit number for security
-         *  or make your own static passkey as done here.
-         */
-        return 123456;
-    }
-
-    void onConfirmPassKey(NimBLEConnInfo& connInfo, uint32_t pass_key) override {
-        Serial.printf("The passkey YES/NO number: %" PRIu32 "\n", pass_key);
-        /** Inject false if passkeys don't match. */
-        NimBLEDevice::injectConfirmPasskey(connInfo, true);
-    }
-
-    void onAuthenticationComplete(NimBLEConnInfo& connInfo) override {
-        /** Check that encryption was successful, if not we disconnect the client */
-        if (!connInfo.isEncrypted()) {
-            NimBLEDevice::getServer()->disconnect(connInfo.getConnHandle());
-            Serial.printf("Encrypt connection failed - disconnecting client\n");
-            return;
-        }
-
-        Serial.printf("Secured connection to: %s\n", connInfo.getAddress().toString().c_str());
-    }
-
-} serverCallbacks;
+void restoreNormalCPUSpeed() {
+  // Set CPU frequency back to default (240MHz)
+  setCpuFrequencyMhz(240);
+  Serial.println("CPU frequency restored to 240MHz");
+}
 
 void displayCurrentView(int view);
+
+
+void wakeFromSleepMode() {
+  if (!sleepModeActive) return; // Already awake
+  
+  Serial.println("Waking from sleep mode");
+  sleepModeActive = false;
+  currentView = preSleepView;  // Restore previous view
+  
+  // Restore normal CPU speed
+  restoreNormalCPUSpeed();
+  
+  // Restore normal frame rate
+  sleepFrameInterval = 11; // Back to ~90 FPS
+  
+  // Restore normal brightness
+  dma_display->setBrightness8(normalBrightness);
+  
+  lastActivityTime = millis(); // Reset activity timer
+  
+  // Notify all clients if connected
+  if (deviceConnected) {
+    // Also send current view back to the app
+    uint8_t viewValue = static_cast<uint8_t>(currentView);
+    pFaceCharacteristic->setValue(&viewValue, 1);
+    pFaceCharacteristic->notify();
+    
+    // Send a temperature update
+    updateTemperature();
+  }
+  
+  // Restore normal BLE advertising if not connected
+  if (!deviceConnected) {
+    NimBLEDevice::getAdvertising()->setMinInterval(160); // 100 ms (default)
+    NimBLEDevice::getAdvertising()->setMaxInterval(240); // 150 ms (default)
+    NimBLEDevice::startAdvertising();
+  }
+}
 
 // Class to handle characteristic callbacks
 class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
@@ -353,19 +223,27 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
         std::string value = pCharacteristic->getValue();
         if(value.length() > 0) {
             uint8_t newView = value[0];
-            if (newView >= 1 && newView <=12 && newView != currentView) {
-                currentView = newView;
-                //viewChanged = true;
-                Serial.printf("Write request - new view: %d\n", currentView);
-                pCharacteristic->notify();
+
+          // Command to wake from sleep mode (e.g., sending 255)
+          if (newView == 255 && sleepModeActive) {
+            sleepModeActive = false;
+            wakeFromSleepMode();
+            return;
+          }
+          // Normal view change
+          if (newView >= 1 && newView <=12 && newView != currentView) {
+              currentView = newView;
+              lastActivityTime = millis(); // BLE command counts as activity
+              Serial.printf("Write request - new view: %d\n", currentView);
+              pCharacteristic->notify();
             }
         }
     }
 
-    void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
+  void onStatus(NimBLECharacteristic* pCharacteristic, int code) override {
         Serial.printf("Notification/Indication return code: %d, %s\n", code, NimBLEUtils::returnCodeToString(code));
     }
-    void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) override {
+  void onSubscribe(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo, uint16_t subValue) override {
         std::string str  = "Client ID: ";
         str             += connInfo.getConnHandle();
         str             += " Address: ";
@@ -396,10 +274,6 @@ class DescriptorCallbacks : public NimBLEDescriptorCallbacks {
     }
 } dscCallbacks;
 
-////////////////////////////////////////////
-//////////////////BLE SETUP/////////////////
-////////////////////////////////////////////
-
 
 //non-blocking LED status functions (Neopixel)
 void fadeInAndOutLED(uint8_t r, uint8_t g, uint8_t b) {
@@ -424,7 +298,7 @@ void fadeInAndOutLED(uint8_t r, uint8_t g, uint8_t b) {
 void handleBLEConnection() {
     if (deviceConnected != oldDeviceConnected) {
         if (deviceConnected) {
-            statusPixel.setPixelColor(0, 0, 255, 0); // Green when connected
+            statusPixel.setPixelColor(0, 0, 100, 0); // Green when connected
         } else {
             statusPixel.setPixelColor(0, 0, 0, 0); // Off when disconnected
             NimBLEDevice::startAdvertising();
@@ -434,68 +308,57 @@ void handleBLEConnection() {
     }
     
     if (!deviceConnected) {
-        fadeInAndOutLED(0, 0, 255); // Blue fade when disconnected
+        fadeInAndOutLED(0, 0, 100); // Blue fade when disconnected
     }
 }
 
 void fadeBlueLED() {
-    fadeInAndOutLED(0, 0, 255); // Blue color
-}
-
-//Temp Non-Blocking Variables
-unsigned long temperatureMillis = 0;
-const unsigned long temperatureInterval = 1000; // 1 second interval for temperature update
-
-void updateTemperature() {
-  unsigned long currentMillis = millis();
-
-  // Check if enough time has passed to update temperature
-  if (currentMillis - temperatureMillis >= temperatureInterval) {
-    temperatureMillis = currentMillis;
-
-    if (deviceConnected) {
-      // Read the ESP32's internal temperature
-      float temperature = temperatureRead();  // Temperature in Celsius
-
-      // Convert temperature to string and send over BLE
-      char tempStr[12];
-      snprintf(tempStr, sizeof(tempStr), "%.1f°C", temperature);
-      pTemperatureCharacteristic->setValue(tempStr);
-      pTemperatureCharacteristic->notify();
-
-      // Optional: Debug output to serial
-      Serial.print("Internal Temperature: ");
-      Serial.println(tempStr);
-    }
-  }
+    fadeInAndOutLED(0, 0, 100); // Blue color
 }
 
 // Bitmap Drawing Functions ------------------------------------------------
 void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t color = 0xffff) {
     // Ensure width is padded to the nearest byte boundary
     int byteWidth = (width + 7) / 8;
-
-    for (int j = 0; j < height; j++) {
-        for (int i = 0; i < width; i++) {
-            // Calculate byte and bit positions
-            int byteIndex = j * byteWidth + (i / 8);
-            int bitIndex = 7 - (i % 8); // Bits are stored MSB first
-
+    
+    // Pre-check if entire bitmap is out of bounds
+    if (x >= dma_display->width() || y >= dma_display->height() || 
+        x + width <= 0 || y + height <= 0) {
+        return; // Completely out of bounds, nothing to draw
+    }
+    
+    // Calculate visible region to avoid per-pixel boundary checks
+    int startX = max(0, -x);
+    int startY = max(0, -y);
+    int endX = min(width, dma_display->width() - x);
+    int endY = min(height, dma_display->height() - y);
+    
+    for (int j = startY; j < endY; j++) {
+        uint8_t bitMask = 0x80 >> (startX & 7); // Start with the correct bit position
+        int byteIndex = j * byteWidth + (startX >> 3); // Integer division by 8
+        
+        for (int i = startX; i < endX; i++) {
             // Check if the bit is set
-            if (pgm_read_byte(&xbm[byteIndex]) & (1 << bitIndex)) {
-                // Draw the pixel only if within display boundaries
-                if (x + i >= 0 && y + j >= 0 && x + i < dma_display->width() && y + j < dma_display->height()) {
-                    dma_display->drawPixel(x + i, y + j, color);
-                }
+            if (pgm_read_byte(&xbm[byteIndex]) & bitMask) {
+                dma_display->drawPixel(x + i, y + j, color);
+            }
+            
+            // Move to the next bit
+            bitMask >>= 1;
+            if (bitMask == 0) { // We've used all bits in this byte
+                bitMask = 0x80; // Reset to the first bit of the next byte
+                byteIndex++;     // Move to the next byte
             }
         }
     }
 }
 
+uint16_t plasmaSpeed = 1; // Lower = slower animation
+
 void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm, 
-                 uint8_t time_offset = 0, float scale = 1.0) {
+                 uint8_t time_offset = 0, float scale = 5.0) {
   int byteWidth = (width + 7) / 8;
-  uint16_t plasmaSpeed = 10; // Lower = slower animation
+
   
   for (int j = 0; j < height; j++) {
     for (int i = 0; i < width; i++) {
@@ -503,12 +366,16 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
         // Plasma calculation specific to pixel position
         uint8_t v = 
           sin8((x + i) * scale + time_counter) + 
-          cos8((y + j) * scale + time_counter/2) + 
-          sin8((x + i + y + j) * scale * 0.5 + time_counter/3);
+          cos8((y + j) * scale + time_counter / 2) + 
+          sin8((x + i + y + j) * scale * 0.5 + time_counter / 3);
         
         CRGB color = ColorFromPalette(currentPalette, v + time_offset);
+        // Apply global brightness control from preferences
+        color.r = (uint8_t)(color.r * globalBrightnessScale);
+        color.g = (uint8_t)(color.g * globalBrightnessScale);
+        color.b = (uint8_t)(color.b * globalBrightnessScale);
+
         uint16_t rgb565 = dma_display->color565(color.r, color.g, color.b);
-        
         dma_display->drawPixel(x + i, y + j, rgb565);
       }
     }
@@ -533,11 +400,11 @@ void drawPlasmaFace() {
 
 void updatePlasmaFace() {
   static unsigned long lastUpdate = 0;
-  const uint16_t frameDelay = 50; // Slower update for smoother transition
+  const uint16_t frameDelay = 5; // Low delay for smoother transition
   
   if (millis() - lastUpdate > frameDelay) {
     lastUpdate = millis();
-    time_counter += 5; // Speed of plasma animation
+    time_counter += plasmaSpeed; // Speed of plasma animation
     
     // Cycle palette every 10 seconds
     if (millis() % 10000 < frameDelay) {
@@ -631,22 +498,11 @@ void displayLoadingBar() {
   dma_display->fillRect(barX + 1, (barY * 2) + 1, progressWidth, barHeight - 2, dma_display->color565(255, 255, 255));
   dma_display->fillRect((barX + 1) + 64, (barY * 2) + 1, progressWidth, barHeight - 2, dma_display->color565(255, 255, 255));
 
-/*
-  // Display percentage text
-  char progressText[16];
-  sprintf(progressText, "%d%%", loadingProgress);
-  dma_display->setTextColor(dma_display->color565(255, 255, 255));
-  dma_display->setCursor(barX - 8, barY + 14); // Position above the bar
-  dma_display->print(progressText);
-*/
-  //delay(10);     // Short delay for smoother animation
 }
 
 // Helper function for ease-in-out quadratic easing
 float easeInOutQuad(float t) {
-return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-
-dma_display->flipDMABuffer();
+  return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 }
 
 // Easing functions with bounds checking
@@ -817,42 +673,28 @@ void blinkingEyes() {
 
   // Draw  eyes
   if (currentView == 4 || currentView == 5) {
-    //drawXbm565(0, 0, 32, 16, Eye, dma_display->color565(255, 255, 255));
-    //drawXbm565(96, 0, 32, 16, EyeL, dma_display->color565(255, 255, 255));
+
     drawPlasmaXbm(0, 0, 32, 16, Eye, 0, 1.0);     // Right eye
     drawPlasmaXbm(96, 0, 32, 16, EyeL, 128, 1.0); // Left eye (phase offset)
   }
   else if (currentView == 6) {
-    //drawXbm565(0, 0, 32, 12, semicircleeyes, dma_display->color565(255, 255, 255));
-    //drawXbm565(96, 0, 32, 12, semicircleeyes, dma_display->color565(255, 255, 255));
+
     drawPlasmaXbm(0, 0, 32, 12, semicircleeyes, 0, 1.0);     // Right eye
     drawPlasmaXbm(96, 0, 32, 12, semicircleeyes, 128, 1.0); // Left eye (phase offset)
   }
   else if (currentView == 7) {
-    //drawXbm565(0, 0, 31, 15, x_eyes, dma_display->color565(255, 255, 255));
-    //drawXbm565(96, 0, 31, 15, x_eyes, dma_display->color565(255, 255, 255));
+
     drawPlasmaXbm(0, 0, 31, 15, x_eyes, 0, 1.0);     // Right eye
     drawPlasmaXbm(96, 0, 31, 15, x_eyes, 128, 1.0); // Left eye (phase offset)
   }
-  /*
-  if (currentView == 8) {
-    drawXbm565(0, 0, Angry, 16, 8, dma_display->color565(255, 255, 255));
-    drawXbm565(96, 0, AngryL, 16, 8, dma_display->color565(255, 255, 255));
-  }
-  if (currentView == 9) {
-    drawXbm565(0, 0, Spooked, 16, 8, dma_display->color565(255, 255, 255));
-    drawXbm565(96, 0, SpookedL, 16, 8, dma_display->color565(255, 255, 255));
-  }
-  */
+
   else if (currentView == 8) {
-    //drawXbm565(0, 0, 24, 16, slanteyes, dma_display->color565(255, 255, 255));
-    //drawXbm565(104, 0, 24, 16, slanteyesL, dma_display->color565(255, 255, 255));
+
     drawPlasmaXbm(0, 0, 24, 16, slanteyes, 0, 1.0);     // Right eye
     drawPlasmaXbm(104, 0, 24, 16, slanteyesL, 128, 1.0); // Left eye (phase offset)
   }
   else if (currentView == 9) {
-  //  drawXbm565(15, 0, 25, 25, spiral, dma_display->color565(255, 255, 255));
-  //  drawXbm565(88, 0, 25, 25, spiralL, dma_display->color565(255, 255, 255));
+
   }
 
   if (isBlinking) {
@@ -865,21 +707,59 @@ void blinkingEyes() {
   }
 }
 
-void drawBlush() {
-  //dma_display->clearScreen();
-  // Calculate blush brightness
-  if (isBlushFadingIn) {
-    unsigned long currentTime = millis();
-    unsigned long elapsedTime = currentTime - blushFadeStartTime;
+// Function to disable/clear the blush display when the effect is over
+void disableBlush() {
+  Serial.println("Blush disabled!");
+  // Clear the blush area to ensure the effect is removed
+  dma_display->fillRect(45, 1, 18, 13, 0); // Clear right blush area
+  dma_display->fillRect(72, 1, 18, 13, 0); // Clear left blush area
+}
+
+// Update the blush effect state (non‑blocking)
+void updateBlush() {
+  unsigned long now = millis();
+  unsigned long elapsed = now - blushStateStartTime;
   
-  // Calculate blush brightness
-  if (elapsedTime <= blushFadeDuration) {
-    blushBrightness = map(elapsedTime, 0, blushFadeDuration, 0, 255); // Gradual fade-in
-  } else {
-      blushBrightness = 255; // Max brightness reached
-      isBlushFadingIn = false; // Stop fading
-    }
+  switch (blushState) {
+    case BLUSH_FADE_IN:
+      if (elapsed < fadeInDuration) {
+        // Gradually increase brightness from 0 to 255
+        blushBrightness = map(elapsed, 0, fadeInDuration, 0, 255);
+      } else {
+        blushBrightness = 255;
+        blushState = BLUSH_FULL;
+        blushStateStartTime = now;  // Restart timer for full brightness phase
+      }
+      break;
+      
+    case BLUSH_FULL:
+      if (elapsed >= fullDuration) {
+        // After 6 seconds at full brightness, start fading out
+        blushState = BLUSH_FADE_OUT;
+        blushStateStartTime = now;  // Restart timer for fade‑out
+      }
+      // Brightness remains at 255 during this phase.
+      break;
+      
+    case BLUSH_FADE_OUT:
+      if (elapsed < fadeOutDuration) {
+        // Decrease brightness gradually from 255 to 0
+        blushBrightness = map(elapsed, 0, fadeOutDuration, 255, 0);
+      } else {
+        blushBrightness = 0;
+        blushState = BLUSH_INACTIVE;
+        disableBlush();
+      }
+      break;
+      
+    default:
+      break;
   }
+}
+
+void drawBlush() {
+  //Serial.print("Blush brightness: ");
+  //Serial.println(blushBrightness);
 
   // Set blush color based on brightness
   uint16_t blushColor = dma_display->color565(blushBrightness, 0, blushBrightness);
@@ -915,30 +795,16 @@ dma_display->clearScreen(); // Clear the display
 }
 
 void protoFaceTest() {
-  //dma_display->clearScreen(); // Clear the display
 
-   // Draw Nose
-   //drawXbm565(56, 2, 8, 8, nose, dma_display->color565(255, 255, 255));
-   //drawXbm565(64, 2, 8, 8, noseL, dma_display->color565(255, 255, 255));
-   //drawPlasmaXbm(56, 10, 8, 8, nose, 64, 2.0);
-   //drawPlasmaXbm(64, 10, 8, 8, noseL, 64, 2.0);
-   // Draw blinking eyes
    blinkingEyes();
 
-   // Draw mouth
-   //drawXbm565(0, 16, 64, 16, maw, dma_display->color565(255, 255, 255));
-   //(64, 16, 64, 16, mawL, dma_display->color565(255, 255, 255));
-   //drawXbm565(0, 0, Eye, 32, 16, dma_display->color565(255, 255, 255));
-   //drawXbm565(96, 0, EyeL, 32, 16, dma_display->color565(255, 255, 255));
-
-   //drawXbm565(0, 10, 64, 22, maw2Closed, dma_display->color565(255, 255, 255));
-   //drawXbm565(64, 10, 64, 22, maw2ClosedL, dma_display->color565(255, 255, 255));
    drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 0, 1.0);     // Right eye
    drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0); // Left eye (phase offset)
 
-  if (currentView == 5) { // Moved before drawing nose to prevent clipping of partial pixel clearing
-   drawBlush();
-   }
+   
+  if (currentView > 3) { // Only draw blush effect for face views, not utility views
+    drawBlush();
+  }
 
    drawPlasmaXbm(56, 10, 8, 8, nose, 64, 2.0);
    drawPlasmaXbm(64, 10, 8, 8, noseL, 64, 2.0);
@@ -972,86 +838,179 @@ void patternPlasma() {
   }
 }
 
+void displaySleepMode() {
+  static unsigned long lastBlinkTime = 0;
+  static bool eyesOpen = false;
+  static float animationPhase = 0;
+  static unsigned long lastAnimTime = 0;
+  
+  // Apply brightness adjustment for breathing effect
+  static unsigned long lastBreathTime = 0;
+  static float brightness = 0;
+  static float breathingDirection = 1;  // 1 for increasing, -1 for decreasing
+  
+  // Update breathing effect
+  if (millis() - lastBreathTime >= 50) {
+    lastBreathTime = millis();
+    
+    // Update breathing brightness
+    brightness += breathingDirection * 0.01;  // Slow breathing effect
+    
+    // Reverse direction at limits
+    if (brightness >= 1.0) {
+      brightness = 1.0;
+      breathingDirection = -1;
+    } else if (brightness <= 0.1) {  // Keep a minimum brightness
+      brightness = 0.1;
+      breathingDirection = 1;
+    }
+    
+    // Apply breathing effect to overall brightness
+    uint8_t currentBrightness = sleepBrightness * brightness;
+    dma_display->setBrightness8(currentBrightness);
+  }
+  
+  dma_display->clearScreen();
+  
+  // Simple animation for floating Zs
+  if (millis() - lastAnimTime > 100) {
+    animationPhase += 0.1;
+    lastAnimTime = millis();
+  }
+  
+  // Draw animated ZZZs with offset based on animation phase
+  int offset1 = sin8(animationPhase * 20) / 16;
+  int offset2 = sin8((animationPhase + 0.3) * 20) / 16;
+  int offset3 = sin8((animationPhase + 0.6) * 20) / 16;
+  
+  drawXbm565(27, 2 + offset1, 8, 8, sleepZ1, dma_display->color565(150, 150, 150));
+  drawXbm565(37, 0 + offset2, 8, 8, sleepZ2, dma_display->color565(100, 100, 100));
+  drawXbm565(47, 1 + offset3, 8, 8, sleepZ3, dma_display->color565(50, 50, 50));
+
+  drawXbm565(71, 2 + offset1, 8, 8, sleepZ1, dma_display->color565(50, 50, 50));
+  drawXbm565(81, 0 + offset2, 8, 8, sleepZ2, dma_display->color565(100, 100, 100));
+  drawXbm565(91, 1 + offset3, 8, 8, sleepZ3, dma_display->color565(150, 150, 150));
+  
+  // Draw closed or slightly open eyes
+  if (millis() - lastBlinkTime > 4000) {  // Occasional slow blink
+    eyesOpen = !eyesOpen;
+    lastBlinkTime = millis();
+  }
+  
+  // Draw nose
+  drawXbm565(56, 10, 8, 8, nose, dma_display->color565(100, 100, 100));
+  drawXbm565(64, 10, 8, 8, noseL, dma_display->color565(100, 100, 100));
+  
+  if (eyesOpen) {
+    // Draw slightly open eyes - just a small slit
+    dma_display->fillRect(5, 5, 20, 2, dma_display->color565(150, 150, 150));
+    dma_display->fillRect(103, 5, 20, 2, dma_display->color565(150, 150, 150));
+  } else {
+    // Draw closed eyes
+    dma_display->drawLine(5, 10, 40, 12, dma_display->color565(150, 150, 150));
+    dma_display->drawLine(83, 10, 40, 12, dma_display->color565(150, 150, 150));
+  }
+  
+  // Draw sleeping mouth (slight curve)
+  drawXbm565(0, 20, 64, 8, maw2Closed, dma_display->color565(120, 120, 120));
+  drawXbm565(64, 20, 64, 8, maw2ClosedL, dma_display->color565(120, 120, 120));
+  
+  dma_display->flipDMABuffer();
+}
+
 void setup() {
 
   Serial.begin(BAUD_RATE);
-  Serial.print(F("*****************************************************"));
-  Serial.print(F("*                      LumiFur                      *"));
-  Serial.print(F("*****************************************************"));
-    
-    Serial.print("Initializing BLE...");
-    NimBLEDevice::init("LumiFur_Controller");
-    NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
-    NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
-    pServer = NimBLEDevice::createServer();
-    pServer->setCallbacks(&serverCallbacks);
+  delay(1000); // Delay for serial monitor to start
+  Serial.println(" ");
+  Serial.println("*****************************************************");
+  Serial.println("*****************************************************");
+  Serial.println("*****************************************************");
+  Serial.println("*******************    LumiFur    *******************");
+  Serial.println("*****************************************************");
+  Serial.println("*****************************************************");
+  Serial.println("*****************************************************");
+  
+  // Initialize Preferences
+  initPreferences();
+  
+  // Retrieve and print stored brightness value.
+  int userBrightness = getUserBrightness();
+  // Map userBrightness (1-100) to hardware brightness (1-255).
+  int hwBrightness = map(userBrightness, 1, 100, 1, 255);
+  Serial.printf("Stored brightness: %d\n", userBrightness);
+ 
 
-    NimBLEService* pService = pServer->createService(SERVICE_UUID);
-    
-     // Face control characteristic with encryption
-    NimBLECharacteristic* pFaceCharacteristic =
-      pService->createCharacteristic(
-        CHARACTERISTIC_UUID,
-        NIMBLE_PROPERTY::READ |
-        NIMBLE_PROPERTY::WRITE |
-        NIMBLE_PROPERTY::NOTIFY |
-        NIMBLE_PROPERTY::READ_ENC | // only allow reading if paired / encrypted
-        NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
-    );
-    
-    // Set initial view value
-    uint8_t viewValue = static_cast<uint8_t>(currentView);
-    pFaceCharacteristic->setValue(&viewValue, 1);
-    pFaceCharacteristic->setCallbacks(&chrCallbacks);
+  Serial.println("Initializing BLE...");
+  NimBLEDevice::init("LumiFur_Controller");
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
+  NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
+  pServer = NimBLEDevice::createServer();
+  pServer->setCallbacks(&serverCallbacks);
 
-    // Temperature characteristic with encryption
-    pTemperatureCharacteristic = 
-      pService->createCharacteristic(
-        TEMPERATURE_CHARACTERISTIC_UUID,
-        NIMBLE_PROPERTY::READ |
-        NIMBLE_PROPERTY::NOTIFY |
-        NIMBLE_PROPERTY::READ_ENC
-    );
-    
-    // Config characteristic with encryption
-    pConfigCharacteristic = pService->createCharacteristic(
-        CONFIG_CHARACTERISTIC_UUID,
-        NIMBLE_PROPERTY::READ |
-        NIMBLE_PROPERTY::WRITE |
-        NIMBLE_PROPERTY::NOTIFY |
-        NIMBLE_PROPERTY::READ_ENC |
-        NIMBLE_PROPERTY::WRITE_ENC
-    );
+  NimBLEService* pService = pServer->createService(SERVICE_UUID);
+  
+  // Face control characteristic with encryption
+  pFaceCharacteristic = pService->createCharacteristic(
+    CHARACTERISTIC_UUID,
+    //NIMBLE_PROPERTY::READ |
+    //NIMBLE_PROPERTY::WRITE |
+    NIMBLE_PROPERTY::NOTIFY |
+    NIMBLE_PROPERTY::READ_ENC | // only allow reading if paired / encrypted
+    NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
+  );
+  
+  // Set initial view value
+  uint8_t viewValue = static_cast<uint8_t>(currentView);
+  pFaceCharacteristic->setValue(&viewValue, 1);
+  pFaceCharacteristic->setCallbacks(&chrCallbacks);
 
-    // Set up descriptors
-    NimBLE2904* pFormat2904 = pFaceCharacteristic->create2904();
-    pFormat2904->setFormat(NimBLE2904::FORMAT_UINT8);
-    pFormat2904->setUnit(0x2700); // Unit-less number
-    pFormat2904->setCallbacks(&dscCallbacks);
+  // Temperature characteristic with encryption
+  pTemperatureCharacteristic = 
+    pService->createCharacteristic(
+      TEMPERATURE_CHARACTERISTIC_UUID,
+      NIMBLE_PROPERTY::READ |
+      NIMBLE_PROPERTY::NOTIFY 
+      //NIMBLE_PROPERTY::READ_ENC
+  );
+  
+  // Config characteristic with encryption
+  pConfigCharacteristic = pService->createCharacteristic(
+      CONFIG_CHARACTERISTIC_UUID,
+      NIMBLE_PROPERTY::NOTIFY |
+      NIMBLE_PROPERTY::READ_ENC |
+      NIMBLE_PROPERTY::WRITE_ENC
+  );
 
-    // Add user description descriptor
-    NimBLEDescriptor* pDesc = 
-        pFaceCharacteristic->createDescriptor(
-            "2901",
-            NIMBLE_PROPERTY::READ,
-            20
-        );
-    pDesc->setValue("Face Control");
+  // Set up descriptors
+  NimBLE2904* pFormat2904 = pFaceCharacteristic->create2904();
+  pFormat2904->setFormat(NimBLE2904::FORMAT_UINT8);
+  pFormat2904->setUnit(0x2700); // Unit-less number
+  pFormat2904->setCallbacks(&dscCallbacks);
 
-    //nimBLEService* pBaadService = pServer->createService("BAAD");
-    pService->start();
+  // Add user description descriptor
+  NimBLEDescriptor* pDesc = 
+      pFaceCharacteristic->createDescriptor(
+          "2901",
+          NIMBLE_PROPERTY::READ,
+          20
+      );
+  pDesc->setValue("Face Control");
 
-    /** Create an advertising instance and add the services to the advertised data */
-    NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
-    pAdvertising->setName("LumiFur_Controller");
-    pAdvertising->addServiceUUID(pService->getUUID());
-    pAdvertising->enableScanResponse(true);
-    pAdvertising->start();
+  //nimBLEService* pBaadService = pServer->createService("BAAD");
+  pService->start();
 
-    Serial.println("BLE setup complete - advertising started");
+  /** Create an advertising instance and add the services to the advertised data */
+  NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
+  pAdvertising->setName("LumiFur_Controller");
+  pAdvertising->addServiceUUID(pService->getUUID());
+  pAdvertising->enableScanResponse(true);
+  pAdvertising->start();
 
+  Serial.println("BLE setup complete - advertising started");
 
-  // redefine pins if required
+  
+  //Redefine pins if required
   //HUB75_I2S_CFG::i2s_pins _pins={R1, G1, BL1, R2, G2, BL2, CH_A, CH_B, CH_C, CH_D, CH_E, LAT, OE, CLK};
   //HUB75_I2S_CFG mxconfig(PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER);
   HUB75_I2S_CFG::i2s_pins _pins={R1_PIN, G1_PIN, B1_PIN, R2_PIN, G2_PIN, B2_PIN, A_PIN, B_PIN, C_PIN, D_PIN, E_PIN, LAT_PIN, OE_PIN, CLK_PIN};
@@ -1071,37 +1030,48 @@ void setup() {
 #ifndef VIRTUAL_PANE
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   dma_display->begin();
-  dma_display->setBrightness8(100);
+  dma_display->setBrightness8(hwBrightness);
 #else
   chain = new MatrixPanel_I2S_DMA(mxconfig);
   chain->begin();
-  chain->setBrightness8(255);
+  chain->setBrightness8(hwBrightness);
   // create VirtualDisplay object based on our newly created dma_display object
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
 #endif
 
-dma_display->clearScreen();
-dma_display->flipDMABuffer();
+  dma_display->clearScreen();
+  dma_display->flipDMABuffer();
 
-/*
-  ledbuff = (CRGB *)malloc(NUM_LEDS * sizeof(CRGB));  // allocate buffer for some tests
+  // Memory allocation for LED buffer
+  ledbuff = (CRGB *)malloc(NUM_LEDS * sizeof(CRGB));
   if (ledbuff == nullptr) {
     Serial.println("Memory allocation for ledbuff failed!");
-    while (1); // Stop execution
+    err(250);  // Call error handler
   }
-*/
 
-// Initialize accelerometer if MATRIXPORTAL_ESP32S3 is used
-#if defined (ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
-  //Adafruit_LIS3DH accel = Adafruit_LIS3DH();
+#if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
+  // Initialize onboard components for MatrixPortal ESP32-S3
   statusPixel.begin(); // Initialize NeoPixel status light
+  
+  if (!accel.begin(0x19)) {  // Default I2C address for LIS3DH on MatrixPortal
+    Serial.println("Could not find accelerometer, check wiring!");
+    err(250);  // Fast blink = I2C error
+  } else {
+    Serial.println("Accelerometer found!");
+    accel.setRange(LIS3DH_RANGE_2_G);  // 2G range is sufficient for motion detection
+  }
 #endif
 
-randomSeed(analogRead(0)); // Seed the random number generator for randomized eye blinking
+  lastActivityTime = millis(); // Initialize the activity timer
+
+  randomSeed(analogRead(0)); // Seed the random number generator
+  //randomSeed(analogRead(0)); // Seed the random number generator
+  
+  // Set sleep timeout based on debug mode
+  SLEEP_TIMEOUT_MS = debugMode ? SLEEP_TIMEOUT_MS_DEBUG : SLEEP_TIMEOUT_MS_NORMAL;
 
   // Set initial plasma color palette
   currentPalette = RainbowColors_p;
-
   // Set up buttons if present
   /* ----------------------------------------------------------------------
   Use internal pull-up resistor, as the up and down buttons 
@@ -1114,6 +1084,17 @@ randomSeed(analogRead(0)); // Seed the random number generator for randomized ey
   #ifdef BUTTON_DOWN
     pinMode(BUTTON_DOWN, INPUT_PULLUP);
   #endif
+
+// Initialize APDS9960 proximity sensor
+if(!apds.begin()){
+  Serial.println("failed to initialize proximity sensor! Please check your wiring.");
+  while(1);
+}
+ Serial.println("Proximity sensor initialized!");
+  apds.enableProximity(true); //enable proximity mode
+  apds.setProximityInterruptThreshold(0, 175); //set the interrupt threshold to fire when proximity reading goes above 175
+  apds.enableProximityInterrupt(); //enable the proximity interrupt
+
 }
 
 uint8_t wheelval = 0;
@@ -1140,11 +1121,18 @@ void displayCurrentMaw() {
   break;
 }
 }
+
 void displayCurrentView(int view) {
   static unsigned long lastFrameTime = 0; // Track the last frame time
-  const unsigned long frameInterval = 11; // Consistent 30 FPS
+  const unsigned long frameInterval = 5; // Consistent 30 FPS
   static int previousView = -1; // Track the last active view
 
+  // If we're in sleep mode, don't display the normal view
+  if (sleepModeActive) {
+    displaySleepMode();
+    return;
+  }
+  
    if (millis() - lastFrameTime < frameInterval) return; // Skip frame if not time yet
   lastFrameTime = millis(); // Update last frame time
 
@@ -1153,8 +1141,10 @@ void displayCurrentView(int view) {
 if (view != previousView) { // Check if the view has changed
     if (view == 5) {
       // Reset fade logic when entering the blush view
-      blushFadeStartTime = millis();
+      blushStateStartTime = millis();
       isBlushFadingIn = true;
+      blushState = BLUSH_FADE_IN;  // Start fade‑in state
+      Serial.println("Entered blush view, resetting fade logic");
     }
     previousView = view; // Update the last active view
   }
@@ -1278,58 +1268,213 @@ if (view != previousView) { // Check if the view has changed
 
   // Only flip buffer if not spiral view (spiral handles its own flip)
   //if (view != 9) 
+
+  if (debugMode) {
+    // --- Begin FPS counter overlay ---
+    static unsigned long lastFpsTime = 0;
+    static int frameCount = 0;
+    frameCount++;
+    unsigned long currentTime = millis();
+    if (currentTime - lastFpsTime >= 1000) {
+        fps = frameCount;
+        frameCount = 0;
+        lastFpsTime = currentTime;
+    }
+    char fpsText[8];
+    sprintf(fpsText, "FPS: %d", fps);
+    dma_display->setTextColor(dma_display->color565(255, 255, 0)); // Yellow text
+    // Position the counter at a corner (adjust as needed)
+    dma_display->setCursor((dma_display->width() / 4) + 10 , 1);
+    dma_display->print(fpsText);
+    // --- End FPS counter overlay ---
+  }
+
   dma_display->flipDMABuffer();
 }
 
+// Helper function to get the current threshold value
+float getCurrentThreshold() {
+  return useShakeSensitivity ? SHAKE_THRESHOLD : SLEEP_THRESHOLD;
+}
+
+// Add with your other utility functions
+bool detectMotion() {
+  accel.read();
+  
+  float x = accel.x / 1000.0;  // Convert to G
+  float y = accel.y / 1000.0;
+  float z = accel.z / 1000.0;
+  
+  // Calculate the movement delta from last reading
+  float deltaX = fabs(x - prevAccelX);
+  float deltaY = fabs(y - prevAccelY);
+  float deltaZ = fabs(z - prevAccelZ);
+  
+  // Store current values for next comparison
+  prevAccelX = x;
+  prevAccelY = y;
+  prevAccelZ = z;
+  
+  // Use the current threshold based on the context
+  float threshold = getCurrentThreshold();
+
+  // Check if movement exceeds threshold
+  if (deltaX > threshold || 
+      deltaY > threshold || 
+      deltaZ > threshold) {
+    return true;
+  }
+  
+  return false;
+}
+
+void enterSleepMode() {
+  Serial.println("Entering sleep mode");
+  sleepModeActive = true;
+  preSleepView = currentView;  // Save current view
+  
+  // Lower display brightness
+  dma_display->setBrightness8(sleepBrightness);
+  
+  // Reduce CPU speed for power saving
+  reduceCPUSpeed();
+  
+  // Reduce the update rate during sleep
+  sleepFrameInterval = 100; // 10 FPS during sleep to save power
+  
+  // Notify all clients of sleep mode if connected
+  if (deviceConnected) {
+    // Send a message through the temperature characteristic
+    char sleepMsg[] = "Sleep Mode Active";
+    pTemperatureCharacteristic->setValue(sleepMsg);
+    pTemperatureCharacteristic->notify();
+  }
+  
+  // Additional sleep actions
+  if (!deviceConnected) {
+    // Increase BLE advertising interval to save power during sleep
+    NimBLEDevice::getAdvertising()->setMinInterval(1600); // 1000 ms (units of 0.625 ms)
+    NimBLEDevice::getAdvertising()->setMaxInterval(2000); // 1250 ms (units of 0.625 ms)
+    NimBLEDevice::startAdvertising();
+  }
+}
+
+void checkSleepMode() {
+  static unsigned long lastAccelCheck = 0;
+  const unsigned long accelCheckInterval = 1000; // Check motion once per second to save power
+  
+  // Only check accelerometer periodically to save power
+  if (millis() - lastAccelCheck >= accelCheckInterval) {
+    lastAccelCheck = millis();
+    
+    // Check for motion
+    if (detectMotion()) {
+      lastActivityTime = millis();
+      
+      // If we were in sleep mode, wake up
+      if (sleepModeActive) {
+        wakeFromSleepMode();
+      }
+    } 
+    else {
+      // Check if it's time to enter sleep mode
+      if (!sleepModeActive && (millis() - lastActivityTime > SLEEP_TIMEOUT_MS)) {
+        enterSleepMode();
+      }
+    }
+  }
+}
+
+
 
 void loop(void) {
-  
+  unsigned long now = millis();
   bool isConnected = NimBLEDevice::getServer()->getConnectedCount() > 0;
   
-  // Always handle BLE and temperature updates first
+  // Always handle BLE and temperature updates first.
   handleBLEConnection();
   updateTemperature();
 
-  // Handle view changes from any source (BLE/buttons)
-  static int lastView = -1;
-  bool viewChanged = false;
+  // Check for sleep mode (only on MatrixPortal ESP32-S3).
+  #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
+    checkSleepMode();
+  #endif
 
-  // Check button presses (outside frame timing)
-  if (debounceButton(BUTTON_UP)) {
-  currentView = (currentView + 1) % totalViews;
-  viewChanged = true;
+  // If the device is in sleep mode, use low-sensitivity motion detection to wake it.
+  if (sleepModeActive) {
+    // Ensure low sensitivity (useShakeSensitivity = false).
+    useShakeSensitivity = false;
+    if (detectMotion()) {
+      // Motion detected with the low threshold – wake up the device.
+      wakeFromSleepMode();
+    }
   }
-  if (debounceButton(BUTTON_DOWN)) {
-  currentView = (currentView - 1 + totalViews) % totalViews;
-  viewChanged = true;
-  }
+  else {
+    // Device is active—handle button input, sensor reading, blush effect,
+    // and strong motion detection (shake) to trigger spiral eyes.
 
-  if(viewChanged && isConnected) {
-  uint8_t viewValue = static_cast<uint8_t>(currentView);
-  pFaceCharacteristic->setValue(&viewValue, 1);
-  pFaceCharacteristic->notify();
-  }
+    // --- Handle button inputs for view changes ---
+    static int lastView = -1;
+    bool viewChanged = false;
+    if (debounceButton(BUTTON_UP)) {
+      currentView = (currentView + 1) % totalViews;
+      viewChanged = true;
+    }
+    if (debounceButton(BUTTON_DOWN)) {
+      currentView = (currentView - 1 + totalViews) % totalViews;
+      viewChanged = true;
+    }
+    if (viewChanged && isConnected) {
+      uint8_t viewValue = static_cast<uint8_t>(currentView);
+      pFaceCharacteristic->setValue(&viewValue, 1);
+      pFaceCharacteristic->notify();
+    }
 
-  // Frame rate controlled updates
-  static unsigned long lastFrameTime = 0;
-  const unsigned long frameInterval = 11; // ~90 FPS
+    // --- Sensor reading and blush trigger ---
+    if (now - lastSensorReadTime >= sensorInterval) {
+      lastSensorReadTime = now;
+      uint8_t proximity = apds.readProximity();
+      //Serial.print("Proximity: ");
+      //Serial.println(proximity);
+      // Trigger blush if the proximity condition is met and no blush is active.
+      if (proximity >= 15 && blushState == BLUSH_INACTIVE) {
+        Serial.println("Blush triggered by proximity!");
+        blushState = BLUSH_FADE_IN;
+        blushStateStartTime = now;
+      }
+      lastView = currentView;  // Update the last active view.
+    }
+    if (blushState != BLUSH_INACTIVE) {
+      updateBlush();
+      drawBlush();
+    }
+
+    // --- Check for a strong shake to trigger spiral eyes ---
+    // Temporarily set high sensitivity.
+    useShakeSensitivity = true;
+    if (detectMotion() && currentView != 9) {
+      previousView = currentView;   // Save the current view.
+      currentView = 9;              // Switch to spiral eyes view (assumed view 9).
+      spiralStartTime = millis();   // Record the trigger time.
+    }
+    // Reset sensitivity back to the low (sleep mode) threshold.
+    useShakeSensitivity = false;
+    // If spiral eyes view is active, revert back after 5 seconds.
+    if (currentView == 9 && (millis() - spiralStartTime >= 5000)) {
+      currentView = previousView;   // Return to the previous view.
+    }
+  }
   
-  if(millis() - lastFrameTime >= frameInterval) {
-  lastFrameTime = millis();
-  /*
-  // Only update if view needs animation refresh
-  switch(currentView) {
-    case 0:  // Scrolling text
-    case 1:  // Loading bar
-    case 2:  // Plasma
-    case 4:  // Normal face
-    case 5:  // Blush face
-    case 9:  // Spiral eyes
-    case 10: // Plasma test
-    displayCurrentView(currentView);
-    break;
-  }
-  */
-  displayCurrentView(currentView);
+  // --- Frame rate controlled display updates ---
+  static unsigned long lastFrameTime = 0;
+  const unsigned long currentFrameInterval = sleepModeActive ? sleepFrameInterval : 5;
+  if (millis() - lastFrameTime >= currentFrameInterval) {
+    lastFrameTime = millis();
+    if (sleepModeActive) {
+      displaySleepMode();
+    } else {
+      displayCurrentView(currentView);
+    }
   }
 }
+
