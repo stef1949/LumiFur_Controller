@@ -26,12 +26,6 @@ jobs:
             build-mode: manual  # Changed from 'autobuild' to 'manual'
 
     steps:
-      - name: Cache
-        uses: actions/cache@v4.2.3
-        with:
-          key: ${{ runner.os }}-platformio-${{ hashFiles('**/platformio.ini') }}
-          restore-keys: |
-            ${{ runner.os }}-platformio-
         
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -51,6 +45,17 @@ jobs:
         run: |
           pio run
 
+      - name: Cache
+        uses: actions/cache@v4.2.3
+        with:
+          path: |
+            ~/.platformio/packages
+            ~/.platformio/platforms
+            ~/.platformio/projects
+          key: ${{ runner.os }}-platformio-${{ hashFiles('**/platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-platformio-
+            
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         with:
