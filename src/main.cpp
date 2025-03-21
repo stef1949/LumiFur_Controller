@@ -1245,7 +1245,6 @@ if (view != previousView) { // Check if the view has changed
   case 9: // Spiral eyes
     protoFaceTest();
     updateRotatingSpiral();
-//  updateBlinkAnimation(); // Update blink animation progress
     break;
 
   case 10: //Plasma bitmap test
