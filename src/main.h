@@ -1,4 +1,3 @@
-
 #include <FastLED.h>
 #include "userPreferences.h"
 #include "deviceConfig.h"

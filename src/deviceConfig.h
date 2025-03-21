@@ -65,6 +65,7 @@
   #define INT_PIN 3
   Adafruit_APDS9960 apds;
   #include <Adafruit_LIS3DH.h>      // Library for built-in For accelerometer
+  Adafruit_LIS3DH lis = Adafruit_LIS3DH();
   #include <Adafruit_NeoPixel.h>    // Library for built-in NeoPixel
   #define STATUS_LED_PIN 4
   Adafruit_NeoPixel statusPixel(1, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
