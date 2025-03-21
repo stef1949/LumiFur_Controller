@@ -87,10 +87,10 @@ jobs:
         
       - name: Run tests with coverage
         run: |
-          pio run --environment adafruit_matrixportal_esp32s3
+          pio run --environment codeql
           # Generate an lcov report for Coveralls (assumes coverage data is available)
-          # gcovr -r . --lcov -o lcov.info
-          lcov -c --no-external -i -d . -o coverage_base.info
+          gcovr -r . --lcov -o lcov.info
+          #lcov -c --no-external -i -d . -o coverage_base.info
           
       - name: lcov --capture
         run: lcov --capture --no-external --directory . --output-file coverage.info
