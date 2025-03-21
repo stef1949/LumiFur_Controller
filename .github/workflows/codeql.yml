@@ -74,8 +74,6 @@ jobs:
       - name: Install Coveralls
         run: pip install coveralls
 
-      - name: Run Coveralls
-        run: coveralls
-        env:
-          COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
-          COVERALLS_SERVICE_NAME: github
+      - name: Coveralls
+        uses: coverallsapp/github-action@v2
+          
