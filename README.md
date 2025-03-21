@@ -8,10 +8,8 @@
   ![version](https://img.shields.io/badge/version-0.1.0-blue)
   <a href="https://github.com/badges/shields/pulse" alt="Activity">
         <img src="https://img.shields.io/github/commit-activity/m/badges/shields" /></a>
-  <a href="https://coveralls.io/github/badges/shields">
-        <img src="https://img.shields.io/coveralls/github/badges/shields"
-            alt="Code Coverage"></a>
-            <a href="https://coveralls.io/github/badges/shields">
+  [![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=main)](https://coveralls.io/github/stef1949/LumiFur_Controller?branch=main)
+  
   
 
 
