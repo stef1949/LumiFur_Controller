@@ -33,18 +33,8 @@ jobs:
       # Install PlatformIO if not already available
       - name: Install PlatformIO
         run: pip install platformio
-
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
-        with:
-          languages: ${{ matrix.language }}
-          build-mode: ${{ matrix.build-mode }}
-
-      # Build the project using PlatformIO
-      - name: Build with PlatformIO
-        run: |
-          pio run
-
+        
+      # Cache PlatformIO dependencies  
       - name: Cache
         uses: actions/cache@v4.2.3
         with:
@@ -56,16 +46,36 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-platformio-
             
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      # Build the project using PlatformIO
+      - name: Build with PlatformIO
+        run: |
+          pio run
+            
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:${{ matrix.language }}"
-          
-        # Install Coveralls
+
+  coveralls:
+    name: Coveralls
+    runs-on: ubuntu-latest
+    needs: analyze  # This ensures the Coveralls job runs after the analyze job
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Install Coveralls
       - name: Install Coveralls
         run: pip install coveralls
-        
+
       - name: Run Coveralls
         run: coveralls
         env:
           COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
+          COVERALLS_SERVICE_NAME: github
