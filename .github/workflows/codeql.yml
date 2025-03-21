@@ -73,7 +73,14 @@ jobs:
       # Install Coveralls
       - name: Install Coveralls
         run: pip install coveralls
-
+        
+      - name: Run tests with coverage
+        run: |
+          # Use your native environment to run tests and generate coverage data
+          platformio test --coverage
+          # Create an lcov report for Coveralls
+          gcovr -r . --lcov -o lcov.info
+          
       - name: Run Coveralls
         uses: coverallsapp/github-action@v2
         with:
