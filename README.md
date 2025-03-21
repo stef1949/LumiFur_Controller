@@ -3,6 +3,18 @@
 </p>
 <h1 align="center">
   LumiFur Controller 
+  
+  [![CodeQL Advanced Build with PlatformIO](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml)
+  ![version](https://img.shields.io/badge/version-0.1.0-blue)
+  <a href="https://github.com/badges/shields/pulse" alt="Activity">
+        <img src="https://img.shields.io/github/commit-activity/m/badges/shields" /></a>
+  <a href="https://coveralls.io/github/badges/shields">
+        <img src="https://img.shields.io/coveralls/github/badges/shields"
+            alt="Code Coverage"></a>
+            <a href="https://coveralls.io/github/badges/shields">
+  
+
+
 </h1>
 A program for controlling an LED matrix display for a Protogen mask, featuring various facial expressions and Bluetooth LE control with an ESP32.
 
