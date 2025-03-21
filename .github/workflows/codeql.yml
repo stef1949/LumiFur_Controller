@@ -76,9 +76,9 @@ jobs:
         
       - name: Run tests with coverage
         run: |
-          # Use your native environment to run tests and generate coverage data
-          platformio test --coverage
-          # Create an lcov report for Coveralls
+          # Run tests using the matrIxportal s3 environment from platformio.ini
+          platformio test --environment native --coverage
+          # Generate an lcov report for Coveralls (assumes coverage data is available)
           gcovr -r . --lcov -o lcov.info
           
       - name: Run Coveralls
