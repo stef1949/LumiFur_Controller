@@ -295,22 +295,6 @@ void fadeInAndOutLED(uint8_t r, uint8_t g, uint8_t b) {
     statusPixel.show();
 }
 
-void handleBLEConnection() {
-    if (deviceConnected != oldDeviceConnected) {
-        if (deviceConnected) {
-            statusPixel.setPixelColor(0, 0, 100, 0); // Green when connected
-        } else {
-            statusPixel.setPixelColor(0, 0, 0, 0); // Off when disconnected
-            NimBLEDevice::startAdvertising();
-        }
-        statusPixel.show();
-        oldDeviceConnected = deviceConnected;
-    }
-    
-    if (!deviceConnected) {
-        fadeInAndOutLED(0, 0, 100); // Blue fade when disconnected
-    }
-}
 
 void fadeBlueLED() {
     fadeInAndOutLED(0, 0, 100); // Blue color
@@ -939,77 +923,9 @@ void setup() {
   // Map userBrightness (1-100) to hardware brightness (1-255).
   int hwBrightness = map(userBrightness, 1, 100, 1, 255);
   Serial.printf("Stored brightness: %d\n", userBrightness);
- 
 
-  Serial.println("Initializing BLE...");
-  NimBLEDevice::init("LumiFur_Controller");
-  NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
-  NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
-  pServer = NimBLEDevice::createServer();
-  pServer->setCallbacks(&serverCallbacks);
+  bleSetup();
 
-  NimBLEService* pService = pServer->createService(SERVICE_UUID);
-  
-  // Face control characteristic with encryption
-  pFaceCharacteristic = pService->createCharacteristic(
-    CHARACTERISTIC_UUID,
-    //NIMBLE_PROPERTY::READ |
-    //NIMBLE_PROPERTY::WRITE |
-    NIMBLE_PROPERTY::NOTIFY |
-    NIMBLE_PROPERTY::READ_ENC | // only allow reading if paired / encrypted
-    NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
-  );
-  
-  // Set initial view value
-  uint8_t viewValue = static_cast<uint8_t>(currentView);
-  pFaceCharacteristic->setValue(&viewValue, 1);
-  pFaceCharacteristic->setCallbacks(&chrCallbacks);
-
-  // Temperature characteristic with encryption
-  pTemperatureCharacteristic = 
-    pService->createCharacteristic(
-      TEMPERATURE_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ |
-      NIMBLE_PROPERTY::NOTIFY 
-      //NIMBLE_PROPERTY::READ_ENC
-  );
-  
-  // Config characteristic with encryption
-  pConfigCharacteristic = pService->createCharacteristic(
-      CONFIG_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::NOTIFY |
-      NIMBLE_PROPERTY::READ_ENC |
-      NIMBLE_PROPERTY::WRITE_ENC
-  );
-
-  // Set up descriptors
-  NimBLE2904* pFormat2904 = pFaceCharacteristic->create2904();
-  pFormat2904->setFormat(NimBLE2904::FORMAT_UINT8);
-  pFormat2904->setUnit(0x2700); // Unit-less number
-  pFormat2904->setCallbacks(&dscCallbacks);
-
-  // Add user description descriptor
-  NimBLEDescriptor* pDesc = 
-      pFaceCharacteristic->createDescriptor(
-          "2901",
-          NIMBLE_PROPERTY::READ,
-          20
-      );
-  pDesc->setValue("Face Control");
-
-  //nimBLEService* pBaadService = pServer->createService("BAAD");
-  pService->start();
-
-  /** Create an advertising instance and add the services to the advertised data */
-  NimBLEAdvertising* pAdvertising = NimBLEDevice::getAdvertising();
-  pAdvertising->setName("LumiFur_Controller");
-  pAdvertising->addServiceUUID(pService->getUUID());
-  pAdvertising->enableScanResponse(true);
-  pAdvertising->start();
-
-  Serial.println("BLE setup complete - advertising started");
-
-  
   //Redefine pins if required
   //HUB75_I2S_CFG::i2s_pins _pins={R1, G1, BL1, R2, G2, BL2, CH_A, CH_B, CH_C, CH_D, CH_E, LAT, OE, CLK};
   //HUB75_I2S_CFG mxconfig(PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER);
@@ -1094,7 +1010,75 @@ if(!apds.begin()){
   apds.enableProximity(true); //enable proximity mode
   apds.setProximityInterruptThreshold(0, 175); //set the interrupt threshold to fire when proximity reading goes above 175
   apds.enableProximityInterrupt(); //enable the proximity interrupt
+}
 
+void bleSetup()
+{
+  Serial.println("Initializing BLE...");
+  NimBLEDevice::init("LumiFur_Controller");
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
+  NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
+  pServer = NimBLEDevice::createServer();
+  pServer->setCallbacks(&serverCallbacks);
+
+  NimBLEService *pService = pServer->createService(SERVICE_UUID);
+
+  // Face control characteristic with encryption
+  pFaceCharacteristic = pService->createCharacteristic(
+      CHARACTERISTIC_UUID,
+      // NIMBLE_PROPERTY::READ |
+      // NIMBLE_PROPERTY::WRITE |
+      NIMBLE_PROPERTY::NOTIFY |
+          NIMBLE_PROPERTY::READ_ENC | // only allow reading if paired / encrypted
+          NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
+  );
+
+  // Set initial view value
+  uint8_t viewValue = static_cast<uint8_t>(currentView);
+  pFaceCharacteristic->setValue(&viewValue, 1);
+  pFaceCharacteristic->setCallbacks(&chrCallbacks);
+
+  // Temperature characteristic with encryption
+  pTemperatureCharacteristic =
+      pService->createCharacteristic(
+          TEMPERATURE_CHARACTERISTIC_UUID,
+          NIMBLE_PROPERTY::READ |
+              NIMBLE_PROPERTY::NOTIFY
+          // NIMBLE_PROPERTY::READ_ENC
+      );
+
+  // Config characteristic with encryption
+  pConfigCharacteristic = pService->createCharacteristic(
+      CONFIG_CHARACTERISTIC_UUID,
+      NIMBLE_PROPERTY::NOTIFY |
+          NIMBLE_PROPERTY::READ_ENC |
+          NIMBLE_PROPERTY::WRITE_ENC);
+
+  // Set up descriptors
+  NimBLE2904 *pFormat2904 = pFaceCharacteristic->create2904();
+  pFormat2904->setFormat(NimBLE2904::FORMAT_UINT8);
+  pFormat2904->setUnit(0x2700); // Unit-less number
+  pFormat2904->setCallbacks(&dscCallbacks);
+
+  // Add user description descriptor
+  NimBLEDescriptor *pDesc =
+      pFaceCharacteristic->createDescriptor(
+          "2901",
+          NIMBLE_PROPERTY::READ,
+          20);
+  pDesc->setValue("Face Control");
+
+  // nimBLEService* pBaadService = pServer->createService("BAAD");
+  pService->start();
+
+  /** Create an advertising instance and add the services to the advertised data */
+  NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
+  pAdvertising->setName("LumiFur_Controller");
+  pAdvertising->addServiceUUID(pService->getUUID());
+  pAdvertising->enableScanResponse(true);
+  pAdvertising->start();
+
+  Serial.println("BLE setup complete - advertising started");
 }
 
 uint8_t wheelval = 0;

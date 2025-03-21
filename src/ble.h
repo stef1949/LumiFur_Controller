@@ -98,3 +98,19 @@ void updateTemperature() {
   }
 }
 
+void handleBLEConnection() {
+    if (deviceConnected != oldDeviceConnected) {
+        if (deviceConnected) {
+            statusPixel.setPixelColor(0, 0, 100, 0); // Green when connected
+        } else {
+            statusPixel.setPixelColor(0, 0, 0, 0); // Off when disconnected
+            NimBLEDevice::startAdvertising();
+        }
+        statusPixel.show();
+        oldDeviceConnected = deviceConnected;
+    }
+    
+    if (!deviceConnected) {
+        fadeInAndOutLED(0, 0, 100); // Blue fade when disconnected
+    }
+}
