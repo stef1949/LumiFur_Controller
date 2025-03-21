@@ -60,7 +60,11 @@ jobs:
         uses: github/codeql-action/analyze@v3
         with:
           category: "/language:${{ matrix.language }}"
-
+          
+        # Install Coveralls
+      - name: Install Coveralls
+        run: pip install coveralls
+        
       - name: Run Coveralls
         run: coveralls
         env:
