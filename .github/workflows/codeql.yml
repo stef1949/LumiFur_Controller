@@ -69,15 +69,17 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
+        
+      # Install PlatformIO if not already available
+      - name: Install PlatformIO
+        run: pip install platformio
       # Install Coveralls
       - name: Install Coveralls
         run: pip install coveralls
         
       - name: Run tests with coverage
         run: |
-          # Run tests using the matrIxportal s3 environment from platformio.ini
-          platformio test --environment native --coverage
+          pio run
           # Generate an lcov report for Coveralls (assumes coverage data is available)
           gcovr -r . --lcov -o lcov.info
           
@@ -85,3 +87,4 @@ jobs:
         uses: coverallsapp/github-action@v2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          path-to-lcov: coverage_filtered.info
