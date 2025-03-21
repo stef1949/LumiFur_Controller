@@ -22,7 +22,6 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #endif
 
-
 #include "main.h"
 
 //BLE Libraries
@@ -89,7 +88,7 @@ const int maxBlinkDelay = 5000;     // Maximum time between blinks (ms)
 
 // Global constants for each sensitivity level
 const float SLEEP_THRESHOLD = 2.0;  // for sleep mode detection
-const float SHAKE_THRESHOLD = 40.0;  // for shake detection
+const float SHAKE_THRESHOLD = 20.0;  // for shake detection
 // Global flag to control which threshold to use
 bool useShakeSensitivity = true;
 
@@ -145,7 +144,7 @@ bool debounceButton(int pin) {
 
 // Sleep mode variables
 // Define both timeout values and select the appropriate one in setup()
-const unsigned long SLEEP_TIMEOUT_MS_DEBUG = 60000;    // 15 seconds (15,000 ms)
+const unsigned long SLEEP_TIMEOUT_MS_DEBUG = 15000;    // 15 seconds (15,000 ms)
 const unsigned long SLEEP_TIMEOUT_MS_NORMAL = 300000; // 5 minutes (300,000 ms)
 unsigned long SLEEP_TIMEOUT_MS; // Will be set in setup() based on debugMode
 bool sleepModeActive = false;
@@ -1059,9 +1058,7 @@ void setup() {
     err(250);  // Fast blink = I2C error
   } else {
     Serial.println("Accelerometer found!");
-    accel.setRange(LIS3DH_RANGE_4_G);  // 2G range is sufficient for motion detection
-    //lis.setPerformanceMode(LIS3DH_MODE_HIGH_RESOLUTION);
-    //lis.setDataRate(LIS3DH_DATARATE_100_HZ);
+    accel.setRange(LIS3DH_RANGE_2_G);  // 2G range is sufficient for motion detection
   }
 #endif
 
@@ -1302,38 +1299,25 @@ float getCurrentThreshold() {
 
 // Add with your other utility functions
 bool detectMotion() {
-  //accel.read();
+  accel.read();
   
-  sensors_event_t event;
-  // Obtain a snapshot of the current accelerometer data.
-  accel.getEvent(&event);
-
-
-  //double x = accel.x / 1000.0;  // Convert to G
-  //double y = accel.y / 1000.0;
-  //double z = accel.z / 1000.0;
+  float x = accel.x / 1000.0;  // Convert to G
+  float y = accel.y / 1000.0;
+  float z = accel.z / 1000.0;
   
   // Calculate the movement delta from last reading
-  float deltaX = fabs(event.acceleration.x - prevAccelX);
-  float deltaY = fabs(event.acceleration.y - prevAccelY);
-  float deltaZ = fabs(event.acceleration.z - prevAccelZ);
+  float deltaX = fabs(x - prevAccelX);
+  float deltaY = fabs(y - prevAccelY);
+  float deltaZ = fabs(z - prevAccelZ);
   
   // Store current values for next comparison
-  prevAccelX = event.acceleration.x;
-  prevAccelY = event.acceleration.y;
-  prevAccelZ = event.acceleration.z;
+  prevAccelX = x;
+  prevAccelY = y;
+  prevAccelZ = z;
   
   // Use the current threshold based on the context
   float threshold = getCurrentThreshold();
 
-  //Serial.print(">TLP: ");
-  Serial.print(">accel_x=:");
-  Serial.println(event.acceleration.x);
-  Serial.print(">, accel_y=:");
-  Serial.println(event.acceleration.y);
-  Serial.print(">, accel_z=:");
-  Serial.println(event.acceleration.y);
-  
   // Check if movement exceeds threshold
   if (deltaX > threshold || 
       deltaY > threshold || 
@@ -1450,8 +1434,6 @@ void loop(void) {
     if (now - lastSensorReadTime >= sensorInterval) {
       lastSensorReadTime = now;
       uint8_t proximity = apds.readProximity();
-      Serial.print(">Proximity:");
-      Serial.println(proximity);
       //Serial.print("Proximity: ");
       //Serial.println(proximity);
       // Trigger blush if the proximity condition is met and no blush is active.
