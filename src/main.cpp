@@ -92,6 +92,11 @@ const float SHAKE_THRESHOLD = 20.0;  // for shake detection
 // Global flag to control which threshold to use
 bool useShakeSensitivity = true;
 
+float temperatureRead() {
+  // Replace with your sensor read logic.
+  // For now, return a default temperature value.
+  return 25.0;  
+}
 
 // Define blush state using an enum
 enum BlushState {

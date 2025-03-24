@@ -81,7 +81,7 @@ void updateTemperature() {
   if (currentMillis - temperatureMillis >= temperatureInterval) {
     temperatureMillis = currentMillis;
 
-    if (deviceConnected) {
+    if (deviceConnected && pTemperatureCharacteristic) {
       // Read the ESP32's internal temperature
       float temperature = temperatureRead();  // Temperature in Celsius
 
@@ -94,7 +94,8 @@ void updateTemperature() {
       // Optional: Debug output to serial
       Serial.print("Internal Temperature: ");
       Serial.println(tempStr);
+    } else if (!pTemperatureCharacteristic) {
+      Serial.println("Error: pTemperatureCharacteristic is null!");
     }
   }
 }
-
