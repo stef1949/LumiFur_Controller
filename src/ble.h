@@ -1,3 +1,6 @@
+#ifndef BLE_H
+#define BLE_H
+
 #include <NimBLEDevice.h>
 #include "driver/temp_sensor.h"
 ////////////////////////////////////////////
@@ -6,6 +9,17 @@
 
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
+
+// BLE UUIDs
+#define SERVICE_UUID                    "01931c44-3867-7740-9867-c822cb7df308"
+#define CHARACTERISTIC_UUID             "01931c44-3867-7427-96ab-8d7ac0ae09fe"
+#define CONFIG_CHARACTERISTIC_UUID      "01931c44-3867-7427-96ab-8d7ac0ae09ff"
+#define TEMPERATURE_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9774-18350e3e27db"
+//#define ULTRASOUND_CHARACTERISTIC_UUID  "01931c44-3867-7b5d-9732-12460e3a35db"
+
+//#define DESC_USER_DESC_UUID  0x2901  // User Description descriptor
+//#define DESC_FORMAT_UUID     0x2904  // Presentation Format descriptor
+
 
 // BLE Server pointers
 NimBLEServer* pServer = nullptr;
@@ -50,7 +64,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
          */
         return 123456;
     }
-
+    
     void onConfirmPassKey(NimBLEConnInfo& connInfo, uint32_t pass_key) override {
         Serial.printf("The passkey YES/NO number: %" PRIu32 "\n", pass_key);
         /** Inject false if passkeys don't match. */
@@ -82,11 +96,8 @@ void updateTemperature() {
 
         // Verify that the device is connected and the temperature characteristic pointer is valid.
         if (deviceConnected && pTemperatureCharacteristic != nullptr) {
-            Serial.print("Temperature: ");
             float result = 0;
             temp_sensor_read_celsius(&result);
-            Serial.print(result);
-            Serial.println(" °C");
 
             // Convert the float value to an integer
             int temperature = (int)result;
@@ -96,9 +107,17 @@ void updateTemperature() {
             snprintf(tempStr, sizeof(tempStr), "%d°C", temperature);
             pTemperatureCharacteristic->setValue(tempStr);
             pTemperatureCharacteristic->notify();
+
+            // Print temperature values if DEBUG_MODE is enabled
+            #if DEBUG_MODE
+            Serial.print("Temperature: ");
+            Serial.print(result);
+            Serial.println(" °C");
+            #endif
         } else {
             // Extra safeguard: log an error if pTemperatureCharacteristic is null
             Serial.println("Error: pTemperatureCharacteristic is null!");
         }
     }
 }
+#endif /* BLE_H */

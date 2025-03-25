@@ -6,15 +6,8 @@
 #include "sdkconfig.h"
 #endif
 
-#define DEBUG_BLE
-#define DEBUG_VIEWS
-
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
-#include "xtensa/core-macros.h"
-#include "bitmaps.h"
-#include "customFonts/lequahyper20pt7b.h"       // Stylized font
-#include <Fonts/FreeSansBold18pt7b.h>           // Larger font
 //#include <Wire.h>                             // For I2C sensors
 #ifdef VIRTUAL_PANE
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
@@ -26,16 +19,6 @@
 
 //BLE Libraries
 #include <NimBLEDevice.h>
-
-// BLE UUIDs
-#define SERVICE_UUID                    "01931c44-3867-7740-9867-c822cb7df308"
-#define CHARACTERISTIC_UUID             "01931c44-3867-7427-96ab-8d7ac0ae09fe"
-#define CONFIG_CHARACTERISTIC_UUID      "01931c44-3867-7427-96ab-8d7ac0ae09ff"
-#define TEMPERATURE_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9774-18350e3e27db"
-//#define ULTRASOUND_CHARACTERISTIC_UUID  "01931c44-3867-7b5d-9732-12460e3a35db"
-
-//#define DESC_USER_DESC_UUID  0x2901  // User Description descriptor
-//#define DESC_FORMAT_UUID     0x2904  // Presentation Format descriptor
 
 
 //#include "EffectsLayer.hpp" // FastLED CRGB Pixel Buffer for which the patterns are drawn
@@ -50,11 +33,16 @@
 //Brightness control
 // Retrieve the brightness value from preferences
 int userBrightness = getUserBrightness(); // e.g., default 204 (80%)
-// Map userBrightness (1-100) to hardware brightness (1-255).
-int hwBrightness = map(userBrightness, 1, 100, 1, 255);
+
+// Map userBrightness (1-255) to hwBrightness (1-255).
+//int hwBrightness = map(userBrightness, 1, 100, 1, 255);
+
+//Map userBrightness (1-255) to sliderBrightness (1-100);
+int sliderBrightness = map(userBrightness, 1, 255, 1, 100);
+
 // Convert the userBrightness into a scale factor (0.0 to 1.0)
-// Here, we simply divide by 100.0 to get a proportion.
-float globalBrightnessScale = userBrightness / 100.0;
+// Here, we simply divide userBrightness by 255.0 to get a proportion.
+float globalBrightnessScale = userBrightness / 255.0;
 
 // View switching
 uint8_t currentView = 4; // Current & initial view being displayed
@@ -117,30 +105,9 @@ uint8_t blushBrightness = 0;
 unsigned long lastSensorReadTime = 0;
 const unsigned long sensorInterval = 50;  // sensor read every 50 ms
 
-
 // Variables for plasma effect
 uint16_t time_counter = 0, cycles = 0, fps = 0;
 unsigned long fps_timer;
-
-CRGB currentColor;
-CRGBPalette16 palettes[] = {ForestColors_p, LavaColors_p, HeatColors_p, RainbowColors_p, CloudColors_p};
-CRGBPalette16 currentPalette = palettes[0];
-
-CRGB ColorFromCurrentPalette(uint8_t index = 0, uint8_t brightness = 255, TBlendType blendType = LINEARBLEND) {
-  return ColorFromPalette(currentPalette, index, brightness, blendType);
-}
-
-// Button config --------------------------------------------------------------
-bool debounceButton(int pin) {
-  static uint32_t lastPressTime = 0;
-  uint32_t currentTime = millis();
-  
-  if (digitalRead(pin) == LOW && (currentTime - lastPressTime) > 200) {
-    lastPressTime = currentTime;
-    return true;
-  }
-  return false;
-}
 
 // Sleep mode variables
 // Define both timeout values and select the appropriate one in setup()
@@ -156,30 +123,6 @@ uint8_t normalBrightness = userBrightness; // Normal brightness level
 volatile bool notifyPending = false;
 unsigned long sleepFrameInterval = 11; // Frame interval in ms (will be changed during sleep)
 
-// Accelerometer object declaration
-Adafruit_LIS3DH accel;
-
-#include "driver/temp_sensor.h"
-
-void initTempSensor(){
-  temp_sensor_config_t temp_sensor = TSENS_CONFIG_DEFAULT();
-  temp_sensor.dac_offset = TSENS_DAC_L2;  // TSENS_DAC_L2 is default; L4(-40°C ~ 20°C), L2(-10°C ~ 80°C), L1(20°C ~ 100°C), L0(50°C ~ 125°C)
-  temp_sensor_set_config(temp_sensor);
-  temp_sensor_start();
-}
-
-// Power management scopes
-void reduceCPUSpeed() {
-  // Set CPU frequency to lowest setting (80MHz vs 240MHz default)
-  setCpuFrequencyMhz(80);
-  Serial.println("CPU frequency reduced to 80MHz for power saving");
-}
-
-void restoreNormalCPUSpeed() {
-  // Set CPU frequency back to default (240MHz)
-  setCpuFrequencyMhz(240);
-  Serial.println("CPU frequency restored to 240MHz");
-}
 
 void displayCurrentView(int view);
 
@@ -285,27 +228,6 @@ class DescriptorCallbacks : public NimBLEDescriptorCallbacks {
     }
 } dscCallbacks;
 
-
-//non-blocking LED status functions (Neopixel)
-void fadeInAndOutLED(uint8_t r, uint8_t g, uint8_t b) {
-    static int brightness = 0;
-    static int step = 5;
-    static unsigned long lastUpdate = 0;
-    const uint8_t delayTime = 5;
-
-    if (millis() - lastUpdate < delayTime) return;
-    lastUpdate = millis();
-
-    brightness += step;
-    if (brightness >= 255 || brightness <= 0) step *= -1;
-    
-    statusPixel.setPixelColor(0, 
-        (r * brightness) / 255,
-        (g * brightness) / 255,
-        (b * brightness) / 255);
-    statusPixel.show();
-}
-
 void handleBLEConnection() {
     if (deviceConnected != oldDeviceConnected) {
         if (deviceConnected) {
@@ -321,10 +243,6 @@ void handleBLEConnection() {
     if (!deviceConnected) {
         fadeInAndOutLED(0, 0, 100); // Blue fade when disconnected
     }
-}
-
-void fadeBlueLED() {
-    fadeInAndOutLED(0, 0, 100); // Blue color
 }
 
 // Bitmap Drawing Functions ------------------------------------------------
@@ -412,7 +330,7 @@ void drawPlasmaFace() {
 void updatePlasmaFace() {
   static unsigned long lastUpdate = 0;
   static unsigned long lastPaletteChange = 0;
-  const uint16_t frameDelay = 10; // Delay for plasma animation update
+  const uint16_t frameDelay = 2; // Delay for plasma animation update
   const unsigned long paletteInterval = 10000; // Change palette every 10 seconds
   unsigned long now = millis();
   
@@ -465,35 +383,10 @@ slanteyes
 };
 
 
-// Sundry globals used for animation ---------------------------------------
-
-int16_t  textX;        // Current text position (X)
-int16_t  textY;        // Current text position (Y)
-int16_t  textMin;      // Text pos. (X) when scrolled off left edge
-char     txt[64];      // Buffer to hold scrolling message text
-int16_t  ball[3][4] = {
-  {  3,  0,  1,  1 },  // Initial X,Y pos+velocity of 3 bouncy balls
-  { 17, 15,  1, -1 },
-  { 27,  4, -1,  1 }
-};
-uint16_t ballcolor[3]; // Colors for bouncy balls (init in setup())
-
-
 // SETUP - RUNS ONCE AT PROGRAM START --------------------------------------
 
-
-// Error handler function. If something goes wrong, this is what runs.
-void err(int x) {
-  uint8_t i;
-  pinMode(LED_BUILTIN, OUTPUT);       // Using onboard LED
-  for(int i=1;;i++) {                     // Loop forever...
-    digitalWrite(LED_BUILTIN, i & 1); // LED on/off blink to alert user
-    delay(x);
-  }
-}
-
 void displayLoadingBar() {
-  dma_display->clearScreen();
+  //dma_display->clearScreen();
   // Draw Apple Logos
   drawXbm565(23, 2, 18, 21, appleLogoApple_logo_black, dma_display->color565(255, 255, 255));
   drawXbm565(88, 2, 18, 21, appleLogoApple_logo_black, dma_display->color565(255, 255, 255));
@@ -512,20 +405,6 @@ void displayLoadingBar() {
   dma_display->fillRect(barX + 1, (barY * 2) + 1, progressWidth, barHeight - 2, dma_display->color565(255, 255, 255));
   dma_display->fillRect((barX + 1) + 64, (barY * 2) + 1, progressWidth, barHeight - 2, dma_display->color565(255, 255, 255));
 
-}
-
-// Helper function for ease-in-out quadratic easing
-float easeInOutQuad(float t) {
-  return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-}
-
-// Easing functions with bounds checking
-float easeInQuad(float t) {
-  return (t >= 1.0f) ? 1.0f : t * t;
-}
-
-float easeOutQuad(float t) {
-  return (t <= 0.0f) ? 0.0f : 1.0f - (1.0f - t) * (1.0f - t);
 }
 
 // Blink animation control with initialization
@@ -649,10 +528,10 @@ void drawRotatedBitmap(int16_t x, int16_t y, const uint8_t *bitmap,
 void updateRotatingSpiral() {
   static unsigned long lastUpdate = 0;
   static float currentAngle = 0;
-  const unsigned long frameInterval = 11; // ~90 FPS (11ms per frame)
+  const unsigned long rotationFrameInterval = 11; // ~90 FPS (11ms per frame)
   unsigned long currentTime = millis();
 
-  if (currentTime - lastUpdate < frameInterval) return;
+  if (currentTime - lastUpdate < rotationFrameInterval) return;
   lastUpdate = currentTime;
 
   // Calculate color once per frame
@@ -677,8 +556,6 @@ void updateRotatingSpiral() {
   drawRotatedBitmap(24, 15, spiral, 25, 25,  cosA, sinA, color);
   drawRotatedBitmap(105, 15, spiralL, 25, 25,  cosA, sinA, color);
 }
-
-
 
 // Draw the blinking eyes
 void blinkingEyes() {
@@ -791,7 +668,7 @@ void drawBlush() {
 }
 
 void drawTransFlag() {
-dma_display->clearScreen(); // Clear the display
+//dma_display->clearScreen(); // Clear the display
 
   int stripeHeight = dma_display->height() / 5; // Height of each stripe
 
@@ -826,8 +703,8 @@ void protoFaceTest() {
 }
 
 void patternPlasma() {
-  dma_display->clearScreen();
-  for (int x = 0; x < dma_display->width() * 1; x++) {
+  //dma_display->clearScreen();
+  for (int x = 0; x < dma_display->width(); x++) {
     for (int y = 0; y < dma_display->height(); y++) {
       int16_t v = 128;
       uint8_t wibble = sin8(time_counter);
@@ -836,8 +713,7 @@ void patternPlasma() {
       v += sin16(y * x * cos8(-time_counter) / 8);
 
       currentColor = ColorFromPalette(currentPalette, (v >> 8));
-      uint16_t color = dma_display->color565(currentColor.r, currentColor.g, currentColor.b);
-      dma_display->drawPixel(x, y, color);
+      dma_display->drawPixelRGB888(x, y, currentColor.r, currentColor.g, currentColor.b);
     }
   }
 
@@ -933,9 +809,9 @@ void displaySleepMode() {
 }
 
 void setup() {
-
   Serial.begin(BAUD_RATE);
-  delay(1000); // Delay for serial monitor to start
+  delay(500); // Delay for serial monitor to start
+
   Serial.println(" ");
   Serial.println("*****************************************************");
   Serial.println("*****************************************************");
@@ -944,19 +820,26 @@ void setup() {
   Serial.println("*****************************************************");
   Serial.println("*****************************************************");
   Serial.println("*****************************************************");
-  
+  Serial.println(" ");
+  Serial.println(" ");
+
+  #if DEBUG_MODE
+  Serial.println("DEBUG MODE ENABLED");
+  #endif
+  Serial.println(" ");
+
   initTempSensor();
 
   // Initialize Preferences
   initPreferences();
   
   // Retrieve and print stored brightness value.
-  int userBrightness = getUserBrightness();
+  //int userBrightness = getUserBrightness();
   // Map userBrightness (1-100) to hardware brightness (1-255).
-  int hwBrightness = map(userBrightness, 1, 100, 1, 255);
+  //int hwBrightness = map(userBrightness, 1, 100, 1, 255);
   Serial.printf("Stored brightness: %d\n", userBrightness);
  
-
+///////////////////// Setup BLE ////////////////////////
   Serial.println("Initializing BLE...");
   NimBLEDevice::init("LumiFur_Controller");
   NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
@@ -1048,11 +931,11 @@ void setup() {
 #ifndef VIRTUAL_PANE
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   dma_display->begin();
-  dma_display->setBrightness8(hwBrightness);
+  dma_display->setBrightness8(userBrightness);
 #else
   chain = new MatrixPanel_I2S_DMA(mxconfig);
   chain->begin();
-  chain->setBrightness8(hwBrightness);
+  chain->setBrightness8(userBrightness);
   // create VirtualDisplay object based on our newly created dma_display object
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
 #endif
@@ -1080,42 +963,47 @@ void setup() {
   }
 #endif
 
-  lastActivityTime = millis(); // Initialize the activity timer
+  lastActivityTime = millis(); // Initialize the activity timer for sleep mode
 
   randomSeed(analogRead(0)); // Seed the random number generator
-  //randomSeed(analogRead(0)); // Seed the random number generator
   
   // Set sleep timeout based on debug mode
-  SLEEP_TIMEOUT_MS = debugMode ? SLEEP_TIMEOUT_MS_DEBUG : SLEEP_TIMEOUT_MS_NORMAL;
+  SLEEP_TIMEOUT_MS = DEBUG_MODE ? SLEEP_TIMEOUT_MS_DEBUG : SLEEP_TIMEOUT_MS_NORMAL;
 
   // Set initial plasma color palette
   currentPalette = RainbowColors_p;
+
   // Set up buttons if present
   /* ----------------------------------------------------------------------
   Use internal pull-up resistor, as the up and down buttons 
   do not have any pull-up resistors connected to them 
   and pressing either of them pulls the input low.
   ------------------------------------------------------------------------- */
+
+#if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
   #ifdef BUTTON_UP
     pinMode(BUTTON_UP, INPUT_PULLUP);
   #endif
   #ifdef BUTTON_DOWN
     pinMode(BUTTON_DOWN, INPUT_PULLUP);
   #endif
+#endif
 
-// Initialize APDS9960 proximity sensor
-if(!apds.begin()){
-  Serial.println("failed to initialize proximity sensor! Please check your wiring.");
-  while(1);
-}
- Serial.println("Proximity sensor initialized!");
+  // Initialize APDS9960 proximity sensor if found
+  if (!apds.begin())
+  {
+    Serial.println("failed to initialize proximity sensor! Please check your wiring.");
+    while (1)
+      ;
+  }
+  Serial.println("Proximity sensor initialized!");
   apds.enableProximity(true); //enable proximity mode
   apds.setProximityInterruptThreshold(0, 175); //set the interrupt threshold to fire when proximity reading goes above 175
   apds.enableProximityInterrupt(); //enable the proximity interrupt
 
 }
 
-uint8_t wheelval = 0;
+//uint8_t wheelval = 0; // Wheel value for color cycling
 
 void displayCurrentMaw() {
   switch (currentMaw) {
@@ -1202,31 +1090,26 @@ if (view != previousView) { // Check if the view has changed
     break;
 
   case 1: // Loading bar effect
-  //dma_display->clearScreen();
-    displayLoadingBar();
-    if (loadingProgress <= loadingMax)
+    if (loadingProgress < loadingMax)
     {
       displayLoadingBar(); // Update the loading bar
       loadingProgress++;   // Increment progress
-      //delay(50);           // Adjust speed of loading animation
+      // Non-blocking animation speed controlled by frame rate
     } else {
       // Reset or transition to another view
-      loadingProgress = 0;
+      loadingProgress = 1;
+      displayLoadingBar(); // Draw initial state after reset
     }
-    //dma_display->flipDMABuffer();
     break;
 
   case 2: // Pattern plasma
     patternPlasma();
-    delay(10);
-    //dma_display->flipDMABuffer();
+    delay(20); // Short delay for smoother animation
+
     break;
 
   case 3:
-    //dma_display->clearScreen(); // Clear the display
     drawTransFlag();
-    //delay(20);
-    //dma_display->flipDMABuffer();
     break;
 
   case 4: // Normal
@@ -1286,7 +1169,7 @@ if (view != previousView) { // Check if the view has changed
   // Only flip buffer if not spiral view (spiral handles its own flip)
   //if (view != 9) 
 
-  if (debugMode) {
+ #if DEBUG_MODE
     // --- Begin FPS counter overlay ---
     static unsigned long lastFpsTime = 0;
     static int frameCount = 0;
@@ -1299,12 +1182,12 @@ if (view != previousView) { // Check if the view has changed
     }
     char fpsText[8];
     sprintf(fpsText, "FPS: %d", fps);
-    dma_display->setTextColor(dma_display->color565(255, 255, 0)); // Yellow text
+    dma_display->setTextColor(dma_display->color565(255, 255, 255)); // White text
     // Position the counter at a corner (adjust as needed)
-    dma_display->setCursor((dma_display->width() / 4) + 10 , 1);
+    dma_display->setCursor((dma_display->width() / 4) + 8 , 1);
     dma_display->print(fpsText);
     // --- End FPS counter overlay ---
-  }
+  #endif
 
   dma_display->flipDMABuffer();
 }
@@ -1404,7 +1287,7 @@ void checkSleepMode() {
 
 
 
-void loop(void) {
+void loop() {
   unsigned long now = millis();
   bool isConnected = NimBLEDevice::getServer()->getConnectedCount() > 0;
   
@@ -1502,7 +1385,7 @@ static unsigned long lastFrameTime = 0;
 unsigned long baseInterval = 5;
 // If the current view is one of the plasma views, increase the interval to reduce load
 if (currentView == 2 || currentView == 10) {
-    baseInterval = 15; // Use 15 ms for plasma view
+    baseInterval = 11; // Use 15 ms for plasma view
 }
 const unsigned long currentFrameInterval = sleepModeActive ? sleepFrameInterval : baseInterval;
 if (millis() - lastFrameTime >= currentFrameInterval) {
