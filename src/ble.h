@@ -1,5 +1,5 @@
 #include <NimBLEDevice.h>
-
+#include "driver/temp_sensor.h"
 ////////////////////////////////////////////
 /////////////////BLE CONFIG/////////////////
 ////////////////////////////////////////////
@@ -58,13 +58,12 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     }
 
     void onAuthenticationComplete(NimBLEConnInfo& connInfo) override {
-        /** Check that encryption was successful, if not we disconnect the client */
         if (!connInfo.isEncrypted()) {
-            NimBLEDevice::getServer()->disconnect(connInfo.getConnHandle());
-            Serial.printf("Encrypt connection failed - disconnecting client\n");
+            Serial.printf("Encryption not established for: %s\n", connInfo.getAddress().toString().c_str());
+            // Instead of disconnecting, you might choose to leave the connection or handle it gracefully.
+            // For production use you can decide to force disconnect once you’re sure your client supports pairing.
             return;
         }
-
         Serial.printf("Secured connection to: %s\n", connInfo.getAddress().toString().c_str());
     }
 
@@ -75,26 +74,31 @@ unsigned long temperatureMillis = 0;
 const unsigned long temperatureInterval = 5000; // 1 second interval for temperature update
 
 void updateTemperature() {
-  unsigned long currentMillis = millis();
+    unsigned long currentMillis = millis();
 
-  // Check if enough time has passed to update temperature
-  if (currentMillis - temperatureMillis >= temperatureInterval) {
-    temperatureMillis = currentMillis;
+    // Check if enough time has passed to update temperature
+    if (currentMillis - temperatureMillis >= temperatureInterval) {
+        temperatureMillis = currentMillis;
 
-    if (deviceConnected) {
-      // Read the ESP32's internal temperature
-      float temperature = temperatureRead();  // Temperature in Celsius
+        // Verify that the device is connected and the temperature characteristic pointer is valid.
+        if (deviceConnected && pTemperatureCharacteristic != nullptr) {
+            Serial.print("Temperature: ");
+            float result = 0;
+            temp_sensor_read_celsius(&result);
+            Serial.print(result);
+            Serial.println(" °C");
 
-      // Convert temperature to string and send over BLE
-      char tempStr[12];
-      snprintf(tempStr, sizeof(tempStr), "%.1f°C", temperature);
-      pTemperatureCharacteristic->setValue(tempStr);
-      pTemperatureCharacteristic->notify();
+            // Convert the float value to an integer
+            int temperature = (int)result;
 
-      // Optional: Debug output to serial
-      Serial.print("Internal Temperature: ");
-      Serial.println(tempStr);
+            // Convert temperature to string using an integer value and send over BLE
+            char tempStr[12];
+            snprintf(tempStr, sizeof(tempStr), "%d°C", temperature);
+            pTemperatureCharacteristic->setValue(tempStr);
+            pTemperatureCharacteristic->notify();
+        } else {
+            // Extra safeguard: log an error if pTemperatureCharacteristic is null
+            Serial.println("Error: pTemperatureCharacteristic is null!");
+        }
     }
-  }
 }
-

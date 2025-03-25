@@ -144,7 +144,7 @@ bool debounceButton(int pin) {
 
 // Sleep mode variables
 // Define both timeout values and select the appropriate one in setup()
-const unsigned long SLEEP_TIMEOUT_MS_DEBUG = 15000;    // 15 seconds (15,000 ms)
+const unsigned long SLEEP_TIMEOUT_MS_DEBUG = 100000;    // 15 seconds (15,000 ms)
 const unsigned long SLEEP_TIMEOUT_MS_NORMAL = 300000; // 5 minutes (300,000 ms)
 unsigned long SLEEP_TIMEOUT_MS; // Will be set in setup() based on debugMode
 bool sleepModeActive = false;
@@ -153,10 +153,20 @@ float prevAccelX = 0, prevAccelY = 0, prevAccelZ = 0;
 uint8_t preSleepView = 4;  // Store the view before sleep
 uint8_t sleepBrightness = 15; // Brightness level during sleep (0-255)
 uint8_t normalBrightness = userBrightness; // Normal brightness level
+volatile bool notifyPending = false;
 unsigned long sleepFrameInterval = 11; // Frame interval in ms (will be changed during sleep)
 
 // Accelerometer object declaration
 Adafruit_LIS3DH accel;
+
+#include "driver/temp_sensor.h"
+
+void initTempSensor(){
+  temp_sensor_config_t temp_sensor = TSENS_CONFIG_DEFAULT();
+  temp_sensor.dac_offset = TSENS_DAC_L2;  // TSENS_DAC_L2 is default; L4(-40°C ~ 20°C), L2(-10°C ~ 80°C), L1(20°C ~ 100°C), L0(50°C ~ 125°C)
+  temp_sensor_set_config(temp_sensor);
+  temp_sensor_start();
+}
 
 // Power management scopes
 void reduceCPUSpeed() {
@@ -188,7 +198,7 @@ void wakeFromSleepMode() {
   sleepFrameInterval = 11; // Back to ~90 FPS
   
   // Restore normal brightness
-  dma_display->setBrightness8(normalBrightness);
+  dma_display->setBrightness8(userBrightness);
   
   lastActivityTime = millis(); // Reset activity timer
   
@@ -235,7 +245,8 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
               currentView = newView;
               lastActivityTime = millis(); // BLE command counts as activity
               Serial.printf("Write request - new view: %d\n", currentView);
-              pCharacteristic->notify();
+              //pCharacteristic->notify();
+              notifyPending = true;
             }
         }
     }
@@ -400,16 +411,19 @@ void drawPlasmaFace() {
 
 void updatePlasmaFace() {
   static unsigned long lastUpdate = 0;
-  const uint16_t frameDelay = 5; // Low delay for smoother transition
+  static unsigned long lastPaletteChange = 0;
+  const uint16_t frameDelay = 10; // Delay for plasma animation update
+  const unsigned long paletteInterval = 10000; // Change palette every 10 seconds
+  unsigned long now = millis();
   
-  if (millis() - lastUpdate > frameDelay) {
-    lastUpdate = millis();
-    time_counter += plasmaSpeed; // Speed of plasma animation
-    
-    // Cycle palette every 10 seconds
-    if (millis() % 10000 < frameDelay) {
-      currentPalette = palettes[random(0, sizeof(palettes)/sizeof(palettes[0]))];
-    }
+  if (now - lastUpdate > frameDelay) {
+    lastUpdate = now;
+    time_counter += plasmaSpeed; // Update plasma animation counter
+  }
+  
+  if (now - lastPaletteChange > paletteInterval) {
+    lastPaletteChange = now;
+    currentPalette = palettes[random(0, sizeof(palettes)/sizeof(palettes[0]))];
   }
 }
 
@@ -931,6 +945,8 @@ void setup() {
   Serial.println("*****************************************************");
   Serial.println("*****************************************************");
   
+  initTempSensor();
+
   // Initialize Preferences
   initPreferences();
   
@@ -953,11 +969,11 @@ void setup() {
   // Face control characteristic with encryption
   pFaceCharacteristic = pService->createCharacteristic(
     CHARACTERISTIC_UUID,
-    //NIMBLE_PROPERTY::READ |
-    //NIMBLE_PROPERTY::WRITE |
-    NIMBLE_PROPERTY::NOTIFY |
-    NIMBLE_PROPERTY::READ_ENC | // only allow reading if paired / encrypted
-    NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
+    NIMBLE_PROPERTY::READ |
+    NIMBLE_PROPERTY::WRITE |
+    NIMBLE_PROPERTY::NOTIFY 
+    //NIMBLE_PROPERTY::READ_ENC  // only allow reading if paired / encrypted
+   // NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
   );
   
   // Set initial view value
@@ -978,8 +994,10 @@ void setup() {
   pConfigCharacteristic = pService->createCharacteristic(
       CONFIG_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::NOTIFY |
-      NIMBLE_PROPERTY::READ_ENC |
-      NIMBLE_PROPERTY::WRITE_ENC
+      NIMBLE_PROPERTY::READ |
+      NIMBLE_PROPERTY::WRITE 
+      //NIMBLE_PROPERTY::READ_ENC |
+      //NIMBLE_PROPERTY::WRITE_ENC
   );
 
   // Set up descriptors
@@ -1124,7 +1142,7 @@ void displayCurrentMaw() {
 
 void displayCurrentView(int view) {
   static unsigned long lastFrameTime = 0; // Track the last frame time
-  const unsigned long frameInterval = 5; // Consistent 30 FPS
+  const unsigned long frameInterval = 10; // Consistent 30 FPS
   static int previousView = -1; // Track the last active view
 
   // If we're in sleep mode, don't display the normal view
@@ -1200,7 +1218,7 @@ if (view != previousView) { // Check if the view has changed
 
   case 2: // Pattern plasma
     patternPlasma();
-    //delay(10);
+    delay(10);
     //dma_display->flipDMABuffer();
     break;
 
@@ -1392,7 +1410,10 @@ void loop(void) {
   
   // Always handle BLE and temperature updates first.
   handleBLEConnection();
-  updateTemperature();
+  if (notifyPending) {
+    pFaceCharacteristic->notify();
+    notifyPending = false;
+}
 
   // Check for sleep mode (only on MatrixPortal ESP32-S3).
   #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
@@ -1409,6 +1430,7 @@ void loop(void) {
     }
   }
   else {
+    updateTemperature();
     // Device is active—handle button input, sensor reading, blush effect,
     // and strong motion detection (shake) to trigger spiral eyes.
 
@@ -1462,18 +1484,34 @@ void loop(void) {
     if (currentView == 9 && (millis() - spiralStartTime >= 5000)) {
       currentView = previousView;   // Return to the previous view.
     }
+/*
+static unsigned long lastTempTime = 0; // Static variable to track last temperature read time
+if (millis() - lastTempTime >= 5000) {
+    lastTempTime = millis(); // Reset the timer
+    Serial.print("Temperature: ");
+    float result = 0;
+    temp_sensor_read_celsius(&result);
+    Serial.print(result);
+    Serial.println(" °C");
+}
+*/
   }
   
-  // --- Frame rate controlled display updates ---
-  static unsigned long lastFrameTime = 0;
-  const unsigned long currentFrameInterval = sleepModeActive ? sleepFrameInterval : 5;
-  if (millis() - lastFrameTime >= currentFrameInterval) {
-    lastFrameTime = millis();
-    if (sleepModeActive) {
-      displaySleepMode();
-    } else {
-      displayCurrentView(currentView);
-    }
+// --- Frame rate controlled display updates ---
+static unsigned long lastFrameTime = 0;
+unsigned long baseInterval = 5;
+// If the current view is one of the plasma views, increase the interval to reduce load
+if (currentView == 2 || currentView == 10) {
+    baseInterval = 15; // Use 15 ms for plasma view
+}
+const unsigned long currentFrameInterval = sleepModeActive ? sleepFrameInterval : baseInterval;
+if (millis() - lastFrameTime >= currentFrameInterval) {
+  lastFrameTime = millis();
+  if (sleepModeActive) {
+    displaySleepMode();
+  } else {
+    displayCurrentView(currentView);
   }
+}
 }
 
