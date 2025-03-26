@@ -28,7 +28,7 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 - [License](#license) 📜
 
 ## Features ✨
-- Multiple facial expressions (idle, happy, angry, playful, silly, kinky, and more)
+- Multiple facial expressions (idle, happy, angry, playful, silly, lewd, and more)
 - Smooth blinking animations
 - Bluetooth Low Energy (BLE) connectivity to switch expressions remotely
 - Boot-up animation with scrolling text
