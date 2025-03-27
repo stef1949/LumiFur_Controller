@@ -1,5 +1,8 @@
-#include <NimBLEDevice.h>
+#ifndef BLE_H
+#define BLE_H
 
+#include <NimBLEDevice.h>
+#include "driver/temp_sensor.h"
 ////////////////////////////////////////////
 //////////////////BLE UUIDs/////////////////
 ////////////////////////////////////////////
@@ -15,6 +18,17 @@
 
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
+
+// BLE UUIDs
+#define SERVICE_UUID                    "01931c44-3867-7740-9867-c822cb7df308"
+#define CHARACTERISTIC_UUID             "01931c44-3867-7427-96ab-8d7ac0ae09fe"
+#define CONFIG_CHARACTERISTIC_UUID      "01931c44-3867-7427-96ab-8d7ac0ae09ff"
+#define TEMPERATURE_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9774-18350e3e27db"
+//#define ULTRASOUND_CHARACTERISTIC_UUID  "01931c44-3867-7b5d-9732-12460e3a35db"
+
+//#define DESC_USER_DESC_UUID  0x2901  // User Description descriptor
+//#define DESC_FORMAT_UUID     0x2904  // Presentation Format descriptor
+
 
 // BLE Server pointers
 NimBLEServer* pServer = nullptr;
@@ -59,7 +73,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
          */
         return 123456;
     }
-
+    
     void onConfirmPassKey(NimBLEConnInfo& connInfo, uint32_t pass_key) override {
         Serial.printf("The passkey YES/NO number: %" PRIu32 "\n", pass_key);
         /** Inject false if passkeys don't match. */
@@ -67,13 +81,12 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     }
 
     void onAuthenticationComplete(NimBLEConnInfo& connInfo) override {
-        /** Check that encryption was successful, if not we disconnect the client */
         if (!connInfo.isEncrypted()) {
-            NimBLEDevice::getServer()->disconnect(connInfo.getConnHandle());
-            Serial.printf("Encrypt connection failed - disconnecting client\n");
+            Serial.printf("Encryption not established for: %s\n", connInfo.getAddress().toString().c_str());
+            // Instead of disconnecting, you might choose to leave the connection or handle it gracefully.
+            // For production use you can decide to force disconnect once you’re sure your client supports pairing.
             return;
         }
-
         Serial.printf("Secured connection to: %s\n", connInfo.getAddress().toString().c_str());
     }
 
@@ -84,26 +97,36 @@ unsigned long temperatureMillis = 0;
 const unsigned long temperatureInterval = 5000; // 1 second interval for temperature update
 
 void updateTemperature() {
-  unsigned long currentMillis = millis();
+    unsigned long currentMillis = millis();
 
-  // Check if enough time has passed to update temperature
-  if (currentMillis - temperatureMillis >= temperatureInterval) {
-    temperatureMillis = currentMillis;
+    // Check if enough time has passed to update temperature
+    if (currentMillis - temperatureMillis >= temperatureInterval) {
+        temperatureMillis = currentMillis;
 
-    if (deviceConnected) {
-      // Read the ESP32's internal temperature
-      float temperature = temperatureRead();  // Temperature in Celsius
+        // Verify that the device is connected and the temperature characteristic pointer is valid.
+        if (deviceConnected && pTemperatureCharacteristic != nullptr) {
+            float result = 0;
+            temp_sensor_read_celsius(&result);
 
-      // Convert temperature to string and send over BLE
-      char tempStr[12];
-      snprintf(tempStr, sizeof(tempStr), "%.1f°C", temperature);
-      pTemperatureCharacteristic->setValue(tempStr);
-      pTemperatureCharacteristic->notify();
+            // Convert the float value to an integer
+            int temperature = (int)result;
 
-      // Optional: Debug output to serial
-      Serial.print("Internal Temperature: ");
-      Serial.println(tempStr);
+            // Convert temperature to string using an integer value and send over BLE
+            char tempStr[12];
+            snprintf(tempStr, sizeof(tempStr), "%d°C", temperature);
+            pTemperatureCharacteristic->setValue(tempStr);
+            pTemperatureCharacteristic->notify();
+
+            // Print temperature values if DEBUG_MODE is enabled
+            #if DEBUG_MODE
+            Serial.print("Temperature: ");
+            Serial.print(result);
+            Serial.println(" °C");
+            #endif
+        } else {
+            // Extra safeguard: log an error if pTemperatureCharacteristic is null
+            Serial.println("Error: pTemperatureCharacteristic is null!");
+        }
     }
-  }
 }
-
+#endif /* BLE_H */
