@@ -1,7 +1,16 @@
 #include <NimBLEDevice.h>
 
 ////////////////////////////////////////////
-/////////////////BLE CONFIG/////////////////
+//////////////////BLE UUIDs/////////////////
+////////////////////////////////////////////
+#define SERVICE_UUID                    "01931c44-3867-7740-9867-c822cb7df308"
+#define CHARACTERISTIC_UUID             "01931c44-3867-7427-96ab-8d7ac0ae09fe"
+#define CONFIG_CHARACTERISTIC_UUID      "01931c44-3867-7427-96ab-8d7ac0ae09ff"
+#define TEMPERATURE_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9774-18350e3e27db"
+//#define ULTRASOUND_CHARACTERISTIC_UUID  "01931c44-3867-7b5d-9732-12460e3a35db"
+
+/////////////////////////////////////////////
+/////////////////BLE CONFIG//////////////////
 ////////////////////////////////////////////
 
 bool deviceConnected = false;
