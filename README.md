@@ -3,6 +3,16 @@
 </p>
 <h1 align="center">
   LumiFur Controller 
+  
+  [![CodeQL Advanced Build with PlatformIO](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml)
+  ![version](https://img.shields.io/badge/version-0.1.0-blue)
+  <a href="https://github.com/badges/shields/pulse" alt="Activity">
+        <img src="https://img.shields.io/github/commit-activity/m/badges/shields" /></a>
+  [![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=main)](https://coveralls.io/github/stef1949/LumiFur_Controller?branch=main)
+  
+  
+
+
 </h1>
 A program for controlling an LED matrix display for a Protogen mask, featuring various facial expressions and Bluetooth LE control with an ESP32.
 
@@ -18,7 +28,7 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 - [License](#license) 📜
 
 ## Features ✨
-- Multiple facial expressions (idle, happy, angry, playful, silly, kinky, and more)
+- Multiple facial expressions (idle, happy, angry, playful, silly, lewd, and more)
 - Smooth blinking animations
 - Bluetooth Low Energy (BLE) connectivity to switch expressions remotely
 - Boot-up animation with scrolling text

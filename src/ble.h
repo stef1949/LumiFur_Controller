@@ -129,4 +129,5 @@ void updateTemperature() {
         }
     }
 }
+
 #endif /* BLE_H */
