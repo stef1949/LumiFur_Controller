@@ -5,7 +5,7 @@
   LumiFur Controller 
   
   [![CodeQL Advanced Build with PlatformIO](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml)
-  ![version](https://img.shields.io/badge/version-0.1.0-blue)
+  ![version](https://img.shields.io/badge/version-0.2.0-blue)
   <a href="https://github.com/badges/shields/pulse" alt="Activity">
         <img src="https://img.shields.io/github/commit-activity/m/badges/shields" /></a>
   [![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=main)](https://coveralls.io/github/stef1949/LumiFur_Controller?branch=main)
