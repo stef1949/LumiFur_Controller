@@ -23,6 +23,9 @@
 // #include "EffectsLayer.hpp" // FastLED CRGB Pixel Buffer for which the patterns are drawn
 // EffectsLayer effects(VPANEL_W, VPANEL_H);
 
+// Setup functions for adaptive brightness using APDS9960:
+// Call setupAdaptiveBrightness() in your setup() to initialize the sensor.
+
 // ----------------------------------------------------------------
 // ----------------------------------------------------------------
 // ------------------- LumiFur Global Variables -------------------
@@ -31,17 +34,6 @@
 
 // Brightness control
 //  Retrieve the brightness value from preferences
-int userBrightness = getUserBrightness(); // e.g., default 204 (80%)
-
-// Map userBrightness (1-255) to hwBrightness (1-255).
-// int hwBrightness = map(userBrightness, 1, 100, 1, 255);
-
-// Map userBrightness (1-255) to sliderBrightness (1-100);
-int sliderBrightness = map(userBrightness, 1, 255, 1, 100);
-
-// Convert the userBrightness into a scale factor (0.0 to 1.0)
-// Here, we simply divide userBrightness by 255.0 to get a proportion.
-float globalBrightnessScale = userBrightness / 255.0;
 
 // View switching
 uint8_t currentView = 4;   // Current & initial view being displayed
@@ -1080,20 +1072,9 @@ void setup()
 #endif
 #endif
 
-  // Initialize APDS9960 proximity sensor if found
-  if (!apds.begin())
-  {
-    Serial.println("failed to initialize proximity sensor! Please check your wiring.");
-    while (1)
-      ;
-  }
-  Serial.println("Proximity sensor initialized!");
-  apds.enableProximity(true);                  // enable proximity mode
-  apds.setProximityInterruptThreshold(0, 175); // set the interrupt threshold to fire when proximity reading goes above 175
-  apds.enableProximityInterrupt();             // enable the proximity interrupt
-}
-
+setupAdaptiveBrightness();
 // uint8_t wheelval = 0; // Wheel value for color cycling
+}
 
 void displayCurrentMaw()
 {
@@ -1502,6 +1483,9 @@ void loop()
         Serial.println(" °C");
     }
     */
+   // Read ambient light and update display brightness
+  uint8_t adaptiveBrightness = getAdaptiveBrightness();
+  dma_display->setBrightness8(adaptiveBrightness);
   }
 
   // --- Frame rate controlled display updates ---
