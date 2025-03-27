@@ -18,14 +18,14 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 
 ## Table of Contents
 
-- [Features](#features) ✨
-- [Hardware Requirements](#hardware-requirements) 🛠️
-- [Software Requirements](#software-requirements) 💻
-- [Installation](#installation) ⚙️
-- [Usage](#usage) 📖
-- [Facial Expressions](#facial-expressions) 😃
-- [Contributing](#contributing) 🤝
-- [License](#license) 📜
+- ✨ [Features](#features)
+- 🛠️ [Hardware Requirements](#hardware-requirements)
+- 💻 [Software Requirements](#software-requirements)
+- ⚙️ [Installation](#installation)
+- 📖 [Usage](#usage)
+- 😃 [Facial Expressions](#facial-expressions)
+- 🤝 [Contributing](#contributing)
+- 📜 [License](#license)
 
 ## Features ✨
 - Multiple facial expressions (idle, happy, angry, playful, silly, lewd, and more)
