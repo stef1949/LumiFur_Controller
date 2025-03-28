@@ -37,7 +37,7 @@
 
 // View switching
 uint8_t currentView = 4;   // Current & initial view being displayed
-const int totalViews = 11; // Total number of views to cycle through
+const int totalViews = 13; // Total number of views to cycle through
 // int userBrightness = 20; // Default brightness level (0-255)
 
 unsigned long spiralStartTime = 0; // Global variable to record when spiral view started
@@ -112,7 +112,7 @@ uint8_t preSleepView = 4;                  // Store the view before sleep
 uint8_t sleepBrightness = 15;              // Brightness level during sleep (0-255)
 uint8_t normalBrightness = userBrightness; // Normal brightness level
 volatile bool notifyPending = false;
-unsigned long sleepFrameInterval = 11; // Frame interval in ms (will be changed during sleep)
+unsigned long sleepFrameInterval = 5; // Frame interval in ms (will be changed during sleep)
 
 void displayCurrentView(int view);
 
@@ -640,7 +640,7 @@ void blinkingEyes()
   else if (currentView == 9)
   {
   }
-
+  
   if (isBlinking)
   {
     // Calculate the height of the black box
@@ -738,10 +738,11 @@ void drawTransFlag()
 
   int stripeHeight = dma_display->height() / 5; // Height of each stripe
 
-  // Define colors in RGB565 format
-  uint16_t lightBlue = dma_display->color565(0, 102 / 2, 204 / 2);   // Deeper light blue
-  uint16_t pink = dma_display->color565(255, 20 / 2, 147 / 2);       // Deeper pink
-  uint16_t white = dma_display->color565(255 / 2, 255 / 2, 255 / 2); // White (unchanged)
+  // Define colors in RGB565 format with intended values:
+  // lightBlue: (0,51,102), pink: (255,10,73), white: (255,255,255)
+  uint16_t lightBlue = dma_display->color565(0, (102 / 2), (204 / 2));  
+  uint16_t pink = dma_display->color565(255, (20 / 2), (147 / 2));        
+  uint16_t white = dma_display->color565(255, 255, 255);                   
 
   // Draw stripes
   dma_display->fillRect(0, 0, dma_display->width(), stripeHeight, lightBlue);                // Top light blue stripe
@@ -885,6 +886,41 @@ void displaySleepMode()
   drawXbm565(0, 20, 64, 8, maw2Closed, dma_display->color565(120, 120, 120));
   drawXbm565(64, 20, 64, 8, maw2ClosedL, dma_display->color565(120, 120, 120));
 
+  dma_display->flipDMABuffer();
+}
+
+struct Star {
+  int x;
+  int y;
+  int speed;
+};
+
+const int NUM_STARS = 50;
+Star stars[NUM_STARS];
+
+void initStarfield() {
+  for (int i = 0; i < NUM_STARS; i++) {
+      stars[i].x = random(0, dma_display->width());
+      stars[i].y = random(0, dma_display->height());
+      stars[i].speed = random(1, 4); // Stars move at different speeds
+  }
+}
+
+void updateStarfield() {
+  // Clear the display for a fresh frame
+  //dma_display->clearScreen();
+  // Update and draw each star
+  for (int i = 0; i < NUM_STARS; i++) {
+      dma_display->drawPixel(stars[i].x, stars[i].y, dma_display->color565(255, 255, 255));
+      // Move star leftwards based on its speed
+      stars[i].x -= stars[i].speed;
+      // Reset star to right edge if it goes off the left side
+      if (stars[i].x < 0) {
+          stars[i].x = dma_display->width() - 1;
+          stars[i].y = random(0, dma_display->height());
+          stars[i].speed = random(1, 4);
+      }
+  }
   dma_display->flipDMABuffer();
 }
 
@@ -1056,6 +1092,31 @@ void setup()
   // Set initial plasma color palette
   currentPalette = RainbowColors_p;
 
+
+  ////////Setup Bouncing Squares////////
+  myDARK = dma_display->color565(64, 64, 64);
+  myWHITE = dma_display->color565(192, 192, 192);
+  myRED = dma_display->color565(255, 0, 0);
+  myGREEN = dma_display->color565(0, 255, 0);
+  myBLUE = dma_display->color565(0, 0, 255);
+
+  colours = {{ myDARK, myWHITE, myRED, myGREEN, myBLUE }};
+
+  // Create some random squares
+  for (int i = 0; i < numSquares; i++)
+  {
+    Squares[i].square_size = random(2,10);
+    Squares[i].xpos = random(0, dma_display->width() - Squares[i].square_size);
+    Squares[i].ypos = random(0, dma_display->height() - Squares[i].square_size);
+    Squares[i].velocityx = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+    Squares[i].velocityy = static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+
+    int random_num = random(6);
+    Squares[i].colour = colours[random_num];
+  }
+
+  // Initialize the starfield
+  initStarfield();
   // Set up buttons if present
   /* ----------------------------------------------------------------------
   Use internal pull-up resistor, as the up and down buttons
@@ -1072,8 +1133,22 @@ void setup()
 #endif
 #endif
 
-setupAdaptiveBrightness();
-// uint8_t wheelval = 0; // Wheel value for color cycling
+  setupAdaptiveBrightness();
+  // uint8_t wheelval = 0; // Wheel value for color cycling
+
+
+  // Boot screen
+  dma_display->clearScreen();
+  dma_display->setTextSize(2); // Set text size
+  dma_display->setCursor(0, 0);
+  dma_display->setTextColor(dma_display->color565(255, 0, 255));
+  dma_display->print("LumiFur"); // Set text size
+  dma_display->setTextSize(1); // Set text size
+  dma_display->setCursor(0, 20);
+  dma_display->setTextColor(dma_display->color565(255, 255, 255));
+  dma_display->print("Initializing..."); // Set text size
+  dma_display->flipDMABuffer(); // Flip the buffer to show the boot screen
+  delay(1500); // Delay to show boot screen
 }
 
 void displayCurrentMaw()
@@ -1141,31 +1216,31 @@ void displayCurrentView(int view)
     // This happens "in the background" with double buffering, that's
     // why you don't see everything flicker. It requires double the RAM,
     // so it's not practical for every situation.
-
-    // Draw big scrolling text
-    dma_display->setCursor(textX, textY);
-    dma_display->print(txt);
+    
+    dma_display->clearScreen(); // Clear the display
 
     // Update text position for next frame. If text goes off the
     // left edge, reset its position to be off the right edge.
-    if ((--textX) < textMin)
-      textX = dma_display->width();
+    for (int i = 0; i < numSquares; i++)
+  {
+    // Draw rect and then calculate
+    dma_display->fillRect(Squares[i].xpos, Squares[i].ypos, Squares[i].square_size, Squares[i].square_size, Squares[i].colour);
 
-    // Draw the three bouncy balls on top of the text...
-    for (byte i = 0; i < 3; i++)
-    {
-      // Draw 'ball'
-      dma_display->fillCircle(ball[i][0], ball[i][1], 5, ballcolor[i]);
-      // Update ball's X,Y position for next frame
-      ball[i][0] += ball[i][2];
-      ball[i][1] += ball[i][3];
-      // Bounce off edges
-      if ((ball[i][0] == 0) || (ball[i][0] == (dma_display->width() - 1)))
-        ball[i][2] *= -1;
-      if ((ball[i][1] == 0) || (ball[i][1] == (dma_display->height() - 1)))
-        ball[i][3] *= -1;
+    if (Squares[i].square_size + Squares[i].xpos >= dma_display->width()) {
+      Squares[i].velocityx *= -1;
+    } else if (Squares[i].xpos <= 0) {
+      Squares[i].velocityx = abs (Squares[i].velocityx);
     }
 
+    if (Squares[i].square_size + Squares[i].ypos >= dma_display->height()) {
+      Squares[i].velocityy *= -1;
+    } else if (Squares[i].ypos <= 0) {
+      Squares[i].velocityy = abs (Squares[i].velocityy);
+    }
+
+    Squares[i].xpos += Squares[i].velocityx;
+    Squares[i].ypos += Squares[i].velocityy;
+  }
     break;
 
   case 1: // Loading bar effect
@@ -1234,13 +1309,17 @@ void displayCurrentView(int view)
     updatePlasmaFace();
     updateBlinkAnimation();
     break;
-    /*
-      case 10: // UwU eyes
-        protoFaceTest();
-        updateBlinkAnimation(); // Update blink animation progress
-        break;
 
-    */
+  case 11: // UwU eyes
+    protoFaceTest();
+    //updatePlasmaFace();
+    // updateBlinkAnimation(); // Update blink animation progress
+    break;
+
+  case 12: // UwU eyes with blush
+    updateStarfield();
+    break;
+
   default:
     // Optional: Handle unsupported views
     // dma_display->clearScreen();
@@ -1264,6 +1343,7 @@ void displayCurrentView(int view)
   }
   char fpsText[8];
   sprintf(fpsText, "FPS: %d", fps);
+  dma_display->setTextSize(1); // Set text size for FPS counter
   dma_display->setTextColor(dma_display->color565(255, 255, 255)); // White text
   // Position the counter at a corner (adjust as needed)
   dma_display->setCursor((dma_display->width() / 4) + 8, 1);
@@ -1483,9 +1563,10 @@ void loop()
         Serial.println(" °C");
     }
     */
-   // Read ambient light and update display brightness
-  uint8_t adaptiveBrightness = getAdaptiveBrightness();
-  dma_display->setBrightness8(adaptiveBrightness);
+    // Read ambient light and update display brightness
+    uint8_t adaptiveBrightness = getAdaptiveBrightness();
+    dma_display->setBrightness8(adaptiveBrightness);
+
   }
 
   // --- Frame rate controlled display updates ---

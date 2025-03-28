@@ -138,6 +138,7 @@ int16_t ball[3][4] = {
     {27, 4, -1, 1}};
 uint16_t ballcolor[3]; // Colors for bouncy balls (init in setup())
 
+
 // Error handler function. If something goes wrong, this is what runs.
 void err(int x)
 {
@@ -201,7 +202,7 @@ uint8_t getAdaptiveBrightness()
     // else: sensor not ready—keep last computed adaptiveBrightness.
     // If the sensor isn't ready, targetBrightness remains unchanged.
   }
-  
+
   // Smoothly transition adaptiveBrightness towards targetBrightness.
   // Here, we use a smoothing factor; adjust the factor (0 < smoothingFactor <= 1)
   // to control the speed of transition.
@@ -210,5 +211,26 @@ uint8_t getAdaptiveBrightness()
 
   return adaptiveBrightness;
 }
+
+
+constexpr std::size_t color_num = 5;
+using colour_arr_t = std::array<uint16_t, color_num>;
+
+uint16_t myDARK, myWHITE, myRED, myGREEN, myBLUE;
+colour_arr_t colours;
+
+struct Square
+{
+  float xpos, ypos;
+  float velocityx;
+  float velocityy;
+  boolean xdir, ydir;
+  uint16_t square_size;
+  uint16_t colour;
+};
+
+const int numSquares = 25;
+Square Squares[numSquares];
+
 
 #endif /* MAIN_H */
