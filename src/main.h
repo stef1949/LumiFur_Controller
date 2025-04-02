@@ -181,7 +181,7 @@ void setupAdaptiveBrightness()
   apds.enableProximity(true);                  // enable proximity mode
   apds.enableColor(true);                      // enable color mode
   apds.setProximityInterruptThreshold(0, 175); // set the interrupt threshold to fire when proximity reading goes above 175
-  apds.enableProximityInterrupt();
+  //apds.enableProximityInterrupt();
 }
 
 // Setup functions for adaptive brightness & proximity sensing using APDS9960:
@@ -231,6 +231,5 @@ struct Square
 
 const int numSquares = 25;
 Square Squares[numSquares];
-
 
 #endif /* MAIN_H */
