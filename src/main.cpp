@@ -888,7 +888,7 @@ void displaySleepMode()
 
   dma_display->flipDMABuffer();
 }
-
+// Star structure for starfield animation
 struct Star {
   int x;
   int y;
