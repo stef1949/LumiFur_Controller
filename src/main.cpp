@@ -20,6 +20,8 @@
 // BLE Libraries
 #include <NimBLEDevice.h>
 
+#include <vector> //For chunking example
+
 // #include "EffectsLayer.hpp" // FastLED CRGB Pixel Buffer for which the patterns are drawn
 // EffectsLayer effects(VPANEL_W, VPANEL_H);
 
@@ -156,6 +158,59 @@ void wakeFromSleepMode()
     NimBLEDevice::startAdvertising();
   }
 }
+
+// Callback class for handling writes to the command characteristic
+class CommandCallbacks : public NimBLECharacteristicCallbacks {
+
+  // Override the onWrite method
+  void onWrite(NimBLECharacteristic* pCharacteristic) {
+      // Get the value written by the client
+      std::string rxValue = pCharacteristic->getValue();
+
+      if (rxValue.length() > 0) {
+          uint8_t commandCode = rxValue[0]; // Assuming single-byte commands
+
+          Serial.print("Command Characteristic received write, command code: 0x");
+          Serial.println(commandCode, HEX);
+
+          // Process the command
+          switch (commandCode) {
+              case 0x01: // Command: Get Temperature History
+                  Serial.println("-> Command: Get Temperature History");
+                  triggerHistoryTransfer(); // Call the function to start sending history
+                  break;
+
+              case 0x02: // Example: Command: Clear History Buffer
+                  Serial.println("-> Command: Clear History Buffer");
+                  clearHistoryBuffer();
+                  break;
+
+              // Add more cases for other commands here...
+
+              default:
+                  Serial.print("-> Unknown command code received: 0x");
+                  Serial.println(commandCode, HEX);
+                  break;
+          }
+      } else {
+          Serial.println("Command Characteristic received empty write.");
+      }
+  }
+} cmdCallbacks;
+
+// New Callback class for handling notifications related to Temperature Logs
+class TemperatureLogsCallbacks : public NimBLECharacteristicCallbacks {
+  public:
+      // Optionally, implement onSubscribe to log when a client subscribes to notifications
+      void onSubscribe(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo, uint16_t subValue) override {
+          std::string str = "Client subscribed to Temperature Logs notifications, Client ID: ";
+          str += connInfo.getConnHandle();
+          str += " Address: ";
+          str += connInfo.getAddress().toString();
+          Serial.printf("%s\n", str.c_str());
+      } 
+      
+    }; TemperatureLogsCallbacks logsCallbacks;
 
 // Class to handle characteristic callbacks
 class CharacteristicCallbacks : public NimBLECharacteristicCallbacks
@@ -358,7 +413,7 @@ void updatePlasmaFace()
 {
   static unsigned long lastUpdate = 0;
   static unsigned long lastPaletteChange = 0;
-  const uint16_t frameDelay = 2;               // Delay for plasma animation update
+  const uint16_t frameDelay = 1;               // Delay for plasma animation update
   const unsigned long paletteInterval = 10000; // Change palette every 10 seconds
   unsigned long now = millis();
 
@@ -981,11 +1036,23 @@ void setup()
   pFaceCharacteristic->setValue(&viewValue, 1);
   pFaceCharacteristic->setCallbacks(&chrCallbacks);
 
+
+  pCommandCharacteristic = pService->createCharacteristic(
+    COMMAND_CHARACTERISTIC_UUID,
+    NIMBLE_PROPERTY::WRITE
+);
+pCommandCharacteristic->setCallbacks(&cmdCallbacks);
+Serial.print("Command Characteristic created, UUID: ");
+Serial.println(pCommandCharacteristic->getUUID().toString().c_str());
+Serial.print("Properties: ");
+Serial.println(pCommandCharacteristic->getProperties()); // Print properties as integer
+
   // Temperature characteristic with encryption
   pTemperatureCharacteristic =
       pService->createCharacteristic(
           TEMPERATURE_CHARACTERISTIC_UUID,
           NIMBLE_PROPERTY::READ |
+          NIMBLE_PROPERTY::WRITE |
               NIMBLE_PROPERTY::NOTIFY
           // NIMBLE_PROPERTY::READ_ENC
       );
@@ -999,6 +1066,18 @@ void setup()
       // NIMBLE_PROPERTY::READ_ENC |
       // NIMBLE_PROPERTY::WRITE_ENC
   );
+  // 
+  pTemperatureLogsCharacteristic = pService->createCharacteristic(
+    TEMPERATURE_LOGS_CHARACTERISTIC_UUID,
+    NIMBLE_PROPERTY::NOTIFY
+  );
+  //pTemperatureLogsCharacteristic->setCallbacks(&chrCallbacks);
+    Serial.println("Command Characteristic created");
+    pTemperatureLogsCharacteristic->setCallbacks(&logsCallbacks); // If using new logsCallbacks
+Serial.print("Temperature Logs Characteristic created, UUID: ");
+Serial.println(pTemperatureLogsCharacteristic->getUUID().toString().c_str());
+Serial.print("Properties: ");
+Serial.println(pTemperatureLogsCharacteristic->getProperties()); // Print properties as integer
 
   // Set up descriptors
   NimBLE2904 *pFormat2904 = pFaceCharacteristic->create2904();
@@ -1188,12 +1267,10 @@ void displayCurrentView(int view)
     displaySleepMode();
     return;
   }
-
+  dma_display->clearScreen(); // Clear the display
   if (millis() - lastFrameTime < frameInterval)
     return;                 // Skip frame if not time yet
   lastFrameTime = millis(); // Update last frame time
-
-  dma_display->clearScreen(); // Clear the display
 
   if (view != previousView)
   { // Check if the view has changed
@@ -1329,7 +1406,6 @@ void displayCurrentView(int view)
   // Only flip buffer if not spiral view (spiral handles its own flip)
   // if (view != 9)
 
-#if DEBUG_MODE
   // --- Begin FPS counter overlay ---
   static unsigned long lastFpsTime = 0;
   static int frameCount = 0;
@@ -1349,9 +1425,8 @@ void displayCurrentView(int view)
   dma_display->setCursor((dma_display->width() / 4) + 8, 1);
   dma_display->print(fpsText);
   // --- End FPS counter overlay ---
-#endif
 
-  dma_display->flipDMABuffer();
+dma_display->flipDMABuffer();
 }
 
 // Helper function to get the current threshold value
@@ -1490,7 +1565,6 @@ void loop()
   }
   else
   {
-    updateTemperature();
     // Device is active—handle button input, sensor reading, blush effect,
     // and strong motion detection (shake) to trigger spiral eyes.
 
@@ -1529,6 +1603,10 @@ void loop()
         blushStateStartTime = now;
       }
       lastView = currentView; // Update the last active view.
+      
+      // Read ambient light and update display brightness - HAWK Issue with affecting frame rate
+      uint8_t adaptiveBrightness = getAdaptiveBrightness();
+      dma_display->setBrightness8(adaptiveBrightness);
     }
     if (blushState != BLUSH_INACTIVE)
     {
@@ -1563,19 +1641,17 @@ void loop()
         Serial.println(" °C");
     }
     */
-    // Read ambient light and update display brightness
-    uint8_t adaptiveBrightness = getAdaptiveBrightness();
-    dma_display->setBrightness8(adaptiveBrightness);
 
+    updateTemperature();
   }
 
   // --- Frame rate controlled display updates ---
   static unsigned long lastFrameTime = 0;
-  unsigned long baseInterval = 5;
+  unsigned long baseInterval = 10;
   // If the current view is one of the plasma views, increase the interval to reduce load
   if (currentView == 2 || currentView == 10)
   {
-    baseInterval = 11; // Use 15 ms for plasma view
+    baseInterval = 15; // Use 15 ms for plasma view
   }
   const unsigned long currentFrameInterval = sleepModeActive ? sleepFrameInterval : baseInterval;
   if (millis() - lastFrameTime >= currentFrameInterval)
