@@ -42,7 +42,7 @@
 
 // --- Performance Tuning ---
 // Target ~50-60 FPS. Adjust as needed based on view complexity.
-const unsigned long targetFrameIntervalMillis = 10; // 1000ms / 50 FPS = 20ms per frame
+const unsigned long targetFrameIntervalMillis = 5; // 1000ms / 200 FPS = 5ms per frame
 // ---
 
 
@@ -55,7 +55,7 @@ const int totalViews = 15; // Total number of views to cycle through
 // Plasma animation optimization
 uint16_t plasmaFrameDelay = 15; // ms between plasma updates (was 10)
 // Spiral animation optimization
-unsigned long rotationFrameInterval = 15; // ms between spiral rotation updates (was 11)
+unsigned long rotationFrameInterval = 5; // ms between spiral rotation updates (was 11)
 
 
 unsigned long spiralStartMillis = 0; // Global variable to record when spiral view started
@@ -573,7 +573,7 @@ void displayLoadingBar()
   int barWidth = dma_display->width() - 80;               // Width of the loading bar
   int barHeight = 5;                                      // Height of the loading bar
   int barX = (dma_display->width() / 4) - (barWidth / 2); // Center X position
-  int barY = (dma_display->height() - barHeight) / 2;     // Center vertically
+  int barY = (barHeight - barHeight) / 2;     // Center vertically
   // int barRadius = 4;                // Rounded corners
   dma_display->drawRect(barX, (barY * 2), barWidth, barHeight, dma_display->color565(9, 9, 9));
   dma_display->drawRect(barX + 64, (barY * 2), barWidth, barHeight, dma_display->color565(9, 9, 9));
@@ -704,7 +704,6 @@ void drawRotatedBitmap(int16_t x, int16_t y, const uint8_t *bitmap,
 void updateRotatingSpiral() {
   static unsigned long lastUpdate = 0;
   static float currentAngle = 0;
-  const unsigned long rotationFrameInterval = 11; // ~90 FPS (11ms per frame)
   unsigned long currentTime = millis();
 
   if (currentTime - lastUpdate < rotationFrameInterval)
@@ -1052,8 +1051,6 @@ void initStarfield() {
 }
 
 void updateStarfield() {
-  // Clear the display for a fresh frame
-  dma_display->clearScreen(); // Uncommented to clear the screen
   // Update and draw each star
   for (int i = 0; i < NUM_STARS; i++) {
       dma_display->drawPixel(stars[i].x, stars[i].y, dma_display->color565(255, 255, 255));
@@ -1396,9 +1393,6 @@ void updateDVDLogos() {
   for (int i = 0; i < 2; i++) {
     DVDLogo &logo = logos[i];
 
-    // Clear previous
-    dma_display->fillRect(logo.x, logo.y, dvdWidth, dvdHeight, 0);
-
     // Update position
     logo.x += logo.vx;
     logo.y += logo.vy;
@@ -1473,7 +1467,6 @@ void displayCurrentView(int view) {
     displaySleepMode();
     return;
   }
-  dma_display->clearScreen(); // Clear the display
 
   if (view != previousView)
   { // Check if the view has changed
@@ -1486,6 +1479,7 @@ void displayCurrentView(int view) {
       Serial.println("Entered blush view, resetting fade logic");
     }
     previousView = view; // Update the last active view
+    dma_display->clearScreen(); // Clear the display only when switching views
   }
 
   switch (view) {
