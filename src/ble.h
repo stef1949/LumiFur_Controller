@@ -24,6 +24,15 @@ bool oldDeviceConnected = false;
 //#define DESC_USER_DESC_UUID  0x2901  // User Description descriptor
 //#define DESC_FORMAT_UUID     0x2904  // Presentation Format descriptor
 
+/*
+// New BLE task to run on the NimBLE stack core
+void bleTask(void *parameters) {
+    for(;;) {
+        // BLE events are handled internally.
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
+}
+*/
 
 // BLE Server pointers
 NimBLEServer* pServer = nullptr;
@@ -192,6 +201,7 @@ void triggerHistoryTransfer() {
 
     Serial.println("Finished sending history chunks.");
 }
+
 
 void updateTemperature() {
     unsigned long currentMillis = millis();

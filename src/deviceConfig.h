@@ -62,7 +62,8 @@
   //#include <SPI.h>                  // For SPI sensors
   #include "Adafruit_APDS9960.h"    // Library for built-in gesture sensor
   //the pin that the interrupt is attached to
-  #define INT_PIN 3
+  //#define INT_PIN 3
+  #define APDS_AVAILABLE
   Adafruit_APDS9960 apds;
   #include <Adafruit_LIS3DH.h>      // Library for built-in For accelerometer
   #include <Adafruit_NeoPixel.h>    // Library for built-in NeoPixel
