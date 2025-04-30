@@ -42,7 +42,7 @@
 
 // --- Performance Tuning ---
 // Target ~50-60 FPS. Adjust as needed based on view complexity.
-const unsigned long targetFrameIntervalMillis = 10; // 1000ms / 50 FPS = 20ms per frame
+const unsigned long targetFrameIntervalMillis = 5; // 1000ms / 50 FPS = 20ms per frame
 // ---
 
 
@@ -445,6 +445,9 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
     // Precompute the scaled starting x-coordinate for efficiency
     const float startX = x * scale;
 
+// Precompute values that are reused multiple times within loops
+const float cos8_val_shifted = cos8(t2);
+const float term2_factor = scaleHalf;
     // Loop over each row of the XBM image
     for (int j = 0; j < height; j++)
     {
@@ -1033,15 +1036,6 @@ void displaySleepMode() {
 
   dma_display->flipDMABuffer();
 }
-// Star structure for starfield animation
-struct Star {
-  int x;
-  int y;
-  int speed;
-};
-
-const int NUM_STARS = 50;
-Star stars[NUM_STARS];
 
 void initStarfield() {
   for (int i = 0; i < NUM_STARS; i++) {
