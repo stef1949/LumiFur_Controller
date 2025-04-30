@@ -112,7 +112,7 @@ uint8_t preSleepView = 4;                  // Store the view before sleep
 uint8_t sleepBrightness = 15;              // Brightness level during sleep (0-255)
 uint8_t normalBrightness = userBrightness; // Normal brightness level
 volatile bool notifyPending = false;
-unsigned long sleepFrameInterval = 11; // Frame interval in ms (will be changed during sleep)
+unsigned long sleepFrameInterval = 5; // Frame interval in ms (will be changed during sleep)
 
 void displayCurrentView(int view);
 
@@ -129,7 +129,7 @@ void wakeFromSleepMode()
   restoreNormalCPUSpeed();
 
   // Restore normal frame rate
-  sleepFrameInterval = 11; // Back to ~90 FPS
+  sleepFrameInterval = 5; // Back to ~200 FPS
 
   // Restore normal brightness
   dma_display->setBrightness8(userBrightness);
@@ -311,6 +311,18 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
                    uint8_t time_offset = 0, float scale = 5.0)
 {
   int byteWidth = (width + 7) / 8;
+  float sinValues[width];
+  float cosValues[height];
+
+  for (int i = 0; i < width; i++)
+  {
+    sinValues[i] = sin8((x + i) * scale + time_counter);
+  }
+
+  for (int j = 0; j < height; j++)
+  {
+    cosValues[j] = cos8((y + j) * scale + time_counter / 2);
+  }
 
   for (int j = 0; j < height; j++)
   {
@@ -320,8 +332,8 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
       {
         // Plasma calculation specific to pixel position
         uint8_t v =
-            sin8((x + i) * scale + time_counter) +
-            cos8((y + j) * scale + time_counter / 2) +
+            sinValues[i] +
+            cosValues[j] +
             sin8((x + i + y + j) * scale * 0.5 + time_counter / 3);
 
         CRGB color = ColorFromPalette(currentPalette, v + time_offset);
@@ -358,7 +370,7 @@ void updatePlasmaFace()
 {
   static unsigned long lastUpdate = 0;
   static unsigned long lastPaletteChange = 0;
-  const uint16_t frameDelay = 2;               // Delay for plasma animation update
+  const uint16_t frameDelay = 1;               // Delay for plasma animation update
   const unsigned long paletteInterval = 10000; // Change palette every 10 seconds
   unsigned long now = millis();
 
@@ -575,7 +587,7 @@ void updateRotatingSpiral()
 {
   static unsigned long lastUpdate = 0;
   static float currentAngle = 0;
-  const unsigned long rotationFrameInterval = 11; // ~90 FPS (11ms per frame)
+  const unsigned long rotationFrameInterval = 5; // ~200 FPS (5ms per frame)
   unsigned long currentTime = millis();
 
   if (currentTime - lastUpdate < rotationFrameInterval)
@@ -1104,7 +1116,7 @@ void displayCurrentMaw()
 void displayCurrentView(int view)
 {
   static unsigned long lastFrameTime = 0; // Track the last frame time
-  const unsigned long frameInterval = 10; // Consistent 30 FPS
+  const unsigned long frameInterval = 5; // Consistent 200 FPS
   static int previousView = -1;           // Track the last active view
 
   // If we're in sleep mode, don't display the normal view
@@ -1326,7 +1338,7 @@ void enterSleepMode()
   reduceCPUSpeed();
 
   // Reduce the update rate during sleep
-  sleepFrameInterval = 100; // 10 FPS during sleep to save power
+  sleepFrameInterval = 5; // 200 FPS during sleep to save power
 
   // Notify all clients of sleep mode if connected
   if (deviceConnected)
