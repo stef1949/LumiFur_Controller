@@ -77,15 +77,15 @@ unsigned long nextBlinkDelay = 1000; // Random delay between blinks
 int blinkProgress = 0;               // Progress of the blink (0-100%)
 bool isBlinking = false;             // Whether a blink is in progress
 
-int blinkDuration = 300;          // Initial time for a full blink (milliseconds)
-const int minBlinkDuration = 100; // Minimum time for a full blink (ms)
-const int maxBlinkDuration = 500; // Maximum time for a full blink (ms)
-const int minBlinkDelay = 1000;   // Minimum time between blinks (ms)
+int blinkDuration = 700;          // Initial time for a full blink (milliseconds)
+const int minBlinkDuration = 300; // Minimum time for a full blink (ms)
+const int maxBlinkDuration = 800; // Maximum time for a full blink (ms)
+const int minBlinkDelay = 250;   // Minimum time between blinks (ms)
 const int maxBlinkDelay = 5000;   // Maximum time between blinks (ms)
 
 // Global constants for each sensitivity level
-const float SLEEP_THRESHOLD = 2.0;  // for sleep mode detection
-const float SHAKE_THRESHOLD = 20.0; // for shake detection
+const float SLEEP_THRESHOLD = 4.0;  // for sleep mode detection
+const float SHAKE_THRESHOLD = 40.0; // for shake detection
 // Global flag to control which threshold to use
 bool useShakeSensitivity = true;
 
@@ -568,9 +568,6 @@ static char *view_bits[12] = {
 void displayLoadingBar()
 {
   // dma_display->clearScreen();
-  //  Draw Apple Logos
-  drawXbm565(23, 2, 18, 21, appleLogoApple_logo_black, dma_display->color565(255, 255, 255));
-  drawXbm565(88, 2, 18, 21, appleLogoApple_logo_black, dma_display->color565(255, 255, 255));
 
   // Draw the loading bar background
   int barWidth = dma_display->width() - 80;               // Width of the loading bar
@@ -591,7 +588,7 @@ void displayLoadingBar()
 struct blinkState
 {
   unsigned long startTime = 0;
-  unsigned long durationMs = 200; // Default duration
+  unsigned long durationMs = 700; // Default duration
   unsigned long closeDuration = 50;
   unsigned long holdDuration = 20;
   unsigned long openDuration = 50;
@@ -600,7 +597,7 @@ struct blinkState
 void initBlinkState()
 {
   blinkState.startTime = 0;
-  blinkState.durationMs = 200;
+  blinkState.durationMs = 700;
   blinkState.closeDuration = 50;
   blinkState.holdDuration = 20;
   blinkState.openDuration = 50;
@@ -1302,7 +1299,7 @@ dma_display->flipDMABuffer();
   else
   {
     Serial.println("Accelerometer found!");
-    accel.setRange(LIS3DH_RANGE_2_G); // 4G range is sufficient for motion detection
+    accel.setRange(LIS3DH_RANGE_4_G); // 4G range is sufficient for motion detection
     //accel.setDataRate(LIS3DH_DATARATE_100_HZ); // Set data rate to 100Hz
     //accel.setPerformanceMode(LIS3DH_MODE_LOW_POWER); // Set to low power mode
   }
@@ -1363,19 +1360,29 @@ dma_display->flipDMABuffer();
   setupAdaptiveBrightness();
   // uint8_t wheelval = 0; // Wheel value for color cycling
 
-  // Boot screen
-  dma_display->clearScreen();
-  dma_display->setTextSize(2); // Set text size
-  dma_display->setCursor(0, 0);
-  dma_display->setTextColor(dma_display->color565(255, 0, 255));
-  dma_display->print("LumiFur"); // Set text size
-  dma_display->setTextSize(1); // Set text size
-  dma_display->setCursor(0, 20);
-  dma_display->setTextColor(dma_display->color565(255, 255, 255));
-  dma_display->print("Initializing..."); // Set text size
-  dma_display->flipDMABuffer(); // Flip the buffer to show the boot screen
-  delay(1500); // Delay to show boot screen
-
+  while (loadingProgress <= loadingMax)
+  {
+    // Boot screen
+    dma_display->clearScreen();
+    dma_display->setTextSize(2);
+    dma_display->setTextColor(dma_display->color565(255, 0, 255));
+    dma_display->setCursor(0, 10);
+    dma_display->print("LumiFur");
+    dma_display->setCursor(64, 10);
+    dma_display->print("LumiFur"); 
+    dma_display->setTextSize(1);  
+    dma_display->setCursor(0, 20);
+    dma_display->setTextColor(dma_display->color565(255, 255, 255));
+    dma_display->setFont(&TomThumb); // Set font
+    dma_display->print("Booting..."); 
+    dma_display->setCursor(64, 20);
+    dma_display->print("Booting..."); 
+      displayLoadingBar();
+      dma_display->flipDMABuffer();
+      loadingProgress++;
+      delay(15); // ~1.5 s total at loadingMax=100
+    
+  }
 }
 
 void drawDVDLogo(int x, int y, uint16_t color) {
@@ -1517,6 +1524,10 @@ void displayCurrentView(int view) {
     break;
 
   case 1: // Loading bar effect
+  //  Draw Apple Logos
+  drawXbm565(23, 2, 18, 21, appleLogoApple_logo_black, dma_display->color565(255, 255, 255));
+  drawXbm565(88, 2, 18, 21, appleLogoApple_logo_black, dma_display->color565(255, 255, 255));
+
     displayLoadingBar();
     loadingProgress++;
     if (loadingProgress > loadingMax)
@@ -1622,11 +1633,12 @@ void displayCurrentView(int view) {
     lastFpsTime = currentTime;
   }
   char fpsText[8];
-  sprintf(fpsText, "FPS: %d", fps);
+  sprintf(fpsText, "FPS %d", fps);
   dma_display->setTextSize(1); // Set text size for FPS counter
+  dma_display->setFont(&TomThumb); // Use default font
   dma_display->setTextColor(dma_display->color565(255, 255, 255)); // White text
   // Position the counter at a corner (adjust as needed)
-  dma_display->setCursor((dma_display->width() / 4) + 8, 1);
+  dma_display->setCursor(37, 5); // Adjust position
   dma_display->print(fpsText);
   // --- End FPS counter overlay ---
 
@@ -1858,13 +1870,12 @@ void loop() {
 
   } // End of (!sleepModeActive) block
 
+// --- Display Rendering ---
+displayCurrentView(currentView); // Draw the appropriate view based on state
 
    // --- Check sleep again AFTER processing inputs ---
    // This allows inputs like button presses or BLE commands to reset the activity timer *before* checking for sleep timeout
    checkSleepMode();
-
-  // --- Display Rendering ---
-  displayCurrentView(currentView); // Draw the appropriate view based on state
 
    // --- Frame Rate Calculation ---
    calculateFPS(); // Update FPS counter

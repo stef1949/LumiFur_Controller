@@ -8,8 +8,13 @@
 
 #include "xtensa/core-macros.h"
 #include "bitmaps.h"
-#include "customFonts/lequahyper20pt7b.h" // Stylized font
-#include <Fonts/FreeSansBold18pt7b.h>     // Larger font
+//#include "customFonts/lequahyper20pt7b.h" // Stylized font
+//#include <Fonts/FreeSansBold18pt7b.h>     // Larger font
+//#include <Fonts/FreeMonoBold12pt7b.h>    // Smaller font
+//#include <Fonts/Picopixel.h>     // Smallest font
+#include <Fonts/TomThumb.h> // Smallest font
+//#include <Fonts/FreeMonoBold9pt7b.h> // Small font
+#include <Fonts/FreeSans9pt7b.h> // Medium font
 #define BAUD_RATE 115200                  // serial debug port baud rate
 // #define CONFIG_BT_NIMBLE_PINNED_TO_CORE 1 // Pinning NimBLE to core 1
 
