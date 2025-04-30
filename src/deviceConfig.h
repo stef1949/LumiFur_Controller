@@ -69,6 +69,14 @@
   #include <Adafruit_NeoPixel.h>    // Library for built-in NeoPixel
   #define STATUS_LED_PIN 4
   Adafruit_NeoPixel statusPixel(1, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
+  //#include <I2S.h>
+  #include "driver/i2s.h"
+  #include "soc/i2s_reg.h"
+  #define MIC_SCK_PIN  A1  // bit clock
+  #define MIC_WS_PIN   A2  // word‑select / LRCLK
+  #define MIC_SD_PIN   A3  // data in
+  #define MIC_PD_PIN   A4  // mic power (optional)
+
 #elif defined(ARDUINO_ADAFRUIT_METRO_ESP32S3) //Metro ESP32-S3
   #define R1_PIN 2
   #define G1_PIN 3

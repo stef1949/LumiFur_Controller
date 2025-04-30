@@ -42,7 +42,7 @@
 
 // --- Performance Tuning ---
 // Target ~50-60 FPS. Adjust as needed based on view complexity.
-const unsigned long targetFrameIntervalMillis = 5; // 1000ms / 50 FPS = 20ms per frame
+const unsigned long targetFrameIntervalMillis = 1; // 1000ms / 50 FPS = 20ms per frame
 // ---
 
 
@@ -66,6 +66,7 @@ int currentMaw = 1;              // Current & initial maw being displayed
 const int totalMaws = 2;         // Total number of maws to cycle through
 unsigned long mawChangeTime = 0; // Time when maw was changed
 bool mawTemporaryChange = false; // Whether the maw is temporarily changed
+bool mouthOpen = false;         // Whether the mouth is open
 
 // Loading Bar
 int loadingProgress = 0; // Current loading progress (0-100)
@@ -85,7 +86,7 @@ const int maxBlinkDelay = 5000;   // Maximum time between blinks (ms)
 
 // Global constants for each sensitivity level
 const float SLEEP_THRESHOLD = 4.0;  // for sleep mode detection
-const float SHAKE_THRESHOLD = 40.0; // for shake detection
+const float SHAKE_THRESHOLD = 20.0; // for shake detection
 // Global flag to control which threshold to use
 bool useShakeSensitivity = true;
 
@@ -877,10 +878,13 @@ void drawTransFlag() {
 void baseFace() {
 
   blinkingEyes();
-
-  drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 0, 1.0);     // Right eye
-  drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0); // Left eye (phase offset)
-
+  if (mouthOpen) {
+    drawPlasmaXbm(0, 10, 64, 22, maw2, 0, 1.0);
+    drawPlasmaXbm(64, 10, 64, 22, maw2L, 128, 1.0);   // Left eye open (phase offset)
+  } else {
+    drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 0, 1.0);     // Right eye
+    drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0); // Left eye (phase offset)
+  }
   if (currentView > 3)
   { // Only draw blush effect for face views, not utility views
     drawBlush();
@@ -1077,6 +1081,17 @@ void bleNotifyTask(void *param) {
     vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
+
+// Add this at the top, just after your other declarations:
+static void displayTask(void* pvParameters) {
+  for(;;) {
+    // render the current view and flip DMA buffer
+    displayCurrentView(currentView);
+    vTaskDelay(pdMS_TO_TICKS(targetFrameIntervalMillis));
+  }
+}
+
+const i2s_port_t I2S_PORT = I2S_NUM_0;
 
 void setup() {
   Serial.begin(BAUD_RATE);
@@ -1348,6 +1363,54 @@ dma_display->flipDMABuffer();
   and pressing either of them pulls the input low.
   ------------------------------------------------------------------------- */
 
+/*
+// start I2S at 16 kHz with 32-bits per sample
+if (!I2S.begin(I2S_PHILIPS_MODE, 16000, 32)) {
+  Serial.println("Failed to initialize I2S!");
+  while (1); // do nothing
+}
+*/
+
+esp_err_t err;
+
+i2s_config_t i2sConfig = {
+  .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
+  .sample_rate = 16000, // Sample rate
+  .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
+  .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
+  .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB),
+  .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1, // Interrupt level
+  .dma_buf_count = 8,                       // Number of DMA buffers
+  .dma_buf_len = 1024,                      // Length of each DMA buffer
+  .use_apll = false,
+};
+// Configure I2S pins for microphone input (data in only)
+i2s_pin_config_t pinConfig = {
+  .bck_io_num   = MIC_SCK_PIN,
+  .ws_io_num    = MIC_WS_PIN,
+  .data_out_num = I2S_PIN_NO_CHANGE,
+  .data_in_num  = MIC_SD_PIN
+};
+
+i2s_driver_install(I2S_PORT, &i2sConfig, 0, NULL);
+//REG_SET_BIT(I2S_TIMING_REG(I2S_PORT), BIT(9)); // Set I2S timing register
+if (err != ESP_OK) {
+  Serial.printf("Failed installing driver: %d\n", err);
+  while (true);
+}
+err = i2s_set_pin(I2S_PORT, &pinConfig);
+if (err != ESP_OK) {
+  Serial.printf("Failed setting pin: %d\n", err);
+  while (true);
+}
+Serial.println("I2S driver installed.");
+
+
+// if you need to drive a power line:
+pinMode(MIC_PD_PIN, OUTPUT);
+digitalWrite(MIC_PD_PIN, HIGH);
+
+
 #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
 #ifdef BUTTON_UP
   pinMode(BUTTON_UP, INPUT_PULLUP);
@@ -1383,6 +1446,30 @@ dma_display->flipDMABuffer();
       delay(15); // ~1.5 s total at loadingMax=100
     
   }
+
+   // Spawn BLE notify task (you already have):
+   xTaskCreatePinnedToCore(
+    bleNotifyTask,
+    "BLE Task",
+    4096,
+    NULL,
+    1,
+    NULL,
+    CONFIG_BT_NIMBLE_PINNED_TO_CORE
+  );
+
+  // Now spawn the display task pinned to the other core (we'll pick core 1):
+  xTaskCreatePinnedToCore(
+    displayTask,
+    "Display Task",
+    4096,               // stack bytes
+    NULL,
+    3,                  // priority
+    NULL,
+    1                   // pin to core 1
+  );
+
+  // Then return—loop() can be left empty or just do background housekeeping
 }
 
 void drawDVDLogo(int x, int y, uint16_t color) {
@@ -1443,27 +1530,61 @@ if (bounced) {
   // Optional: Add a small delay for smoother animation
 }
 
+// Define a threshold for microphone amplitude to trigger mouth open/close
+#ifndef MIC_THRESHOLD
+#define MIC_THRESHOLD 5000 // Adjust this value as needed for your microphone sensitivity
+#endif
+
 void displayCurrentMaw() {
-  switch (currentMaw) {
-  case 0:
-    // dma_display->clearScreen();
-    Serial.println("Displaying Closed maw");
-    drawXbm565(0, 10, 64, 22, maw2Closed, dma_display->color565(255, 255, 255));
-    drawXbm565(64, 10, 64, 22, maw2ClosedL, dma_display->color565(255, 255, 255));
-    // dma_display->flipDMABuffer();
-    break;
-
-  case 1:
-    // dma_display->clearScreen();
+  // Draw open or closed based on the mic‐triggered flag
+  if (mouthOpen) {
     Serial.println("Displaying open maw");
-    drawXbm565(0, 10, 64, 22, maw2, dma_display->color565(255, 255, 255));
-    drawXbm565(64, 10, 64, 22, maw2L, dma_display->color565(255, 255, 255));
-    break;
-
-  default:
-    Serial.println("Unknown Maw State");
-    break;
+    drawXbm565(0, 10, 64, 22, maw2,      dma_display->color565(255,255,255));
+    drawXbm565(64, 10, 64, 22, maw2L,     dma_display->color565(255,255,255));
+  } else {
+    Serial.println("Displaying Closed maw");
+    drawXbm565(0, 10, 64, 22, maw2Closed,  dma_display->color565(255,255,255));
+    drawXbm565(64, 10, 64, 22, maw2ClosedL, dma_display->color565(255,255,255));
   }
+}
+
+// ——————————————————————————————————————————————————————————————————————
+// Optimized mouth‑movement reader
+static int32_t mouthBuf[128];        // static so it lives in .bss, not on the stack
+
+void updateMouthMovement() {
+  size_t bytes_read = 0;
+  // Read into our 32‑bit buffer, get actual bytes read in bytes_read
+  esp_err_t err = i2s_read(
+    I2S_PORT,
+    mouthBuf,
+    sizeof(mouthBuf),
+    &bytes_read,
+    portMAX_DELAY
+  );
+  if (err != ESP_OK) {
+    Serial.printf("I2S read error: %d\n", err);
+    return;
+  }
+  // Compute sample count from bytes_read, not from return value
+  size_t samples = bytes_read / sizeof(int32_t);
+
+  uint64_t acc = 0;
+  for (size_t i = 0; i < samples; ++i) {
+    acc += abs(mouthBuf[i] >> 8);
+  }
+
+  uint32_t avg = samples ? uint32_t(acc / samples) : 0;
+  mouthOpen = (samples && (avg > MIC_THRESHOLD));
+
+  Serial.print(">avg:");
+  Serial.println(avg);
+  /*
+  Serial.printf(
+    "MouthMovement → bytes_read=%u samples=%u avg=%u thr=%d open=%d\n",
+    (unsigned)bytes_read, (unsigned)samples, avg, MIC_THRESHOLD, mouthOpen
+  );
+  */
 }
 
 void displayCurrentView(int view) {
@@ -1871,26 +1992,16 @@ void loop() {
   } // End of (!sleepModeActive) block
 
 // --- Display Rendering ---
-displayCurrentView(currentView); // Draw the appropriate view based on state
+//updateMouthMovement(); // Update mouth movement if needed
+//displayCurrentView(currentView); // Draw the appropriate view based on state
 
    // --- Check sleep again AFTER processing inputs ---
    // This allows inputs like button presses or BLE commands to reset the activity timer *before* checking for sleep timeout
    checkSleepMode();
-
    // --- Frame Rate Calculation ---
    calculateFPS(); // Update FPS counter
 
-   // --- Frame Rate Limiting ---
-   unsigned long frameEndTimeMillis = millis();
-   unsigned long frameDurationMillis = frameEndTimeMillis - frameStartTimeMillis;
-   if (frameDurationMillis < targetFrameIntervalMillis) {
-     // Yield remaining time to other tasks (like BLE stack, FreeRTOS scheduler)
-     vTaskDelay(pdMS_TO_TICKS(targetFrameIntervalMillis - frameDurationMillis));
-   } else {
-       // Frame took too long, yield briefly anyway to prevent starving other tasks
-       vTaskDelay(pdMS_TO_TICKS(1));
-       // Serial.printf("Frame took too long: %lu ms\n", frameDurationMillis); // DEBUG ONLY
-   }
+   vTaskDelay(pdMS_TO_TICKS(5));  // yield to the display & BLE tasks
  
   /*
   // If the current view is one of the plasma views, increase the interval to reduce load
@@ -1898,5 +2009,4 @@ displayCurrentView(currentView); // Draw the appropriate view based on state
     baseInterval = 10; // Use 15 ms for plasma view
   }
   */
-  //delay(1); // Small delay to prevent overloading the CPU
 }
