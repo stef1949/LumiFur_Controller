@@ -1033,6 +1033,23 @@ void displaySleepMode() {
 
   dma_display->flipDMABuffer();
 }
+// Star structure for starfield animation
+struct Star {
+  int x;
+  int y;
+  int speed;
+};
+
+const int NUM_STARS = 50;
+Star stars[NUM_STARS];
+
+void initStarfield() {
+  for (int i = 0; i < NUM_STARS; i++) {
+      stars[i].x = random(0, dma_display->width());
+      stars[i].y = random(0, dma_display->height());
+      stars[i].speed = random(1, 4); // Stars move at different speeds
+  }
+}
 
 void updateStarfield() {
   // Clear the display for a fresh frame
