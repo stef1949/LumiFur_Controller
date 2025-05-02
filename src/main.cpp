@@ -67,7 +67,8 @@ const int totalMaws = 2;         // Total number of maws to cycle through
 unsigned long mawChangeTime = 0; // Time when maw was changed
 bool mawTemporaryChange = false; // Whether the maw is temporarily changed
 bool mouthOpen = false;         // Whether the mouth is open
-
+static unsigned long lastMouthTriggerTime = 0;
+const unsigned long mouthOpenHoldTime = 300; // ms to hold open
 // Loading Bar
 int loadingProgress = 0; // Current loading progress (0-100)
 int loadingMax = 100;    // Maximum loading value
@@ -137,6 +138,8 @@ unsigned long sleepFrameInterval = 50; // Frame interval in ms (will be changed 
 volatile int currentFPS = 0; // Use volatile if accessed by ISR, though not needed here
 unsigned long lastFpsCalcTime = 0;
 int frameCounter = 0;
+
+static TaskHandle_t bleNotifyTaskHandle = NULL;
 
 void calculateFPS() {
     frameCounter++;
@@ -283,7 +286,8 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks {
       lastActivityTime = millis(); // BLE command counts as activity
       Serial.printf("Write request - new view: %d\n", currentView);
       // pCharacteristic->notify();
-      notifyPending = true;
+      //notifyPending = true;
+      xTaskNotifyGive(bleNotifyTaskHandle);
     } else if (newView >= totalViews) {
       Serial.printf("BLE Write ignored - invalid view number: %d (Total Views: %d)\n", newView, totalViews); // DEBUG
  }
@@ -427,7 +431,7 @@ void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t c
   }
 }
 
-uint16_t plasmaSpeed = 5; // Lower = slower animation
+uint16_t plasmaSpeed = 2; // Lower = slower animation
 
 void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
                    uint8_t time_offset = 0, float scale = 5.0, float animSpeed = 0.2f)
@@ -1070,17 +1074,17 @@ void initDVDLogoAnimation() {
 }
 
 void bleNotifyTask(void *param) {
-  while (true) {
-    if (notifyPending && deviceConnected) {
-      uint8_t bleViewValue = static_cast<uint8_t>(currentView);
-      pFaceCharacteristic->setValue(&bleViewValue, 1);
-      pFaceCharacteristic->notify();
-      pConfigCharacteristic->notify(); // Optional if config actually changed
-      notifyPending = false;
+    for (;;) {
+      // block here until someone calls xTaskNotifyGive()
+      ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+      if (deviceConnected) {
+        uint8_t bleViewValue = static_cast<uint8_t>(currentView);
+       pFaceCharacteristic->setValue(&bleViewValue, 1);
+       pFaceCharacteristic->notify();
+       pConfigCharacteristic->notify();
+      }
     }
-    vTaskDelay(pdMS_TO_TICKS(20));
-  }
-}
+ }
 
 // Add this at the top, just after your other declarations:
 static void displayTask(void* pvParameters) {
@@ -1092,6 +1096,15 @@ static void displayTask(void* pvParameters) {
 }
 
 const i2s_port_t I2S_PORT = I2S_NUM_0;
+
+static volatile unsigned long softMillis = 0;  // our software “millis” counter
+TimerHandle_t softMillisTimer = nullptr;
+
+// this callback fires every 1 ms and increments softMillis:
+static void IRAM_ATTR onSoftMillisTimer(TimerHandle_t xTimer) {
+  (void)xTimer;
+  softMillis++;
+}
 
 void setup() {
   Serial.begin(BAUD_RATE);
@@ -1375,13 +1388,13 @@ esp_err_t err;
 
 i2s_config_t i2sConfig = {
   .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-  .sample_rate = 16000, // Sample rate
+  .sample_rate = 22050, // Sample rate
   .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
   .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-  .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_I2S | I2S_COMM_FORMAT_I2S_MSB),
-  .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1, // Interrupt level
-  .dma_buf_count = 8,                       // Number of DMA buffers
-  .dma_buf_len = 1024,                      // Length of each DMA buffer
+  .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S | I2S_COMM_FORMAT_STAND_MSB),
+  .intr_alloc_flags = 0, // Interrupt level
+  .dma_buf_count = 4,                       // Number of DMA buffers
+  .dma_buf_len = 64,                      // Length of each DMA buffer
   .use_apll = false,
 };
 // Configure I2S pins for microphone input (data in only)
@@ -1454,7 +1467,7 @@ digitalWrite(MIC_PD_PIN, HIGH);
     4096,
     NULL,
     1,
-    NULL,
+    &bleNotifyTaskHandle,
     CONFIG_BT_NIMBLE_PINNED_TO_CORE
   );
 
@@ -1470,6 +1483,18 @@ digitalWrite(MIC_PD_PIN, HIGH);
   );
 
   // Then return—loop() can be left empty or just do background housekeeping
+
+  // create a 1 ms auto‑reloading FreeRTOS timer
+  softMillisTimer = xTimerCreate(
+    "softMillis",                 // name
+    pdMS_TO_TICKS(1),             // period = 1 ms
+    pdTRUE,                       // auto‑reload
+    nullptr,                      // timer ID
+    onSoftMillisTimer             // callback
+  );
+  if (softMillisTimer) {
+    xTimerStart(softMillisTimer, 0);
+  }
 }
 
 void drawDVDLogo(int x, int y, uint16_t color) {
@@ -1532,15 +1557,20 @@ if (bounced) {
 
 // Define a threshold for microphone amplitude to trigger mouth open/close
 #ifndef MIC_THRESHOLD
-#define MIC_THRESHOLD 5000 // Adjust this value as needed for your microphone sensitivity
+#define MIC_THRESHOLD 450000 // Adjust this value as needed for your microphone sensitivity
 #endif
 
+static uint8_t mawBrightness = 0; // new: scaled 0–255 based on mic level
 void displayCurrentMaw() {
+// build a gray‐scale color from current mic level
+uint16_t col = dma_display->color565(mawBrightness,
+  mawBrightness,
+  mawBrightness);
   // Draw open or closed based on the mic‐triggered flag
   if (mouthOpen) {
     Serial.println("Displaying open maw");
-    drawXbm565(0, 10, 64, 22, maw2,      dma_display->color565(255,255,255));
-    drawXbm565(64, 10, 64, 22, maw2L,     dma_display->color565(255,255,255));
+    drawXbm565(0, 10, 64, 22, maw2, col);
+    drawXbm565(64, 10, 64, 22, maw2L, col);
   } else {
     Serial.println("Displaying Closed maw");
     drawXbm565(0, 10, 64, 22, maw2Closed,  dma_display->color565(255,255,255));
@@ -1553,38 +1583,63 @@ void displayCurrentMaw() {
 static int32_t mouthBuf[128];        // static so it lives in .bss, not on the stack
 
 void updateMouthMovement() {
-  size_t bytes_read = 0;
-  // Read into our 32‑bit buffer, get actual bytes read in bytes_read
+  unsigned long now = millis();
+  size_t bytesRead = 0;
+
+  // Read into our 32‑bit buffer
   esp_err_t err = i2s_read(
-    I2S_PORT,
-    mouthBuf,
-    sizeof(mouthBuf),
-    &bytes_read,
-    portMAX_DELAY
+      I2S_PORT,
+      mouthBuf,
+      sizeof(mouthBuf),
+      &bytesRead,
+      portMAX_DELAY
   );
+  Serial.printf("[Mouth] I2S read err=%d, bytesRead=%u\n", err, (unsigned)bytesRead);
   if (err != ESP_OK) {
-    Serial.printf("I2S read error: %d\n", err);
-    return;
+      Serial.println("[Mouth] read failed, skipping");
+      return;
   }
-  // Compute sample count from bytes_read, not from return value
-  size_t samples = bytes_read / sizeof(int32_t);
 
-  uint64_t acc = 0;
+  // How many samples did we actually get?
+  size_t samples = bytesRead / sizeof(mouthBuf[0]);
+  Serial.printf("[Mouth] samples=%u\n", (unsigned)samples);
+  if (samples == 0) {
+      mouthOpen = false;
+      Serial.println("[Mouth] no data → mouthOpen=false");
+      return;
+  }
+
+  // Sum magnitudes
+  uint32_t acc = 0;
   for (size_t i = 0; i < samples; ++i) {
-    acc += abs(mouthBuf[i] >> 8);
+      acc += (uint32_t)abs(mouthBuf[i] >> 8);
+  }
+  uint32_t thresholdSum = MIC_THRESHOLD * samples;
+  Serial.printf("[Mouth] acc=%u, thresholdSum=%u\n", acc, thresholdSum);
+
+   // map acc from [MIC_THRESHOLD … MIC_THRESHOLD+10000] → [0…255]
+  mawBrightness = constrain(
+    map((int)acc,
+        MIC_THRESHOLD,
+        MIC_THRESHOLD + 10000,
+        0,
+        255),
+    20,
+    255
+  );
+
+  // Decide open/closed
+  if (acc > thresholdSum) {
+      mouthOpen = true;
+      lastMouthTriggerTime = now;
+      Serial.println("[Mouth] → TRIGGER OPEN");
+  } else {
+      mouthOpen = (now - lastMouthTriggerTime) < mouthOpenHoldTime;
+      Serial.printf("[Mouth] hold‑time → mouthOpen=%u\n", mouthOpen);
   }
 
-  uint32_t avg = samples ? uint32_t(acc / samples) : 0;
-  mouthOpen = (samples && (avg > MIC_THRESHOLD));
-
-  Serial.print(">avg:");
-  Serial.println(avg);
-  /*
-  Serial.printf(
-    "MouthMovement → bytes_read=%u samples=%u avg=%u thr=%d open=%d\n",
-    (unsigned)bytes_read, (unsigned)samples, avg, MIC_THRESHOLD, mouthOpen
-  );
-  */
+  Serial.print(">acc:");
+  Serial.println(acc);
 }
 
 void displayCurrentView(int view) {
@@ -1886,7 +1941,9 @@ void loop() {
                 currentView = 9;            // Switch to spiral eyes view
                 spiralStartMillis = millis(); // Record the trigger time.
                  //Serial.println("Shake detected! Switching to Spiral View."); // DEBUG ONLY
-                 if (isConnected) notifyPending = true; // Notify BLE clients of view change
+                 if (isConnected) 
+                 //notifyPending = true; // Notify BLE clients of view change
+                 xTaskNotifyGive(bleNotifyTaskHandle);
             }
         }
         #endif
@@ -1913,7 +1970,8 @@ void loop() {
             if (viewChangedByButton && isConnected) {
                 // uint8_t bleViewValue = static_cast<uint8_t>(currentView); // Done by notify task
                 // pFaceCharacteristic->setValue(&bleViewValue, 1);
-                notifyPending = true; // Set the flag to notify via BLE task
+                //notifyPending = true; // Set the flag to notify via BLE task
+                xTaskNotifyGive(bleNotifyTaskHandle);
             }
             if (viewChangedByButton) {
                  //Serial.printf("View changed by button: %d\n", currentView); // DEBUG ONLY
@@ -1978,7 +2036,9 @@ void loop() {
              //Serial.println("Spiral timeout, reverting view."); // DEBUG ONLY
              currentView = previousView; // Return to the previous view.
              spiralStartMillis = 0; // Reset timer
-             if (isConnected) notifyPending = true;
+             if (isConnected) 
+             //notifyPending = true;
+             xTaskNotifyGive(bleNotifyTaskHandle);
         }
 
         // --- Update Temperature Sensor Periodically ---
@@ -1992,7 +2052,7 @@ void loop() {
   } // End of (!sleepModeActive) block
 
 // --- Display Rendering ---
-//updateMouthMovement(); // Update mouth movement if needed
+updateMouthMovement(); // Update mouth movement if needed
 //displayCurrentView(currentView); // Draw the appropriate view based on state
 
    // --- Check sleep again AFTER processing inputs ---
