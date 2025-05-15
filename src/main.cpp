@@ -380,12 +380,13 @@ void handleBLEStatusLED() {
       statusPixel.setPixelColor(0, 0, 0, 0); // Off when disconnected
       NimBLEDevice::startAdvertising();
     }
-    statusPixel.show();
+    //statusPixel.show();
     oldDeviceConnected = deviceConnected;
   }
   if (!deviceConnected){
     fadeInAndOutLED(0, 0, 100); // Blue fade when disconnected
   }
+  statusPixel.show();
 }
 
 // Bitmap Drawing Functions ------------------------------------------------
