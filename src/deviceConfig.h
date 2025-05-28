@@ -63,7 +63,7 @@
   #include "Adafruit_APDS9960.h"    // Library for built-in gesture sensor
   //the pin that the interrupt is attached to
   //#define INT_PIN 3
-  #define APDS_AVAILABLE
+  #define APDS_AVAILABLE 
   Adafruit_APDS9960 apds;
   #include <Adafruit_LIS3DH.h>      // Library for built-in For accelerometer
   #include <Adafruit_NeoPixel.h>    // Library for built-in NeoPixel
@@ -71,28 +71,29 @@
   Adafruit_NeoPixel statusPixel(1, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
   //#include <I2S.h>
   #include "driver/i2s.h"
-  #include "soc/i2s_reg.h"
-  #define MIC_SCK_PIN  A1  // bit clock
-  #define MIC_WS_PIN   A2  // word‑select / LRCLK
-  #define MIC_SD_PIN   A3  // data in
-  #define MIC_PD_PIN   A4  // mic power (optional)
+#include "soc/i2s_reg.h"
+#define MIC_SCK_PIN A1 // bit clock
+#define MIC_WS_PIN A2  // word‑select / LRCLK
+#define MIC_SD_PIN A3  // data in
+#define MIC_PD_PIN A4  // mic power (optional)
+#define ACCEL_AVAILABLE
 
-#elif defined(ARDUINO_ADAFRUIT_METRO_ESP32S3) //Metro ESP32-S3
-  #define R1_PIN 2
-  #define G1_PIN 3
-  #define B1_PIN 4
-  #define R2_PIN 5
-  #define G2_PIN 6
-  #define B2_PIN 7
-  #define A_PIN  A0
-  #define B_PIN  A1
-  #define C_PIN  A2
-  #define D_PIN  A3
-  #define E_PIN  21 
-  #define LAT_PIN 10
-  #define OE_PIN  9
-  #define CLK_PIN 8
-  #define PIN_E 9 // E pin for 64px high panels
+#elif defined(ARDUINO_ADAFRUIT_METRO_ESP32S3) // Metro ESP32-S3
+#define R1_PIN 2
+#define G1_PIN 3
+#define B1_PIN 4
+#define R2_PIN 5
+#define G2_PIN 6
+#define B2_PIN 7
+#define A_PIN A0
+#define B_PIN A1
+#define C_PIN A2
+#define D_PIN A3
+#define E_PIN 21
+#define LAT_PIN 10
+#define OE_PIN 9
+#define CLK_PIN 8
+#define PIN_E 9           // E pin for 64px high panels
 #elif defined(__SAMD51__) // M4 Metro Variants (Express, AirLift)
   //
 #elif defined(_SAMD21_) // Feather M0 variants

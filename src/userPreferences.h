@@ -27,7 +27,7 @@ Preferences& getPrefs() {
   
   // Brightness functions
   int getUserBrightness() {
-    return getPrefs().getInt("brightness", 204);
+    return getPrefs().getInt("brightness", 255); // Default to 255 (full brightness)
   }
   void setUserBrightness(int brightness) {
     getPrefs().putInt("brightness", brightness);

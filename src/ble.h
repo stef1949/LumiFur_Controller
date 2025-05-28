@@ -5,6 +5,10 @@
 #include <NimBLEDevice.h>
 #include "driver/temp_sensor.h"
 
+// expose the userBrightness defined in main.h
+extern uint8_t userBrightness;
+extern bool brightnessChanged;
+
 /////////////////////////////////////////////
 /////////////////BLE CONFIG//////////////////
 ////////////////////////////////////////////
@@ -18,7 +22,9 @@ bool oldDeviceConnected = false;
 #define CONFIG_CHARACTERISTIC_UUID      "01931c44-3867-7427-96ab-8d7ac0ae09ff"
 #define TEMPERATURE_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9774-18350e3e27db"
 #define TEMPERATURE_LOGS_CHARACTERISTIC_UUID   "0195eec2-ae6e-74a1-bcd5-215e2365477c" // New Command UUID
-#define COMMAND_CHARACTERISTIC_UUID   "0195eec3-06d2-7fd4-a561-49493be3ee41"
+#define COMMAND_CHARACTERISTIC_UUID     "0195eec3-06d2-7fd4-a561-49493be3ee41"
+#define BRIGHTNESS_CHARACTERISTIC_UUID  "01931c44-3867-7427-96ab-8d7ac0ae09ef"
+
 //#define ULTRASOUND_CHARACTERISTIC_UUID  "01931c44-3867-7b5d-9732-12460e3a35db"
 
 //#define DESC_USER_DESC_UUID  0x2901  // User Description descriptor
@@ -42,7 +48,7 @@ NimBLECharacteristic* pTemperatureCharacteristic = nullptr;
 NimBLECharacteristic* pConfigCharacteristic = nullptr;
 NimBLECharacteristic* pCommandCharacteristic;
 NimBLECharacteristic* pTemperatureLogsCharacteristic = nullptr; // New Command UUID
-
+NimBLECharacteristic* pBrightnessCharacteristic = nullptr;
 
 void triggerHistoryTransfer();
 void clearHistoryBuffer();
@@ -245,6 +251,19 @@ void updateTemperature() {
             // Extra safeguard: log an error if pTemperatureCharacteristic is null or not connected
             if (!deviceConnected) Serial.println("Warning: updateTemperature called while not connected.");
             if (pTemperatureCharacteristic == nullptr) Serial.println("Error: pTemperatureCharacteristic is null!");
+        }
+    }
+}
+
+void checkBrightness()
+{
+    if (brightnessChanged)
+    {
+ if (pBrightnessCharacteristic != nullptr) { // Null check
+    uint8_t v = userBrightness;
+            pBrightnessCharacteristic->setValue(&v, 1);
+            pBrightnessCharacteristic->notify();
+            Serial.printf("Manual brightness change (from ESP32) notified to app: %u\n", v);
         }
     }
 }
