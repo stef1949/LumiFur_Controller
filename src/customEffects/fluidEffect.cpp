@@ -1,267 +1,175 @@
 #include "fluidEffect.h"
-#include "Fonts/TomThumb.h" // Ensure this path is correct
+#include <Arduino.h>
 
-// Includes for panel and accelerometer
-#ifdef VIRTUAL_PANE
-#include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
-#else
-#include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
-#endif
+#define PANE_WIDTH 64
+#define PANE_HEIGHT 32
 
-#if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) || defined(ACCEL_AVAILABLE)
-#include <Adafruit_LIS3DH.h>
-#endif
-
-// --- Simulation Parameters ---
-const unsigned long FluidEffect::SIM_UPDATE_INTERVAL_MS = 30; // Faster update for particle dynamics (adjust)
-const int FluidEffect::MAX_PARTICLES = 5000;                  // Max number of particles (adjust for performance)
-const float FluidEffect::PARTICLE_RADIUS = 1.0f;             // For rendering as 1x1 pixel if centered
-const float FluidEffect::GRAVITY_Y = 9.8f * 2.0f;            // Scaled gravity (pixels/sec^2), adjust strength
-const float FluidEffect::ACCEL_FORCE_FACTOR = 15.0f;         // How much accelerometer influences particles
-const float FluidEffect::BOUNDARY_DAMPING = 0.6f;            // Energy lost on wall collision (0.0=no bounce, 1.0=perfect bounce)
-const float FluidEffect::DRAG_COEFFICIENT = 0.01f;           // Slows down particles over time
-
-// --- Constructor ---
-#if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) || defined(ACCEL_AVAILABLE)
-FluidEffect::FluidEffect(MatrixPanel_I2S_DMA* display, Adafruit_LIS3DH* accelerometer, bool* accelEnabledGlobalFlag)
-    : dma_display_(display),
-      accelerometerEnabledGlobalFlag_(accelEnabledGlobalFlag),
-      accel_(accelerometer),
-      smoothedAccelX_g_(0.0f), smoothedAccelY_g_(0.0f),
-      gridWidth_(0), gridHeight_(0),
-      lastSimUpdateTime_(0) {
-    if (dma_display_) {
-        gridWidth_ = dma_display_->width();
-        gridHeight_ = dma_display_->height();
-        particles_.reserve(MAX_PARTICLES); // Pre-allocate vector capacity
-    } else { Serial.println("FluidEffect ERROR: Display pointer is null!"); }
-    if (!accel_) { Serial.println("FluidEffect WARNING: Accel pointer is null!"); }
-    if (!accelerometerEnabledGlobalFlag_) { Serial.println("FluidEffect ERROR: accelEnabledGlobalFlag is null!"); }
+// Constructor
+FluidEffect::FluidEffect(MatrixDisplayAdaptor* display, Adafruit_LIS3DH* accel, bool* accelEnabled)
+    : dma_display(display), accelerometer(accel), accelerometer_enabled(accelEnabled), num_active_particles(0) {
+    // Seed random number generator if not done globally, or if specific seed needed
+    // randomSeed(analogRead(0)); // Usually done in main setup()
 }
-#else
-FluidEffect::FluidEffect(MatrixPanel_I2S_DMA* display, void* /*dummy_accel*/, bool* accelEnabledGlobalFlag)
-    : dma_display_(display),
-      accelerometerEnabledGlobalFlag_(accelEnabledGlobalFlag),
-      // accel_ is not initialized
-      smoothedAccelX_g_(0.0f), smoothedAccelY_g_(0.0f),
-      gridWidth_(0), gridHeight_(0),
-      lastSimUpdateTime_(0) {
-    if (dma_display_) {
-        gridWidth_ = dma_display_->width();
-        gridHeight_ = dma_display_->height();
-        particles_.reserve(MAX_PARTICLES);
-    } else { Serial.println("FluidEffect ERROR: Display pointer is null!"); }
-    if (!accelerometerEnabledGlobalFlag_) { Serial.println("FluidEffect ERROR: accelEnabledGlobalFlag is null!"); }
+
+// Destructor
+FluidEffect::~FluidEffect() {
+    // Nothing specific to clean up with this simple struct array
 }
-#endif
 
-// FluidEffect::~FluidEffect() { /* particles_ vector handles its own memory */ }
-
-void FluidEffect::addParticle(float x, float y, float vx, float vy) {
-    if (particles_.size() < MAX_PARTICLES) {
-        Particle p = {x, y, vx, vy, dma_display_->color565(60, 120, 255)}; // Default blue
-        // Particle p = {x, y, vx, vy, dma_display_->color565(random(50,100), random(100,150), random(200,255))}; // Random blue shades
-        particles_.push_back(p);
-    }
+// Called when the effect starts
+void FluidEffect::begin() {
+    initializeParticles();
 }
 
 void FluidEffect::initializeParticles() {
-    particles_.clear();
-    if (!dma_display_ || gridWidth_ == 0 || gridHeight_ == 0) return;
+    num_active_particles = MAX_PARTICLES_FLUID; // Use all particles
+    if (!dma_display) return; // Should not happen if setup correctly
 
-    int initialParticleCount = MAX_PARTICLES * 0.8; // Start with 80% of max particles
-    for (int i = 0; i < initialParticleCount; ++i) {
-        // Place particles in the bottom half, somewhat randomly
-        float px = random(gridWidth_ * 0.1f, gridWidth_ * 0.9f);
-        float py = random(gridHeight_ * 0.5f, gridHeight_ * 0.9f); // Start in bottom half
-        addParticle(px, py);
+    for (int i = 0; i < num_active_particles; ++i) {
+        // Initial position: a block of particles in the upper middle part of the screen
+        particles[i].x = random(PANE_WIDTH / 3, 2 * PANE_WIDTH / 3);
+        particles[i].y = random(PANE_HEIGHT / 4, PANE_HEIGHT / 2);
+
+        // Initial velocity: small random velocities
+        particles[i].xv = ((float)random(-50, 51) / 100.0f) * 0.5f; // Random between -0.25 and +0.25
+        particles[i].yv = ((float)random(-50, 51) / 100.0f) * 0.5f; // Random between -0.25 and +0.25
     }
-    Serial.printf("Initialized with %d particles.\n", particles_.size());
 }
 
-void FluidEffect::begin() {
-    initializeParticles();
-    smoothedAccelX_g_ = 0.0f;
-    smoothedAccelY_g_ = 0.0f; // For accelerometer Y-axis
-    lastSimUpdateTime_ = millis();
+void FluidEffect::applyGravityAndAccel() {
+    float current_gravity_x = 0.0f;
+    float current_gravity_y = GRAVITY_BASE; // Default gravity downwards
 
-#if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) || defined(ACCEL_AVAILABLE)
-    if (accel_ && accelerometerEnabledGlobalFlag_ && *accelerometerEnabledGlobalFlag_) {
-        accel_->read();
-        smoothedAccelX_g_ = accel_->x_g;
-        smoothedAccelY_g_ = accel_->y_g; // Use Y-axis accelerometer reading
+    // Check if accelerometer is enabled and available
+    if (accelerometer_enabled && *accelerometer_enabled && accelerometer) {
+        sensors_event_t event;
+        if (accelerometer->getEvent(&event)) {
+            // Adjust "gravity" based on accelerometer readings
+            // event.acceleration.x, y, z are in m/s^2
+            // Assuming panel is held upright, or laid flat.
+            // If laid flat (screen facing up):
+            // Tilt left/right along X-axis: event.acceleration.x
+            // Tilt forward/backward along Y-axis: event.acceleration.y
+            // These factors might need tuning based on how panel is oriented
+            current_gravity_x += event.acceleration.x * ACCEL_SENSITIVITY_MULTIPLIER;
+            current_gravity_y -= event.acceleration.y * ACCEL_SENSITIVITY_MULTIPLIER; // Common for Y to be inverted
+        }
     }
-#endif
-    Serial.println("FluidEffect::begin() - Particle System Initialized");
+
+    for (int i = 0; i < num_active_particles; ++i) {
+        particles[i].xv += current_gravity_x * DT_FLUID;
+        particles[i].yv += current_gravity_y * DT_FLUID;
+    }
 }
 
+void FluidEffect::applyParticleInteractions() {
+    for (int i = 0; i < num_active_particles; ++i) {
+        for (int j = i + 1; j < num_active_particles; ++j) { // Iterate j from i+1 to avoid redundant pairs
+            float dx = particles[j].x - particles[i].x;
+            float dy = particles[j].y - particles[i].y;
+            float dist_sq = dx * dx + dy * dy;
 
-void FluidEffect::applyGlobalForces(float dt) {
-    // Accelerometer X for horizontal force
-    // Accelerometer Y for vertical force (counteracting or adding to gravity)
-    // Note: accel_->y_g might be positive when tilted "up" or "down" depending on orientation.
-    // If panel is flat, Y might be near 0. If vertical, Y might be +/-1G.
-    // We'll assume Y-axis of accel corresponds to screen's Y-axis for simplicity.
-    float forceX = smoothedAccelX_g_ * ACCEL_FORCE_FACTOR;
-    float forceY = GRAVITY_Y - (smoothedAccelY_g_ * ACCEL_FORCE_FACTOR); // Gravity pulls down, accel Y can push up/down
+            // Check if particles are close enough to interact and not at the exact same spot
+            if (dist_sq < PARTICLE_INTERACTION_DISTANCE_SQ && dist_sq > 0.0001f) {
+                float dist = sqrt(dist_sq);
+                
+                // Repulsive force = factor * (overlap_distance / distance)
+                // Force is stronger for more overlap and closer particles
+                float force_magnitude = PARTICLE_REPEL_FACTOR * (PARTICLE_INTERACTION_DISTANCE - dist) / dist;
+                
+                float force_x_component = dx * force_magnitude;
+                float force_y_component = dy * force_magnitude;
 
-    for (auto& p : particles_) {
-        p.vx += forceX * dt;
-        p.vy += forceY * dt;
+                // Apply force to both particles (equal and opposite)
+                particles[i].xv -= force_x_component * DT_FLUID;
+                particles[i].yv -= force_y_component * DT_FLUID;
+                particles[j].xv += force_x_component * DT_FLUID;
+                particles[j].yv += force_y_component * DT_FLUID;
+            }
+        }
+    }
+}
 
+void FluidEffect::updateParticlePositions() {
+    for (int i = 0; i < num_active_particles; ++i) {
         // Apply drag
-        p.vx *= (1.0f - DRAG_COEFFICIENT);
-        p.vy *= (1.0f - DRAG_COEFFICIENT);
+        particles[i].xv *= PARTICLE_DRAG;
+        particles[i].yv *= PARTICLE_DRAG;
+
+        // Update positions
+        particles[i].x += particles[i].xv * DT_FLUID;
+        particles[i].y += particles[i].yv * DT_FLUID;
     }
 }
 
-void FluidEffect::updateParticlePositions(float dt) {
-    for (auto& p : particles_) {
-        p.x += p.vx * dt;
-        p.y += p.vy * dt;
-    }
-}
+void FluidEffect::applyScreenCollisions() {
+    if (!dma_display) return;
 
-void FluidEffect::handleBoundaryCollisions() {
-    if (gridWidth_ == 0 || gridHeight_ == 0) return;
-    // static unsigned long lastCollisionPrint = 0; // To avoid spamming
-
-    for (auto& p : particles_) {
-        bool collidedX = false;
-        bool collidedY = false;
-
-        // Left boundary
-        if (p.x - PARTICLE_RADIUS < 0) {
-            // if (millis() - lastCollisionPrint > 1000) { // Print only once a second
-            //     Serial.printf("L_COL: P(%.1f,%.1f) V(%.1f,%.1f) -> ", p.x, p.y, p.vx, p.vy);
-            // }
-            p.x = PARTICLE_RADIUS;
-            p.vx *= -BOUNDARY_DAMPING;
-            collidedX = true;
-            // if (millis() - lastCollisionPrint > 1000) {
-            //     Serial.printf("P(%.1f,%.1f) V(%.1f,%.1f)\n", p.x, p.y, p.vx, p.vy);
-            // }
+    for (int i = 0; i < num_active_particles; ++i) {
+        // Collision with left wall
+        if (particles[i].x < 0) {
+            particles[i].x = 0;
+            particles[i].xv *= WALL_DAMPING;
         }
-        // Right boundary
-        else if (p.x + PARTICLE_RADIUS >= gridWidth_) { // Use >= for the upper bound check with floats
-            // if (millis() - lastCollisionPrint > 1000) {
-            //     Serial.printf("R_COL: P(%.1f,%.1f) V(%.1f,%.1f) -> ", p.x, p.y, p.vx, p.vy);
-            // }
-            p.x = gridWidth_ - 1.0f - PARTICLE_RADIUS; // Ensure rightmost pixel is gridWidth - 1
-            p.vx *= -BOUNDARY_DAMPING;
-            collidedX = true;
-            // if (millis() - lastCollisionPrint > 1000) {
-            //      Serial.printf("P(%.1f,%.1f) V(%.1f,%.1f)\n", p.x, p.y, p.vx, p.vy);
-            // }
+        // Collision with right wall
+        else if (particles[i].x >= PANE_WIDTH) {
+            particles[i].x = PANE_WIDTH - 1.0f; // Ensure it's within bounds
+            particles[i].xv *= WALL_DAMPING;
         }
 
-        // Top boundary
-        if (p.y - PARTICLE_RADIUS < 0) {
-            // if (millis() - lastCollisionPrint > 1000) {
-            //     Serial.printf("T_COL: P(%.1f,%.1f) V(%.1f,%.1f) -> ", p.x, p.y, p.vx, p.vy);
-            // }
-            p.y = PARTICLE_RADIUS;
-            p.vy *= -BOUNDARY_DAMPING;
-            collidedY = true;
-            // if (millis() - lastCollisionPrint > 1000) {
-            //     Serial.printf("P(%.1f,%.1f) V(%.1f,%.1f)\n", p.x, p.y, p.vx, p.vy);
-            // }
+        // Collision with top wall
+        if (particles[i].y < 0) {
+            particles[i].y = 0;
+            particles[i].yv *= WALL_DAMPING;
         }
-        // Bottom boundary
-        else if (p.y + PARTICLE_RADIUS >= gridHeight_) { // Use >= for the upper bound check
-            // if (millis() - lastCollisionPrint > 1000) {
-            //     Serial.printf("B_COL: P(%.1f,%.1f) V(%.1f,%.1f) -> ", p.x, p.y, p.vx, p.vy);
-            // }
-            p.y = gridHeight_ - 1.0f - PARTICLE_RADIUS; // Ensure bottommost pixel is gridHeight - 1
-            p.vy *= -BOUNDARY_DAMPING;
-            collidedY = true;
-            // if (millis() - lastCollisionPrint > 1000) {
-            //     Serial.printf("P(%.1f,%.1f) V(%.1f,%.1f)\n", p.x, p.y, p.vx, p.vy);
-            //     lastCollisionPrint = millis();
-            // }
+        // Collision with bottom wall
+        else if (particles[i].y >= PANE_HEIGHT) {
+            particles[i].y = PANE_HEIGHT - 1.0f; // Ensure it's within bounds
+            particles[i].yv *= WALL_DAMPING;
         }
     }
 }
 
-// void FluidEffect::handleInterParticleCollisions() { /* TODO: More complex */ }
+void FluidEffect::drawParticles() {
+    if (!dma_display) return;
 
-void FluidEffect::renderParticles() {
-    if (!dma_display_) return;
-    dma_display_->fillScreen(dma_display_->color565(10, 20, 40)); // Background
+    // dma_display->clearScreen(); // This is typically handled by the main display loop before calling updateAndDraw()
 
-    for (const auto& p : particles_) {
-        // Simple 1x1 pixel rendering
-        int ix = round(p.x);
-        int iy = round(p.y);
-        if (ix >= 0 && ix < gridWidth_ && iy >= 0 && iy < gridHeight_) {
-            dma_display_->drawPixel(ix, iy, p.color);
+    for (int i = 0; i < num_active_particles; ++i) {
+        // Determine particle color (e.g., based on speed or fixed)
+        float speed_sq = particles[i].xv * particles[i].xv + particles[i].yv * particles[i].yv;
+        
+        // Map speed to brightness/color. Max expected speed_sq might be ~2.0f for these parameters.
+        int blue_intensity = map(constrain(speed_sq, 0.0f, 2.0f) * 100, 0, 200, 100, 255); // Base blue intensity
+        int green_intensity = map(constrain(speed_sq, 0.0f, 2.0f) * 100, 0, 200, 50, 150); // Mix in some green for highlights
+
+        uint16_t particle_color = dma_display->color565(0, green_intensity, blue_intensity); // Shades of cyan/blue
+
+        // Draw the particle
+        // Ensure coordinates are integers and within bounds before drawing, though collisions should handle it.
+        int px = static_cast<int>(particles[i].x);
+        int py = static_cast<int>(particles[i].y);
+
+        if (px >= 0 && px < PANE_WIDTH && py >= 0 && py < PANE_HEIGHT) {
+            dma_display->drawPixel(px, py, particle_color);
+            // For slightly larger particles, you could use fillRect:
+            // dma_display->fillRect(px > 0 ? px -1 : 0, py > 0 ? py -1 : 0, 2, 2, particle_color);
         }
-        // Optional: draw slightly larger circles if PARTICLE_RADIUS > 0.5
-        // else if (PARTICLE_RADIUS > 0.5f) {
-        //    dma_display_->fillCircle(round(p.x), round(p.y), round(PARTICLE_RADIUS), p.color);
-        // }
     }
 }
 
+// Main update and draw call for the effect
 void FluidEffect::updateAndDraw() {
-    if (!dma_display_ || !accelerometerEnabledGlobalFlag_) {
-        if (dma_display_) showMessage("Sys Err", dma_display_->color565(255,0,0));
-        return;
-    }
+    if (!dma_display) return;
 
-    float currentAccelX_g = 0.0f;
-    float currentAccelY_g = 0.0f; // For screen Y-axis related forces
+    // Simulation steps
+    applyGravityAndAccel();
+    applyParticleInteractions(); // This is the most computationally expensive step
+    updateParticlePositions();
+    applyScreenCollisions();
 
-#if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) || defined(ACCEL_AVAILABLE)
-    if (!(*accelerometerEnabledGlobalFlag_)) {
-        showMessage("Accel OFF", dma_display_->color565(150, 150, 150));
-        // Simulate with no external accel forces if accel is off by user
-    } else {
-        if (!accel_) {
-            showMessage("Accel ERR", dma_display_->color565(255, 100, 0));
-            // Simulate with no external accel forces
-        } else {
-            accel_->read();
-            currentAccelX_g = accel_->x_g;
-            currentAccelY_g = accel_->y_g; // Read Y for vertical screen forces
-        }
-    }
-    // Smooth accelerometer readings
-    smoothedAccelX_g_ = (0.2f * currentAccelX_g) + (0.8f * smoothedAccelX_g_);
-    smoothedAccelY_g_ = (0.2f * currentAccelY_g) + (0.8f * smoothedAccelY_g_);
-
-#else // No accelerometer hardware compiled
-    // smoothedAccelX_g_ and smoothedAccelY_g_ remain 0.0f
-#endif
-
-    unsigned long currentTime = millis();
-    unsigned long elapsedTime = currentTime - lastSimUpdateTime_;
-
-    if (elapsedTime >= SIM_UPDATE_INTERVAL_MS) {
-        float dt = elapsedTime / 1000.0f; // Delta time in seconds
-        // Clamp dt to avoid explosions if there's a large lag
-        if (dt > 0.1f) dt = 0.1f; 
-
-        applyGlobalForces(dt);
-        updateParticlePositions(dt);
-        handleBoundaryCollisions();
-        // handleInterParticleCollisions(); // If implemented
-
-        lastSimUpdateTime_ = currentTime;
-    }
-
-    renderParticles();
-}
-
-void FluidEffect::showMessage(const char* msg, uint16_t color) {
-    if (!dma_display_) return;
-    dma_display_->fillScreen(dma_display_->color565(0, 0, 0));
-    dma_display_->setFont(&TomThumb);
-    dma_display_->setTextSize(1);
-    dma_display_->setTextColor(color);
-    int16_t x1, y1;
-    uint16_t w, h;
-    dma_display_->getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
-    dma_display_->setCursor((dma_display_->width() - w) / 2, (dma_display_->height() / 2) + (h / 2) -1);
-    dma_display_->print(msg);
+    // Rendering
+    // The main loop already clears the screen via dma_display->clearScreen();
+    drawParticles();
+    // The main loop handles dma_display->flipDMABuffer();
 }
