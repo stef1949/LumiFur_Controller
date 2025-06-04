@@ -1077,23 +1077,23 @@ void baseFace() {
 void patternPlasma() {
   // Pre-calculate values that only depend on time_counter
   // These are constant for the entire frame draw
-  uint8_t wibble = sin8(time_counter);
+  const uint8_t wibble = sin8(time_counter);
   // Pre-calculate the cosine term and the division by 8 (as shift)
   // Note: cos8 argument is uint8_t, so -time_counter wraps around correctly.
-  uint8_t cos8_val_shifted = cos8((uint8_t)(-time_counter)) >> 3; // Calculate cos8(-t)/8 once
-  uint16_t time_val = time_counter; // Use a local copy for calculations if needed
-  uint16_t term2_factor = 128 - wibble; // Calculate 128 - sin8(t) once
+  const uint8_t cos8_val_shifted = cos8((uint8_t)(-time_counter)) >> 3; // Calculate cos8(-t)/8 once
+  const uint16_t time_val = time_counter; // Use a local copy for calculations
+  const uint16_t term2_factor = 128 - wibble; // Calculate 128 - sin8(t) once
 
   // Get display dimensions once
-  int display_width = dma_display->width();
-  int display_height = dma_display->height();
+  const int display_width = dma_display->width();
+  const int display_height = dma_display->height();
 
   // Outer loop for X
   for (int x = 0; x < display_width; x++) {
       // Pre-calculate terms dependent only on X and time
-      uint16_t term1_base = x * wibble * 3 + time_val;
+      const uint16_t term1_base = x * wibble * 3 + time_val;
       // The y*x part needs to be inside the Y loop, but we can precalculate x * cos8_val_shifted
-      uint16_t term3_x_factor = x * cos8_val_shifted;
+      const uint16_t term3_x_factor = x * cos8_val_shifted;
 
       // Inner loop for Y
       for (int y = 0; y < display_height; y++) {
@@ -1455,7 +1455,8 @@ void updateAndDrawFullScreenSpiral(SpiralColorMode colorMode) { // Added colorMo
 
         if (colorMode == SPIRAL_COLOR_WHITE) {
             pixel_color = dma_display->color565(255, 255, 255); // Pure white
-        } else { // SPIRAL_COLOR_PALETTE (default)
+        } else // SPIRAL_COLOR_PALETTE (default)
+        {
             uint8_t color_index = static_cast<uint8_t>(theta_arm * SPIRAL_ARM_COLOR_FACTOR + fullScreenSpiralColorOffset);
             CRGB crgb_color = ColorFromPalette(RainbowColors_p, color_index, 255, LINEARBLEND);
             pixel_color = dma_display->color565(crgb_color.r, crgb_color.g, crgb_color.b);
