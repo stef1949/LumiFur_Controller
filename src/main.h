@@ -9,6 +9,11 @@
 #include "xtensa/core-macros.h"
 #include "bitmaps.h"
 #include <stdio.h>
+#include "esp_ota_ops.h"
+#include "nvs_flash.h"
+#include "nvs.h"
+#include <esp_task_wdt.h>
+#include <esp_ota_ops.h> // For OTA_SIZE_UNKNOWN
 
 //#include "customFonts/lequahyper20pt7b.h" // Stylized font
 //#include <Fonts/FreeSansBold18pt7b.h>     // Larger font
@@ -34,6 +39,16 @@ bool configApplySleepMode = false;
 bool configApplyAuroraMode = false;
 bool configApplyAccelerometer = true;
 bool configApplyConstantColor = false; // Variable to track constant color application
+
+/*------------------------------------------------------------------------------
+  OTA instances & variables
+  ----------------------------------------------------------------------------*/
+static esp_ota_handle_t otaHandler = 0;
+static const esp_partition_t *update_partition = NULL;
+
+uint8_t     txValue = 0;
+int         bufferCount = 0;
+bool        downloadFlag = false;
 
 ////////////////////// DEBUG MODE //////////////////////
 #define DEBUG_MODE 0 // Set to 1 to enable debug outputs

@@ -5,6 +5,7 @@
 #include <NimBLEDevice.h>
 #include "driver/temp_sensor.h"
 
+
 // expose the userBrightness defined in main.h
 extern uint8_t userBrightness;
 extern bool brightnessChanged;
@@ -24,7 +25,7 @@ bool oldDeviceConnected = false;
 #define TEMPERATURE_LOGS_CHARACTERISTIC_UUID   "0195eec2-ae6e-74a1-bcd5-215e2365477c" // New Command UUID
 #define COMMAND_CHARACTERISTIC_UUID     "0195eec3-06d2-7fd4-a561-49493be3ee41"
 #define BRIGHTNESS_CHARACTERISTIC_UUID  "01931c44-3867-7427-96ab-8d7ac0ae09ef"
-
+#define OTA_CHARACTERISTIC_UUID         "01931c44-3867-7427-96ab-8d7ac0ae09ee"
 //#define ULTRASOUND_CHARACTERISTIC_UUID  "01931c44-3867-7b5d-9732-12460e3a35db"
 
 //#define DESC_USER_DESC_UUID  0x2901  // User Description descriptor
@@ -49,11 +50,13 @@ NimBLECharacteristic* pConfigCharacteristic = nullptr;
 NimBLECharacteristic* pCommandCharacteristic;
 NimBLECharacteristic* pTemperatureLogsCharacteristic = nullptr; // New Command UUID
 NimBLECharacteristic* pBrightnessCharacteristic = nullptr;
+NimBLECharacteristic* pOTACharacteristic = nullptr;
 
 void triggerHistoryTransfer();
 void clearHistoryBuffer();
 void storeTemperatureInHistory(float temp); // Good practice to declare static/helper functions if only used in .cpp
 void updateTemperature();
+
 
 // Class to handle BLE server callbacks
 class ServerCallbacks : public NimBLEServerCallbacks {
