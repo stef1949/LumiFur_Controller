@@ -13,7 +13,6 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include <esp_task_wdt.h>
-#include <esp_ota_ops.h> // For OTA_SIZE_UNKNOWN
 
 //#include "customFonts/lequahyper20pt7b.h" // Stylized font
 //#include <Fonts/FreeSansBold18pt7b.h>     // Larger font
