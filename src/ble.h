@@ -25,7 +25,10 @@ bool oldDeviceConnected = false;
 #define TEMPERATURE_LOGS_CHARACTERISTIC_UUID        "0195eec2-ae6e-74a1-bcd5-215e2365477c" // New Command UUID
 #define COMMAND_CHARACTERISTIC_UUID                 "0195eec3-06d2-7fd4-a561-49493be3ee41"
 #define BRIGHTNESS_CHARACTERISTIC_UUID              "01931c44-3867-7427-96ab-8d7ac0ae09ef"
+
 #define OTA_CHARACTERISTIC_UUID                     "01931c44-3867-7427-96ab-8d7ac0ae09ee"
+#define INFO_CHARACTERISTIC_UUID                    "cba1d466-344c-4be3-ab3f-189f80dd7599"
+
 
 //#define ULTRASOUND_CHARACTERISTIC_UUID  "01931c44-3867-7b5d-9732-12460e3a35db"
 
@@ -52,11 +55,52 @@ NimBLECharacteristic* pCommandCharacteristic;
 NimBLECharacteristic* pTemperatureLogsCharacteristic = nullptr; // New Command UUID
 NimBLECharacteristic* pBrightnessCharacteristic = nullptr;
 NimBLECharacteristic* pOTACharacteristic = nullptr;
+static NimBLECharacteristic* pInfoCharacteristic;
 
 void triggerHistoryTransfer();
 void clearHistoryBuffer();
 void storeTemperatureInHistory(float temp); // Good practice to declare static/helper functions if only used in .cpp
 void updateTemperature();
+
+// Fallback defines in case PlatformIO doesn't inject them
+#ifndef FIRMWARE_VERSION
+//#define FIRMWARE_VERSION "unknown"
+#define FIRMWARE_VERSION "2.2.0" // Default version if not defined
+#endif
+
+#ifndef GIT_COMMIT
+#define GIT_COMMIT "unknown"
+#endif
+
+#ifndef GIT_BRANCH
+#ifdef DEBUG_MODE
+#define GIT_BRANCH "dev"
+#else
+#define GIT_BRANCH "main"
+#endif
+#endif
+
+#ifndef BUILD_DATE
+#define BUILD_DATE __DATE__
+#endif
+
+#ifndef BUILD_TIME
+#define BUILD_TIME __TIME__
+#endif
+
+#ifndef DEVICE_MODEL
+#define DEVICE_MODEL "mps3"
+#endif
+
+#ifndef APP_COMPAT_VERSION
+#define APP_COMPAT_VERSION "6.0"
+#endif
+
+std::string fwVersion = FIRMWARE_VERSION;
+std::string deviceModel = DEVICE_MODEL;
+std::string appCompat = APP_COMPAT_VERSION;
+std::string buildTime = std::string(BUILD_DATE) + " " + BUILD_TIME;
+
 
 class OTACallbacks : public NimBLECharacteristicCallbacks {
     esp_ota_handle_t ota_handle = 0;
