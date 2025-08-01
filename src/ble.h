@@ -317,7 +317,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
 //Temp Non-Blocking Variables
 unsigned long temperatureMillis = 0;
-const unsigned long temperatureInterval = 5000; // 1 second interval for temperature update
+const unsigned long temperatureInterval = 100; // 1 second interval for temperature update
 
 // Buffer
 #define HISTORY_BUFFER_SIZE 50
