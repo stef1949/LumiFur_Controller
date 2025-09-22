@@ -307,6 +307,14 @@ class CommandCallbacks : public NimBLECharacteristicCallbacks {
   }
 } cmdCallbacks;
 
+class OtaCallbacks : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* characteristic) {
+    const auto &value = characteristic->getValue();
+    Serial.printf("OTA characteristic received %u bytes\n", static_cast<unsigned>(value.size()));
+  }
+};
+OtaCallbacks otaCallbacks;
+
 // New Callback class for handling notifications related to Temperature Logs
 class TemperatureLogsCallbacks : public NimBLECharacteristicCallbacks {
   public:
@@ -1719,6 +1727,19 @@ pBrightnessCharacteristic = pService->createCharacteristic(
       NIMBLE_PROPERTY::WRITE_NR);
 pBrightnessCharacteristic->setCallbacks(&brightnessCallbacks);
 // initialize with current brightness
+
+pOtaCharacteristic = pService->createCharacteristic(
+    OTA_CHARACTERISTIC_UUID,
+    NIMBLE_PROPERTY::READ |
+        NIMBLE_PROPERTY::WRITE |
+        NIMBLE_PROPERTY::WRITE_NR |
+        NIMBLE_PROPERTY::NOTIFY);
+pOtaCharacteristic->setCallbacks(&otaCallbacks);
+NimBLEDescriptor *otaDesc = pOtaCharacteristic->createDescriptor(
+    "2901",
+    NIMBLE_PROPERTY::READ,
+    20);
+otaDesc->setValue("OTA Control");
 pBrightnessCharacteristic->setValue(&userBrightness, 1);
 
 // nimBLEService* pBaadService = pServer->createService("BAAD");
