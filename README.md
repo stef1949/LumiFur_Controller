@@ -1,5 +1,5 @@
 <p align="center">
-<img width="300" alt="LumiFur Controller" src="https://raw.githubusercontent.com/stef1949/LumiFur_Controller/refs/heads/main/docs/IMG_8739.png">
+<img width="300" alt="LumiFur Controller" src="docs/mps3.png">
 </p>
 <h1 align="center">
   LumiFur Controller 
