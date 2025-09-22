@@ -50,8 +50,19 @@ Ensure you have the required tools installed:
 
 - **PlatformIO** (with VSCode extension recommended)
 - **Git**
+- **GitHub Copilot** (recommended for enhanced development experience)
 
 The project will automatically handle library dependencies defined in `platformio.ini`.
+
+#### GitHub Copilot Integration 🤖
+
+This project includes comprehensive GitHub Copilot instructions to help you develop more efficiently:
+
+- **Review Instructions**: Check `.github/copilot-instructions.md` for detailed project context
+- **Usage Guide**: See `docs/COPILOT_USAGE.md` for development workflow tips
+- **Chat Instructions**: Use `.github/copilot-chat-instructions.md` for focused assistance
+
+Copilot understands our embedded C++ patterns, ESP32 constraints, and PlatformIO build system, making it an excellent tool for both new contributors and experienced developers.
 
 ### 4. Create a Descriptive Branch
 
