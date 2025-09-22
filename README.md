@@ -24,6 +24,7 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 - ⚙️ [Installation](#installation)
 - 📖 [Usage](#usage)
 - 😃 [Facial Expressions](#facial-expressions)
+- 🤖 [GitHub Copilot Integration](#github-copilot-integration)
 - 🤝 [Contributing](#contributing)
 - 📜 [License](#license)
 
@@ -99,6 +100,32 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 - 6 - Kinky Face
 - 7 - Death Face
 - 8 - Edgy Face
+
+## GitHub Copilot Integration 🤖
+
+This project includes comprehensive GitHub Copilot instructions to help you develop more efficiently. The instructions provide context about:
+
+- **Embedded C++ patterns** specific to ESP32 development
+- **Hardware constraints** and memory management guidelines  
+- **PlatformIO build system** usage and environment configurations
+- **LED matrix and BLE** communication patterns
+- **Animation and graphics** optimization techniques
+- **Testing frameworks** (Unity and GoogleTest) integration
+
+### Getting Started with Copilot
+
+1. **Install Extensions**: The recommended VS Code extensions include GitHub Copilot
+2. **Review Instructions**: Check `.github/copilot-instructions.md` for detailed guidance
+3. **Use Chat Instructions**: Use `.github/copilot-chat-instructions.md` for Copilot Chat sessions
+
+### Copilot-Assisted Development Tips
+
+- **Hardware Context**: Copilot understands ESP32 memory constraints and embedded best practices
+- **Code Patterns**: Follows established patterns for view management, animations, and BLE communication
+- **Testing Support**: Generates appropriate Unity and GoogleTest test cases
+- **Documentation**: Helps maintain consistent code documentation and comments
+
+The Copilot instructions are designed to help both new contributors and experienced developers work more effectively with this embedded codebase.
 
 ## Contributing 🤝
 Contributions are welcome! Please fork the repository and submit a pull request with your improvements.
