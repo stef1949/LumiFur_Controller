@@ -348,13 +348,13 @@ void applyConfigOptions()
     Serial.println("Aurora mode enabled: switching to aurora palette.");
     // Assume auroraPalette and defaultPalette are defined globally.
     // currentPalette = auroraPalette;
-    bool configApplyAuroraMode = true;
+    configApplyAuroraMode = true;
   }
   else
   {
     Serial.println("Aurora mode disabled: using default palette.");
     // currentPalette = defaultPalette;
-    bool configApplyAuroraMode = false;
+    configApplyAuroraMode = false;
   }
 
   if (constantColorConfig)
