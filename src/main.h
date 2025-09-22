@@ -5,15 +5,38 @@
 #include "userPreferences.h"
 #include "deviceConfig.h"
 #include "ble.h"
-
+#include "SPI.h"
 #include "xtensa/core-macros.h"
 #include "bitmaps.h"
-#include "customFonts/lequahyper20pt7b.h" // Stylized font
-#include <Fonts/FreeSansBold18pt7b.h>     // Larger font
+#include <stdio.h>
+
+//#include "customFonts/lequahyper20pt7b.h" // Stylized font
+//#include <Fonts/FreeSansBold18pt7b.h>     // Larger font
+//#include <Fonts/FreeMonoBold12pt7b.h>    // Smaller font
+//#include <Fonts/Picopixel.h>     // Smallest font
+#include <Fonts/TomThumb.h> // Smallest font
+//#include <Fonts/FreeMonoBold9pt7b.h> // Small font
+#include <Fonts/FreeSans9pt7b.h> // Medium font
+
 #define BAUD_RATE 115200                  // serial debug port baud rate
+// #define CONFIG_BT_NIMBLE_PINNED_TO_CORE 1 // Pinning NimBLE to core 1
+
+// Global variables to store the accessory settings.
+bool autoBrightnessEnabled = true;
+bool accelerometerEnabled = true;
+bool sleepModeEnabled = true;
+bool auroraModeEnabled = true;
+bool constantColorConfig = false;
+CRGB constantColor = CRGB::Green; // Default color for constant color mode
+// Config variables ------------------------------------------------
+bool configApplyAutoBrightness = true; // Variable to track auto brightness application
+bool configApplySleepMode = false;
+bool configApplyAuroraMode = false;
+bool configApplyAccelerometer = true;
+bool configApplyConstantColor = false; // Variable to track constant color application
 
 ////////////////////// DEBUG MODE //////////////////////
-#define DEBUG_MODE 1 // Set to 1 to enable debug outputs
+#define DEBUG_MODE 0 // Set to 1 to enable debug outputs
 
 #if DEBUG_MODE
 #define DEBUG_BLE
@@ -150,7 +173,7 @@ void err(int x)
   }
 }
 
-uint8_t userBrightness = getUserBrightness(); // e.g., default 204 (80%)
+uint8_t userBrightness = getUserBrightness(); // e.g., default 255 (100%)
 
 // Map userBrightness (1-255) to hwBrightness (1-255).
 // int hwBrightness = map(userBrightness, 1, 100, 1, 255);
@@ -166,6 +189,15 @@ unsigned long lastAmbientUpdateTime = 0;
 const unsigned long ambientUpdateInterval = 500; // update every 500 milliseconds
 uint8_t adaptiveBrightness = userBrightness;     // current brightness used by the system
 uint8_t targetBrightness = userBrightness;       // target brightness for adaptive adjustment
+
+//float ambientLux = 0.0;
+static uint16_t lastKnownClearValue = 0; // Initialize to a sensible default
+float smoothedLux = 50.0f;
+const float luxSmoothingFactor = 0.15f; // Adjust between 0.05 - 0.3
+int lastBrightness = 0;
+const int brightnessThreshold = 3; // Only update if change > X
+unsigned long lastLuxUpdate = 0;
+const unsigned long luxUpdateInterval = 100;  // NEW: every 100 milliseconds (10Hz) - ADJUST THIS!
 
 void setupAdaptiveBrightness()
 {
@@ -184,31 +216,207 @@ void setupAdaptiveBrightness()
 }
 
 // Setup functions for adaptive brightness & proximity sensing using APDS9960:
-uint8_t getAdaptiveBrightness()
+uint16_t getRawClearChannelValue()
 {
-  unsigned long now = millis();
-  if (now - lastAmbientUpdateTime >= ambientUpdateInterval)
+  if (apds.colorDataReady())
   {
-    lastAmbientUpdateTime = now;
-    if (apds.colorDataReady())
-    {
-      uint16_t r, g, b, c;
-      apds.getColorData(&r, &g, &b, &c);
-      Serial.print("Ambient light level (clear channel): ");
-      Serial.println(c);
-      targetBrightness = map(c, 0, 1023, 10, 255);
+    uint16_t r, g, b, c;
+    apds.getColorData(&r, &g, &b, &c);
+    Serial.print("Ambient light level (clear channel): ");
+    lastKnownClearValue = c;
+    Serial.println(c);
+return c; // Return the raw clear channel value
+  } else {
+        return lastKnownClearValue; // Return the last good value if current not available
     }
-    // else: sensor not ready—keep last computed adaptiveBrightness.
-    // If the sensor isn't ready, targetBrightness remains unchanged.
-  }
-  
-  // Smoothly transition adaptiveBrightness towards targetBrightness.
-  // Here, we use a smoothing factor; adjust the factor (0 < smoothingFactor <= 1)
-  // to control the speed of transition.
-  const float smoothingFactor = 0.05; // Adjust this value to control the smoothing speed (0.0 to 1.0)
-  adaptiveBrightness = (uint8_t)(adaptiveBrightness + (targetBrightness - adaptiveBrightness) * smoothingFactor);
-
-  return adaptiveBrightness;
 }
+
+void updateAdaptiveBrightness()
+{
+  uint16_t rawClearValue = getRawClearChannelValue();
+
+  float currentLuxEquivalent = static_cast<float>(rawClearValue);
+
+  smoothedLux = (luxSmoothingFactor * currentLuxEquivalent) + ((1.0f - luxSmoothingFactor) * smoothedLux);
+
+  // --- CRITICAL CALIBRATION SECTION ---
+  int min_brightness_output = 20;   // Min brightness display should go to (e.g., 10-25)
+  int max_brightness_output = 255;  // Max brightness (usually 255)
+  float min_clear_for_map = 50.0f;  // CALIBRATE: Raw clear value for "very dark" (e.g., 20-100)
+  float max_clear_for_map = 700.0f; // CALIBRATE: Raw clear value for "bright enough for max display brightness"
+                                    // OBSERVE rawClearValue via Serial.print to set this.
+                                    // Example: if typical indoor bright is C=600, set this to ~600-800.
+                                    // If C values are typically 0-2000, then 700 is too low.
+  // --- END CRITICAL CALIBRATION SECTION ---
+
+  long targetBrightnessLong = map(static_cast<long>(smoothedLux),
+                                  static_cast<long>(min_clear_for_map),
+                                  static_cast<long>(max_clear_for_map),
+                                  min_brightness_output,
+                                  max_brightness_output);
+  int targetBrightnessCalc = constrain(static_cast<int>(targetBrightnessLong), min_brightness_output, max_brightness_output);
+
+  Serial.printf("ADAPT: RawC=%u, SmoothC=%.1f, TargetBr=%d, LastBr=%d, Thr=%d\n",
+                rawClearValue, smoothedLux, targetBrightnessCalc, lastBrightness, brightnessThreshold); // Corrected variable name
+
+  if (abs(targetBrightnessCalc - lastBrightness) >= brightnessThreshold)
+  {
+    dma_display->setBrightness8(static_cast<uint8_t>(targetBrightnessCalc));
+    lastBrightness = targetBrightnessCalc; // Update lastBrightness ONLY when a display change is made
+    Serial.printf(">>>> ADAPT: BRIGHTNESS SET TO %d <<<<\n", targetBrightnessCalc);
+  }
+  else
+  {
+    // Serial.printf("ADAPT: No change needed, diff %d < threshold %d\n", abs(targetBrightness - lastBrightness), brightnessThreshold);
+  }
+}
+
+void maybeUpdateBrightness()
+{
+  if (autoBrightnessEnabled && millis() - lastLuxUpdate >= luxUpdateInterval)
+  {
+    updateAdaptiveBrightness();
+    lastLuxUpdate = millis();
+  }
+}
+
+constexpr std::size_t color_num = 5;
+using colour_arr_t = std::array<uint16_t, color_num>;
+
+uint16_t myDARK, myWHITE, myRED, myGREEN, myBLUE;
+colour_arr_t colours;
+
+struct Square
+{
+  float xpos, ypos;
+  float velocityx;
+  float velocityy;
+  boolean xdir, ydir;
+  uint16_t square_size;
+  uint16_t colour;
+};
+
+const int numSquares = 25;
+Square Squares[numSquares];
+
+// Add the new helper function after the ConfigCallbacks class definition:
+void applyConfigOptions()
+{
+  Serial.println("Applying configuration options...");
+
+  if (autoBrightnessEnabled)
+  {
+    Serial.println("Auto Brightness enabled: adjusting brightness automatically.");
+    // Example: call a function to update auto brightness (if implemented)
+    // updateAutoBrightness();
+    configApplyAutoBrightness = true;
+  }
+  else
+  {
+    Serial.println("Auto brightness disabled. Applying user-set brightness.");
+    dma_display->setBrightness8(userBrightness);
+    Serial.printf("Applied manual brightness: %u\n", userBrightness);
+  }
+
+  if (accelerometerEnabled)
+  {
+    Serial.println("Accelerometer enabled.");
+    // Insert code to enable accelerometer-driven actions here.
+    configApplyAccelerometer = true;
+  }
+  else
+  {
+    Serial.println("Accelerometer disabled.");
+    // Optionally disable or ignore accelerometer actions.
+    configApplyAccelerometer = false;
+  }
+
+  if (sleepModeEnabled)
+  {
+    Serial.println("Sleep mode enabled: device can enter sleep mode.");
+    // Update sleep-related thresholds or enable sleep mode triggers.
+    configApplySleepMode = true;
+  }
+  else
+  {
+    Serial.println("Sleep mode disabled: forcing device to remain awake.");
+    configApplySleepMode = false; // Ensure the device remains awake when sleep mode is disabled.
+  }
+
+  if (auroraModeEnabled)
+  {
+    Serial.println("Aurora mode enabled: switching to aurora palette.");
+    // Assume auroraPalette and defaultPalette are defined globally.
+    // currentPalette = auroraPalette;
+    configApplyAuroraMode = true;
+  }
+  else
+  {
+    Serial.println("Aurora mode disabled: using default palette.");
+    // currentPalette = defaultPalette;
+    configApplyAuroraMode = false;
+  }
+
+  if (constantColorConfig)
+  {
+    Serial.println("Constant color mode enabled.");
+    uint8_t r = 255, g = 255, b = 255; // Example default values for red, green, and blue
+    uint16_t rgb565 = dma_display->color565(constantColor.r, constantColor.g, constantColor.b);
+    dma_display->fillScreen(rgb565);
+    dma_display->flipDMABuffer();
+    bool configApplyConstantColor = true;
+  }
+  else
+  {
+    Serial.println("Constant color mode disabled.");
+    // Reset the display to the previous state or palette.
+    bool configApplyConstantColor = false;
+  }
+}
+
+// Startfield Animation -----------------------------------------------
+struct Star
+{
+  int x;
+  int y;
+  int speed;
+};
+const int NUM_STARS = 50;
+Star stars[NUM_STARS];
+
+void initStarfieldAnimation()
+{
+  for (int i = 0; i < NUM_STARS; i++)
+  {
+    stars[i].x = random(0, dma_display->width());
+    stars[i].y = random(0, dma_display->height());
+    stars[i].speed = random(1, 4); // Stars move at different speeds
+  }
+}
+
+struct DVDLogo
+{
+  int x, y;
+  int vx, vy;
+  uint16_t color;
+};
+
+DVDLogo logos[2];
+
+const int dvdWidth = 23; // Width of the DVD logo
+const int dvdHeight = 10;
+
+unsigned long lastDvdUpdate = 0;
+const unsigned long dvdUpdateInterval = 20;
+
+// First logo (left panel)
+int dvdX1 = 0, dvdY1 = 0;
+int dvdVX1 = 1, dvdVY1 = 1;
+uint16_t dvdColor1;
+
+// Second logo (right panel)
+int dvdX2 = 64, dvdY2 = 0;
+int dvdVX2 = 1, dvdVY2 = 1;
+uint16_t dvdColor2;
 
 #endif /* MAIN_H */

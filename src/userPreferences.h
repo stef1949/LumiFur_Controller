@@ -1,4 +1,9 @@
+#pragma once
 #include <Preferences.h>
+
+static Preferences prefs;
+static constexpr char NAMESPACE[] = "LumiFur";
+static constexpr char KEY_LAST[]  = "lastView";
 
 // Returns a reference to a static Preferences instance.
 Preferences& getPrefs() {
@@ -22,7 +27,7 @@ Preferences& getPrefs() {
   
   // Brightness functions
   int getUserBrightness() {
-    return getPrefs().getInt("brightness", 204);
+    return getPrefs().getInt("brightness", 255); // Default to 255 (full brightness)
   }
   void setUserBrightness(int brightness) {
     getPrefs().putInt("brightness", brightness);
@@ -50,5 +55,43 @@ Preferences& getPrefs() {
   }
   void setDizzyMode(bool dizzyMode) {
     getPrefs().putBool("dizzymode", dizzyMode);
+  }
+
+  // Auto brightness functions
+  bool getAutoBrightness() {
+    return getPrefs().getBool("autobrightness", true);
+  }
+  void setAutoBrightness(bool autoBrightness) {
+    getPrefs().putBool("autobrightness", autoBrightness);
+  }
+
+  // Accelerometer functions
+  bool getAccelerometerEnabled() {
+    return getPrefs().getBool("accelerometer", true);
+  }
+  void setAccelerometerEnabled(bool enabled) {
+    getPrefs().putBool("accelerometer", enabled);
+  }
+
+  // Aurora mode functions
+  bool getAuroraMode() {
+    return getPrefs().getBool("auroramode", true);
+  }
+  void setAuroraMode(bool enabled) {
+    getPrefs().putBool("auroramode", enabled);
+  }
+
+  uint8_t getLastView() {
+    return getPrefs().getUChar(KEY_LAST, 0);
+  }
+  
+  void saveLastView(uint8_t v) {
+    getPrefs().putUChar(KEY_LAST, v);
+  }
+
+
+  // Clear all preferences - Implement feature to reset controller to default settings
+  void clearPreferences() {
+    getPrefs().clear();
   }
   
