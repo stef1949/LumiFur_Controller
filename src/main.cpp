@@ -25,6 +25,7 @@
 #include <NimBLEDevice.h>
 
 #include <vector> //For chunking example
+#include <cstring>
 
 //#define PIXEL_COLOR_DEPTH_BITS 16 // 16 bits per pixel
 
@@ -91,6 +92,23 @@ const int minBlinkDuration = 300; // Minimum time for a full blink (ms)
 const int maxBlinkDuration = 800; // Maximum time for a full blink (ms)
 const int minBlinkDelay = 250;   // Minimum time between blinks (ms)
 const int maxBlinkDelay = 5000;   // Maximum time between blinks (ms)
+
+float globalBrightnessScale = 0.0f;
+uint16_t globalBrightnessScaleFixed = 256;
+bool facePlasmaDirty = true;
+
+inline void updateGlobalBrightnessScale(uint8_t brightness) {
+    globalBrightnessScale = brightness / 255.0f;
+    globalBrightnessScaleFixed = static_cast<uint16_t>((static_cast<uint32_t>(brightness) * 256u + 127u) / 255u);
+    facePlasmaDirty = true;
+}
+
+inline void setBlinkProgress(int newValue) {
+    if (blinkProgress != newValue) {
+        facePlasmaDirty = true;
+    }
+    blinkProgress = newValue;
+}
 
 // Eye bounce effect variables
 bool isEyeBouncing = false;
@@ -227,6 +245,7 @@ void wakeFromSleepMode() {
 
   // Restore normal brightness
   dma_display->setBrightness8(userBrightness);
+  updateGlobalBrightnessScale(userBrightness);
 
   lastActivityTime = millis(); // Reset activity timer
 
@@ -406,6 +425,7 @@ class ConfigCallbacks : public NimBLECharacteristicCallbacks {
         } else {
              Serial.println("Auto brightness has been DISABLED. Applying user-set brightness.");
              dma_display->setBrightness8(userBrightness);
+             updateGlobalBrightnessScale(userBrightness);
              Serial.printf("Applied manual brightness: %u\n", userBrightness);
          }
       }
@@ -428,6 +448,7 @@ class BrightnessCallbacks : public NimBLECharacteristicCallbacks {
       // ADDED: Apply brightness immediately if auto-brightness is off
       if (!autoBrightnessEnabled) {
         dma_display->setBrightness8(userBrightness);
+        updateGlobalBrightnessScale(userBrightness);
         Serial.printf("Applied manual brightness: %u\n", userBrightness);
       }
       Serial.printf("Brightness set to %u\n", userBrightness);
@@ -531,10 +552,7 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
     const uint8_t t2 = static_cast<uint8_t>(t >> 1);
     const uint8_t t3 = static_cast<uint8_t>(((effectiveTimeFixed / 3U) >> 8) & 0xFF);
 
-    uint16_t brightnessScale = static_cast<uint16_t>(globalBrightnessScale * 256.0f + 0.5f);
-    if (brightnessScale > 256) {
-        brightnessScale = 256;
-    }
+    const uint16_t brightnessScale = globalBrightnessScaleFixed;
 
     for (int j = 0; j < height; ++j)
     {
@@ -578,6 +596,9 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
 void updateIdleHoverAnimation() {
     const uint32_t currentMs = millis();
 
+    const int prevIdleYOffset = idleEyeYOffset;
+    const int prevIdleXOffset = idleEyeXOffset;
+
     if (IDLE_HOVER_PERIOD_MS_Y > 0) {
         const uint32_t phaseY = (static_cast<uint64_t>(currentMs % IDLE_HOVER_PERIOD_MS_Y) << 16) / IDLE_HOVER_PERIOD_MS_Y;
         const int32_t sinY = sin16(static_cast<uint16_t>(phaseY));
@@ -593,50 +614,67 @@ void updateIdleHoverAnimation() {
     } else {
         idleEyeXOffset = 0;
     }
+
+    if (idleEyeYOffset != prevIdleYOffset || idleEyeXOffset != prevIdleXOffset) {
+        facePlasmaDirty = true;
+    }
 }
 
 
 
 // NEW: Update eye bounce animation (Modified for multiple bounces)
 void updateEyeBounceAnimation() {
+    int newOffset = currentEyeYOffset;
+
     if (!isEyeBouncing) {
-        currentEyeYOffset = 0; // Ensure offset is zero when not bouncing
-        eyeBounceCount = 0;    // Reset count when not bouncing
+        eyeBounceCount = 0;
+        if (newOffset != 0) {
+            newOffset = 0;
+            facePlasmaDirty = true;
+        }
+        currentEyeYOffset = newOffset;
         return;
     }
 
     unsigned long elapsed = millis() - eyeBounceStartTime;
 
-if (elapsed >= EYE_BOUNCE_DURATION) {
-        eyeBounceCount++; // Increment bounce counter
+    if (elapsed >= EYE_BOUNCE_DURATION) {
+        eyeBounceCount++;
         if (eyeBounceCount >= MAX_EYE_BOUNCES) {
             isEyeBouncing = false;
-            currentEyeYOffset = 0;
-            eyeBounceCount = 0; // Reset for next trigger
+            newOffset = 0;
+            eyeBounceCount = 0;
 
-            // Revert to the previous view (NEW)
-            if (currentView == 17) { // Only revert if we are in the "Spooked" view due to bounce
-                currentView = viewBeforeEyeBounce; // <<< MODIFIED: Revert using the dedicated variable
-                saveLastView(currentView); // Persist the view change
+            if (currentView == 17) {
+                currentView = viewBeforeEyeBounce;
+                saveLastView(currentView);
                 Serial.printf("Eye bounce finished. Reverting to view: %d\n", currentView);
                 if (deviceConnected) {
-                    xTaskNotifyGive(bleNotifyTaskHandle); // Notify BLE client of view change
+                    xTaskNotifyGive(bleNotifyTaskHandle);
                 }
             }
+
+            if (currentEyeYOffset != newOffset) {
+                facePlasmaDirty = true;
+            }
+            currentEyeYOffset = newOffset;
             return;
         } else {
-            // Start the next bounce in the sequence
-            eyeBounceStartTime = millis(); // Reset start time for the new bounce
-            elapsed = 0; // Reset elapsed time for the new bounce calculation
+            eyeBounceStartTime = millis();
+            elapsed = 0;
         }
     }
 
-    // Simple "down then up" triangular wave for the current bounce:
-    unsigned long halfDuration = EYE_BOUNCE_DURATION / 2;
-    if (elapsed < halfDuration) { // Going down
-        currentEyeYOffset = map(elapsed, 0, halfDuration, 0, EYE_BOUNCE_AMPLITUDE);
-    } else { // Going back up
-        currentEyeYOffset = map(elapsed, halfDuration, EYE_BOUNCE_DURATION, EYE_BOUNCE_AMPLITUDE, 0);
+    const unsigned long halfDuration = EYE_BOUNCE_DURATION / 2;
+    if (elapsed < halfDuration) {
+        newOffset = map(elapsed, 0, halfDuration, 0, EYE_BOUNCE_AMPLITUDE);
+    } else {
+        newOffset = map(elapsed, halfDuration, EYE_BOUNCE_DURATION, EYE_BOUNCE_AMPLITUDE, 0);
+    }
+
+    if (newOffset != currentEyeYOffset) {
+        currentEyeYOffset = newOffset;
+        facePlasmaDirty = true;
     }
 }
 void drawPlasmaFace() {
@@ -674,12 +712,14 @@ void updatePlasmaFace()
   {
     lastUpdate = now;
     time_counter += plasmaSpeed; // Update plasma animation counter
+    facePlasmaDirty = true;
   }
 
   if (now - lastPaletteChange > paletteInterval)
   {
     lastPaletteChange = now;
     currentPalette = palettes[random(0, sizeof(palettes) / sizeof(palettes[0]))];
+    facePlasmaDirty = true;
   }
 }
 
@@ -777,7 +817,7 @@ void updateBlinkAnimation() {
       // Safety and validity checks: terminate blink if too much time has elapsed or if phase durations are invalid.
       if (elapsed > blinkState.durationMs * 2 || totalDuration == 0) {
           isBlinking = false;
-          blinkProgress = 0;
+          setBlinkProgress(0);
           lastEyeBlinkTime = now;
           nextBlinkDelay = random(minBlinkDelay, maxBlinkDelay);
           return;
@@ -788,24 +828,27 @@ void updateBlinkAnimation() {
       const unsigned long phase2End = closeDur + holdDur;     // End of hold phase.
 
       if (elapsed < phase1End) {
-          // Closing phase with ease-in.
-          const float progress = static_cast<float>(elapsed) / closeDur;
-          blinkProgress = 100 * easeInQuad(progress);
+          // Closing phase with integer ease-in.
+          const unsigned long scaledProgress = (elapsed * 100UL) / closeDur;
+          const unsigned long eased = (scaledProgress * scaledProgress + 50UL) / 100UL;
+          setBlinkProgress(static_cast<int>(eased > 100UL ? 100UL : eased));
       }
       else if (elapsed < phase2End) {
           // Hold phase – full blink.
-          blinkProgress = 100;
+          setBlinkProgress(100);
       }
       else if (elapsed < totalDuration) {
-          // Opening phase with ease-out.
+          // Opening phase with integer ease-out.
           const unsigned long openElapsed = elapsed - phase2End;
-          const float progress = static_cast<float>(openElapsed) / openDur;
-          blinkProgress = 100 * (1.0f - easeOutQuad(progress));
+          const unsigned long scaledProgress = (openElapsed * 100UL) / openDur;
+          const unsigned long inv = (scaledProgress > 100UL) ? 0UL : (100UL - scaledProgress);
+          const unsigned long eased = 100UL - ((inv * inv + 50UL) / 100UL);
+          setBlinkProgress(static_cast<int>(eased > 100UL ? 100UL : eased));
       }
       else {
           // Blink cycle complete; reset variables.
           isBlinking = false;
-          blinkProgress = 0;
+          setBlinkProgress(0);
           lastEyeBlinkTime = now;
           nextBlinkDelay = random(minBlinkDelay, maxBlinkDelay);
       }
@@ -937,10 +980,6 @@ void blinkingEyes() {
   {
     drawPlasmaXbm(2 + final_x_offset_right, 0 + final_y_offset, 24, 16, slanteyes, 0, 1.0);      // Right eye
     drawPlasmaXbm(102 + final_x_offset_left, 0 + final_y_offset, 24, 16, slanteyesL, 128, 1.0); // Left eye (phase offset)
-  }
-  else if (currentView == 9)
-  {
-
   }
   else if (currentView == 17)
   {
@@ -1094,23 +1133,46 @@ void baseFace() {
     drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 0, 1.0);     // Right eye
     drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0); // Left eye (phase offset)
   }
-  if (currentView > 3)
-  { // Only draw blush effect for face views, not utility views
-   if (blushState != BLUSH_INACTIVE) { // Only draw if blush is active
-        drawBlush();
-    }
-  }
+
   drawPlasmaXbm(56, 4 + final_y_offset, 8, 8, nose, 64, 2.0);
   drawPlasmaXbm(64, 4 + final_y_offset, 8, 8, noseL, 64, 2.0);
+
+  if (currentView > 3)
+  { // Only draw blush effect for face views, not utility views
+    if (blushState != BLUSH_INACTIVE) { // Only draw if blush is active
+      drawBlush();
+    }
+  }
+
+  facePlasmaDirty = false;
 }
 
 void patternPlasma() {
+  static uint16_t paletteLUT[256];
+  static CRGBPalette16 cachedPalette;
+  static uint16_t cachedBrightnessScale = 0;
+  static bool paletteLUTValid = false;
+
+  if (!paletteLUTValid || cachedBrightnessScale != globalBrightnessScaleFixed || std::memcmp(&cachedPalette, &currentPalette, sizeof(CRGBPalette16)) != 0) {
+    const uint16_t scale = globalBrightnessScaleFixed;
+    for (int i = 0; i < 256; ++i) {
+      CRGB color = ColorFromPalette(currentPalette, static_cast<uint8_t>(i));
+      color.r = static_cast<uint8_t>((static_cast<uint16_t>(color.r) * scale + 128) >> 8);
+      color.g = static_cast<uint8_t>((static_cast<uint16_t>(color.g) * scale + 128) >> 8);
+      color.b = static_cast<uint8_t>((static_cast<uint16_t>(color.b) * scale + 128) >> 8);
+      paletteLUT[i] = dma_display->color565(color.r, color.g, color.b);
+    }
+    cachedPalette = currentPalette;
+    cachedBrightnessScale = scale;
+    paletteLUTValid = true;
+  }
+
   // Pre-calculate values that only depend on time_counter
   // These are constant for the entire frame draw
   const uint8_t wibble = sin8(time_counter);
   // Pre-calculate the cosine term and the division by 8 (as shift)
   // Note: cos8 argument is uint8_t, so -time_counter wraps around correctly.
-  const uint8_t cos8_val_shifted = cos8((uint8_t)(-time_counter)) >> 3; // Calculate cos8(-t)/8 once
+  const uint8_t cos8_val_shifted = cos8(static_cast<uint8_t>(-time_counter)) >> 3; // Calculate cos8(-t)/8 once
   const uint16_t time_val = time_counter; // Use a local copy for calculations
   const uint16_t term2_factor = 128 - wibble; // Calculate 128 - sin8(t) once
 
@@ -1135,35 +1197,12 @@ void patternPlasma() {
           v += cos16(y * term2_factor + time_val); // cos16(y*(128-wibble) + t)
           v += sin16(y * term3_x_factor);          // sin16(y * (x * cos8(-t) >> 3))
 
-          // Get color from palette using the upper 8 bits of 'v'
-          // The >> 8 effectively scales and wraps the 16-bit value to 8 bits for palette lookup
-          currentColor = ColorFromPalette(currentPalette, (uint8_t)(v >> 8));
-
-          // Draw the pixel using RGB565 format directly if possible
-          // This is often faster than drawPixelRGB888 as it might avoid internal conversion.
-          uint16_t color565 = dma_display->color565(currentColor.r, currentColor.g, currentColor.b);
+          const uint16_t color565 = paletteLUT[static_cast<uint8_t>(v >> 8)];
           dma_display->drawPixel(x, y, color565);
-
-          // Original drawing call (keep for reference or if color565 doesn't work as expected)
-          // dma_display->drawPixelRGB888(x, y, currentColor.r, currentColor.g, currentColor.b);
       }
   }
-
-  // Increment counters (outside the loops)
-  ++time_counter;
-  // ++cycles; // If 'cycles' is purely for palette change, handle it there
-  // ++fps; // FPS should be calculated globally in the main loop, not here per-effect
-
-  // Palette changing logic (moved cycle counting here)
-  static uint16_t plasma_cycles = 0; // Use a static local counter for this effect
-  plasma_cycles++;
-  if (plasma_cycles >= 1024) {
-      // time_counter = 0; // Resetting time_counter might make the animation jump? Optional.
-      plasma_cycles = 0; // Reset cycle counter for this effect
-      // Select next palette randomly
-      currentPalette = palettes[random(0, sizeof(palettes) / sizeof(palettes[0]))];
-  }
 }
+
 
 void displaySleepMode() {
   static unsigned long lastBlinkTime = 0;
@@ -1198,6 +1237,7 @@ void displaySleepMode() {
     // Apply breathing effect to overall brightness
     uint8_t currentBrightness = sleepBrightness * brightness;
     dma_display->setBrightness8(currentBrightness);
+    updateGlobalBrightnessScale(currentBrightness);
   }
 
   dma_display->clearScreen();
@@ -1453,58 +1493,67 @@ void updateAndDrawFullScreenSpiral(SpiralColorMode colorMode) { // Added colorMo
     // Update animation parameters (rotation, color scroll - color scroll only if palette mode)
     fullScreenSpiralAngle += FULL_SPIRAL_ROTATION_SPEED_RAD_PER_UPDATE;
     if (fullScreenSpiralAngle >= TWO_PI) fullScreenSpiralAngle -= TWO_PI;
-    
+
     if (colorMode == SPIRAL_COLOR_PALETTE) { // Only update color offset if using palette
         fullScreenSpiralColorOffset += FULL_SPIRAL_COLOR_SCROLL_SPEED;
     }
 
     const int centerX = PANE_WIDTH / 2;
     const int centerY = PANE_HEIGHT / 2;
-    const float max_r_squared = powf(hypotf(PANE_WIDTH / 2.0f, PANE_HEIGHT / 2.0f) * 1.1f, 2);
-    const float delta_theta_arm = 0.05f;
-    float min_r_to_draw = 1.2f;
+    const float maxRadiusSquared = powf(hypotf(PANE_WIDTH / 2.0f, PANE_HEIGHT / 2.0f) * 1.1f, 2.0f);
+    const float deltaTheta = 0.05f;
+    const float growthFactor = expf(LOG_SPIRAL_B_COEFF * deltaTheta);
+    const float rotCos = cosf(deltaTheta);
+    const float rotSin = sinf(deltaTheta);
 
-    for (float theta_arm = 0.0f; ; theta_arm += delta_theta_arm) {
-        float r = LOG_SPIRAL_A_COEFF * expf(LOG_SPIRAL_B_COEFF * theta_arm);
+    float radius = LOG_SPIRAL_A_COEFF;
+    float sinAngle = sinf(fullScreenSpiralAngle);
+    float cosAngle = cosf(fullScreenSpiralAngle);
 
-        if ((r * r) > max_r_squared) {
-            break;
-        }
-        if (theta_arm > 20 * TWO_PI) {
-             break;
-        }
+    float x = radius * cosAngle;
+    float y = radius * sinAngle;
 
-        float display_angle_rad = theta_arm + fullScreenSpiralAngle;
-        float cos_val = cosf(display_angle_rad);
-        float sin_val = sinf(display_angle_rad);
+    float colorPhase = fullScreenSpiralColorOffset;
+    const float colorPhaseStep = deltaTheta * SPIRAL_ARM_COLOR_FACTOR;
 
-        int x = static_cast<int>(centerX + r * cos_val + 0.5f);
-        int y = static_cast<int>(centerY + r * sin_val + 0.5f);
+    const int maxSteps = 512;
+    for (int step = 0; step < maxSteps; ++step) {
+        const int drawX = static_cast<int>(centerX + x + 0.5f);
+        const int drawY = static_cast<int>(centerY + y + 0.5f);
 
-        uint16_t pixel_color; // Declare pixel_color
-
+        uint16_t pixel_color;
         if (colorMode == SPIRAL_COLOR_WHITE) {
-            pixel_color = dma_display->color565(255, 255, 255); // Pure white
-        } else // SPIRAL_COLOR_PALETTE (default)
-        {
-            uint8_t color_index = static_cast<uint8_t>(theta_arm * SPIRAL_ARM_COLOR_FACTOR + fullScreenSpiralColorOffset);
+            pixel_color = dma_display->color565(255, 255, 255);
+        } else {
+            const uint8_t color_index = static_cast<uint8_t>(colorPhase);
             CRGB crgb_color = ColorFromPalette(RainbowColors_p, color_index, 255, LINEARBLEND);
             pixel_color = dma_display->color565(crgb_color.r, crgb_color.g, crgb_color.b);
         }
-        
-        // Thickness drawing (same optimized logic as before)
+
         if (SPIRAL_THICKNESS_RADIUS == 0) {
-            if (x >= 0 && x < PANE_WIDTH && y >= 0 && y < PANE_HEIGHT) {
-                dma_display->drawPixel(x, y, pixel_color);
+            if (drawX >= 0 && drawX < PANE_WIDTH && drawY >= 0 && drawY < PANE_HEIGHT) {
+                dma_display->drawPixel(drawX, drawY, pixel_color);
             }
-        } else { 
-            int side_length = SPIRAL_THICKNESS_RADIUS * 2 + 1;
-            int start_x = x - SPIRAL_THICKNESS_RADIUS;
-            int start_y = y - SPIRAL_THICKNESS_RADIUS;
+        } else {
+            const int side_length = SPIRAL_THICKNESS_RADIUS * 2 + 1;
+            const int start_x = drawX - SPIRAL_THICKNESS_RADIUS;
+            const int start_y = drawY - SPIRAL_THICKNESS_RADIUS;
             dma_display->fillRect(start_x, start_y, side_length, side_length, pixel_color);
+        }
+
+        colorPhase += colorPhaseStep;
+
+        const float rotatedX = x * rotCos - y * rotSin;
+        const float rotatedY = x * rotSin + y * rotCos;
+        x = rotatedX * growthFactor;
+        y = rotatedY * growthFactor;
+
+        if ((x * x + y * y) > maxRadiusSquared) {
+            break;
         }
     }
 }
+
 
 
 void setup() {
@@ -1522,6 +1571,8 @@ void setup() {
   Serial.println("*****************************************************");
   Serial.println(" ");
   Serial.println(" ");
+
+  updateGlobalBrightnessScale(userBrightness);
 
 #if DEBUG_MODE
   Serial.println("DEBUG MODE ENABLED");
@@ -1709,10 +1760,12 @@ mxconfig.double_buff = true; // <------------- Turn on double buffer
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   dma_display->begin();
   dma_display->setBrightness8(userBrightness);
+  updateGlobalBrightnessScale(userBrightness);
 #else
   chain = new MatrixPanel_I2S_DMA(mxconfig);
   chain->begin();
   chain->setBrightness8(userBrightness);
+  updateGlobalBrightnessScale(userBrightness);
   // create VirtualDisplay object based on our newly created dma_display object
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
 #endif
@@ -2071,12 +2124,14 @@ static unsigned long lastSoundTime = 0;      // When the mouth was last consider
 
 void updateMouthMovement() {
     unsigned long now = millis();
+    const bool initialMouthOpen = mouthOpen;
     size_t bytesRead = 0;
 
     esp_err_t err = i2s_read(
         I2S_PORT,
         mouthBuf,
         sizeof(mouthBuf),
+
         &bytesRead,
         pdMS_TO_TICKS(10) // Using a small timeout instead of portMAX_DELAY to prevent blocking indefinitely
     );
@@ -2105,6 +2160,9 @@ void updateMouthMovement() {
         Serial.printf(">mic_maw_brightness:%u\n", mawBrightness);
         Serial.printf(">mic_mouth_open:%d\n", mouthOpen ? 1 : 0);
         #endif
+        if (mouthOpen != initialMouthOpen) {
+            facePlasmaDirty = true;
+        }
         return;
         
     }
@@ -2122,6 +2180,9 @@ void updateMouthMovement() {
         Serial.printf(">mic_smoothed_signal:%.0f\n", smoothedSignalLevel);
         # endif
         // ... (rest of teleplot for no samples)
+        if (mouthOpen != initialMouthOpen) {
+            facePlasmaDirty = true;
+        }
         return;
     }
 
@@ -2204,6 +2265,10 @@ void updateMouthMovement() {
     Serial.printf(">mic_maw_brightness:%u\n", mawBrightness);
     Serial.printf(">mic_mouth_open:%d\n", mouthOpen ? 1 : 0);
     # endif
+
+    if (mouthOpen != initialMouthOpen) {
+        facePlasmaDirty = true;
+    }
 }
 // Runs one frame of the Pixel Dust animation
 void PixelDustEffect() {
@@ -2315,6 +2380,7 @@ void displayCurrentView(int view) {
 
   if (view != previousViewLocal)
   { // Check if the view has changed
+    facePlasmaDirty = true;
     if (view == 5)
     {
       // Reset fade logic when entering the blush view
@@ -2562,6 +2628,7 @@ void enterSleepMode() {
   sleepModeActive = true;
   preSleepView = currentView; // Save current view
   dma_display->setBrightness8(sleepBrightness); // Lower display brightness
+  updateGlobalBrightnessScale(sleepBrightness);
 
   reduceCPUSpeed(); // Reduce CPU speed for power saving
 

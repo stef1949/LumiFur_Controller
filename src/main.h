@@ -185,7 +185,9 @@ int sliderBrightness = map(userBrightness, 1, 255, 1, 100);
 
 // Convert the userBrightness into a scale factor (0.0 to 1.0)
 // Here, we simply divide userBrightness by 255.0 to get a proportion.
-float globalBrightnessScale = userBrightness / 255.0;
+extern float globalBrightnessScale;
+extern uint16_t globalBrightnessScaleFixed;
+void updateGlobalBrightnessScale(uint8_t brightness);
 
 unsigned long lastAmbientUpdateTime = 0;
 const unsigned long ambientUpdateInterval = 500; // update every 500 milliseconds
@@ -246,13 +248,11 @@ void updateAdaptiveBrightness()
   smoothedLux = (luxSmoothingFactor * currentLuxEquivalent) + ((1.0f - luxSmoothingFactor) * smoothedLux);
 
   // --- CRITICAL CALIBRATION SECTION ---
-  int min_brightness_output = 20;   // Min brightness display should go to (e.g., 10-25)
-  int max_brightness_output = 255;  // Max brightness (usually 255)
-  float min_clear_for_map = 50.0f;  // CALIBRATE: Raw clear value for "very dark" (e.g., 20-100)
-  float max_clear_for_map = 700.0f; // CALIBRATE: Raw clear value for "bright enough for max display brightness"
-                                    // OBSERVE rawClearValue via Serial.print to set this.
-                                    // Example: if typical indoor bright is C=600, set this to ~600-800.
-                                    // If C values are typically 0-2000, then 700 is too low.
+  const int min_brightness_output = userBrightness;   // Fall back to user-set brightness when dark
+  const int max_brightness_output = 255;  // Preserve full-range capability
+  const float min_clear_for_map = 150.0f;  // Adjusted dark threshold
+  const float max_clear_for_map = 1200.0f; // Adjusted bright threshold
+                                    // OBSERVE rawClearValue via Serial.print to refine these.
   // --- END CRITICAL CALIBRATION SECTION ---
 
   long targetBrightnessLong = map(static_cast<long>(smoothedLux),
@@ -267,7 +267,9 @@ void updateAdaptiveBrightness()
   #endif
   if (abs(targetBrightnessCalc - lastBrightness) >= brightnessThreshold)
   {
-    dma_display->setBrightness8(static_cast<uint8_t>(targetBrightnessCalc));
+    uint8_t currentBrightness = static_cast<uint8_t>(targetBrightnessCalc);
+    dma_display->setBrightness8(currentBrightness);
+    updateGlobalBrightnessScale(currentBrightness);
     lastBrightness = targetBrightnessCalc; // Update lastBrightness ONLY when a display change is made
     #if DEBUG_BRIGHTNESS
     Serial.printf(">>>> ADAPT: BRIGHTNESS SET TO %d <<<<\n", targetBrightnessCalc);
@@ -323,6 +325,7 @@ void applyConfigOptions()
   {
     Serial.println("Auto brightness disabled. Applying user-set brightness.");
     dma_display->setBrightness8(userBrightness);
+    updateGlobalBrightnessScale(userBrightness);
     Serial.printf("Applied manual brightness: %u\n", userBrightness);
   }
 
