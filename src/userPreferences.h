@@ -95,5 +95,3 @@ Preferences& getPrefs() {
     getPrefs().clear();
   }
   
-uint8_t getLastView();            // returns 0..totalViews-1 (default 0)
-void    saveLastView(uint8_t v); // store the last selected view
