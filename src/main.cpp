@@ -48,7 +48,7 @@ bool g_accelerometer_initialized = false;
 
 // --- Performance Tuning ---
 // Target ~50-60 FPS. Adjust as needed based on view complexity.
-const unsigned long targetFrameIntervalMillis = 1; // 1000ms / 50 FPS = 20ms per frame
+const unsigned long targetFrameIntervalMillis = 10; // ~100 FPS pacing
 // ---
 
 bool brightnessChanged = false;
@@ -203,10 +203,11 @@ void calculateFPS() {
 void maybeUpdateTemperature() {
   unsigned long lastTempUpdate = 0;
 const unsigned long tempUpdateInterval = 5000; // 5 seconds
-  if (millis() - lastTempUpdate >= tempUpdateInterval) {
+  if (deviceConnected && (millis() - lastTempUpdate >= tempUpdateInterval)) {
     updateTemperature();
     lastTempUpdate = millis();
-  }}
+  }
+}
 
 void displayCurrentView(int view);
 
@@ -510,84 +511,91 @@ void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t c
 uint16_t plasmaSpeed = 2; // Lower = slower animation
 
 void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
-                   uint8_t time_offset = 0, float scale = 5.0, float animSpeed = 0.2f)
+                   uint8_t time_offset = 0, float scale = 5.0f, float animSpeed = 0.2f)
 {
-    // Calculate byte width using bit-shift instead of division
-    int byteWidth = (width + 7) >> 3;
+    const int byteWidth = (width + 7) >> 3;
+    if (byteWidth <= 0) {
+        return;
+    }
 
-    // Scale the time value for animation speed (preserving refresh rate)
-    // Effective time is slowed down when animSpeed < 1.0, and sped up when > 1.0.
-    float effectiveTimeFloat = time_counter * animSpeed;
-    uint8_t t  = (uint8_t) effectiveTimeFloat;
-    uint8_t t2 = (uint8_t)(effectiveTimeFloat / 2);
-    uint8_t t3 = (uint8_t)(effectiveTimeFloat / 3);
-    
-    const float scaleHalf = scale * 0.5f;
-    // Precompute the scaled starting x-coordinate for efficiency
-    const float startX = x * scale;
+    const uint16_t scaleFixed = static_cast<uint16_t>(scale * 256.0f);
+    if (scaleFixed == 0) {
+        return;
+    }
+    const uint16_t scaleHalfFixed = scaleFixed >> 1;
+    int32_t startXFixed = static_cast<int32_t>(x) * static_cast<int32_t>(scaleFixed);
 
-// Precompute values that are reused multiple times within loops
-const float cos8_val_shifted = cos8(t2);
-const float term2_factor = scaleHalf;
-    // Loop over each row of the XBM image
-    for (int j = 0; j < height; j++)
+    const uint16_t animSpeedFixed = static_cast<uint16_t>(animSpeed * 256.0f);
+    const uint32_t effectiveTimeFixed = static_cast<uint32_t>(time_counter) * animSpeedFixed;
+    const uint8_t t = static_cast<uint8_t>(effectiveTimeFixed >> 8);
+    const uint8_t t2 = static_cast<uint8_t>(t >> 1);
+    const uint8_t t3 = static_cast<uint8_t>(((effectiveTimeFixed / 3U) >> 8) & 0xFF);
+
+    uint16_t brightnessScale = static_cast<uint16_t>(globalBrightnessScale * 256.0f + 0.5f);
+    if (brightnessScale > 256) {
+        brightnessScale = 256;
+    }
+
+    for (int j = 0; j < height; ++j)
     {
-        int yj = y + j;
-        float yScale = yj * scale;
-        // Precompute the cos component for this row using t2
-        uint8_t cos_val = cos8(yScale + t2);
-        // Precompute a portion of the third sine term
-        float tempSum = (x + yj) * scaleHalf;
-        // Setup the starting x value for the sin calculation
-        float x_val = startX;
+        const int yj = y + j;
+        const int32_t yScaleFixed = static_cast<int32_t>(yj) * scaleFixed;
+        const uint8_t cos_val = cos8(static_cast<uint8_t>((yScaleFixed >> 8) + t2));
+        int32_t tempFixed = static_cast<int32_t>(x + yj) * scaleHalfFixed;
+        int32_t xFixed = startXFixed;
+        const uint8_t *rowPtr = reinterpret_cast<const uint8_t *>(xbm) + j * byteWidth;
 
-        // Loop over each column
-        for (int i = 0; i < width; i++)
+        for (int i = 0; i < width; ++i)
         {
-            // Use bitwise arithmetic for efficiency
-            int byteIndex = i >> 3;         // same as i / 8
-            int bitMask = 1 << (7 - (i & 7)); // same as (1 << (7 - (i % 8)))
-            
-            if (pgm_read_byte(xbm + j * byteWidth + byteIndex) & bitMask)
+            const int byteIndex = i >> 3;
+            const uint8_t bitMask = static_cast<uint8_t>(1U << (7 - (i & 7)));
+
+            if (rowPtr[byteIndex] & bitMask)
             {
-                // Calculate plasma components with the scaled time value
-                uint8_t sin_val = sin8(x_val + t);
-                uint8_t sin_val2 = sin8(tempSum + i * scaleHalf + t3);
-                uint8_t v = sin_val + cos_val + sin_val2;
+                const uint8_t sin_val = sin8(static_cast<uint8_t>((xFixed >> 8) + t));
+                const uint8_t sin_val2 = sin8(static_cast<uint8_t>((tempFixed >> 8) + t3));
+                const uint8_t v = sin_val + cos_val + sin_val2;
 
-                // Retrieve the color from the palette and apply a brightness scale
-                CRGB color = ColorFromPalette(currentPalette, v + time_offset);
-                color.r = (uint8_t)(color.r * globalBrightnessScale);
-                color.g = (uint8_t)(color.g * globalBrightnessScale);
-                color.b = (uint8_t)(color.b * globalBrightnessScale);
+                const uint8_t paletteIndex = static_cast<uint8_t>(v + time_offset);
+                CRGB color = ColorFromPalette(currentPalette, paletteIndex);
+                const uint16_t scale = brightnessScale;
+                color.r = static_cast<uint8_t>((static_cast<uint16_t>(color.r) * scale + 128) >> 8);
+                color.g = static_cast<uint8_t>((static_cast<uint16_t>(color.g) * scale + 128) >> 8);
+                color.b = static_cast<uint8_t>((static_cast<uint16_t>(color.b) * scale + 128) >> 8);
 
-                // Convert to display format and draw the pixel
-                uint16_t rgb565 = dma_display->color565(color.r, color.g, color.b);
-                dma_display->drawPixel(x + i, yj, rgb565);
+                dma_display->drawPixel(x + i, yj, dma_display->color565(color.r, color.g, color.b));
             }
-            // Increment the scaled x value for the next column
-            x_val += scale;
+
+            xFixed += scaleFixed;
+            tempFixed += scaleHalfFixed;
         }
     }
 }
 
+
+
 // NEW: Update idle eye hover animation
 void updateIdleHoverAnimation() {
- unsigned long current_ms = millis();
+    const uint32_t currentMs = millis();
 
-    // Calculate Y offset (vertical hover)
-    float progress_y = (float)(current_ms % IDLE_HOVER_PERIOD_MS_Y) / IDLE_HOVER_PERIOD_MS_Y; // 0.0 to 1.0
-    float radians_y = progress_y * TWO_PI; // 0 to 2*PI
-    idleEyeYOffset = round(sin(radians_y) * IDLE_HOVER_AMPLITUDE_Y);
+    if (IDLE_HOVER_PERIOD_MS_Y > 0) {
+        const uint32_t phaseY = (static_cast<uint64_t>(currentMs % IDLE_HOVER_PERIOD_MS_Y) << 16) / IDLE_HOVER_PERIOD_MS_Y;
+        const int32_t sinY = sin16(static_cast<uint16_t>(phaseY));
+        idleEyeYOffset = static_cast<int>((sinY * IDLE_HOVER_AMPLITUDE_Y + 16384) >> 15);
+    } else {
+        idleEyeYOffset = 0;
+    }
 
-    // Calculate X offset (horizontal hover) - NEW
-    float progress_x = (float)(current_ms % IDLE_HOVER_PERIOD_MS_X) / IDLE_HOVER_PERIOD_MS_X; // 0.0 to 1.0
-    // To make the X movement slightly out of phase with Y for a more circular/oval path,
-    // you could add a phase shift to radians_x, e.g., + PI/2 for circular if periods were same.
-    // With different periods, it will naturally create a complex path.
-    float radians_x = progress_x * TWO_PI; // + (PI / 2.0f) if you want X to lead Y by 90 degrees if periods were same
-    idleEyeXOffset = round(cos(radians_x) * IDLE_HOVER_AMPLITUDE_X); // Using cos for X and sin for Y gives a circular/elliptical path
+    if (IDLE_HOVER_PERIOD_MS_X > 0) {
+        const uint32_t phaseX = (static_cast<uint64_t>(currentMs % IDLE_HOVER_PERIOD_MS_X) << 16) / IDLE_HOVER_PERIOD_MS_X;
+        const int32_t cosX = cos16(static_cast<uint16_t>(phaseX));
+        idleEyeXOffset = static_cast<int>((cosX * IDLE_HOVER_AMPLITUDE_X + 16384) >> 15);
+    } else {
+        idleEyeXOffset = 0;
+    }
 }
+
+
 
 // NEW: Update eye bounce animation (Modified for multiple bounces)
 void updateEyeBounceAnimation() {
@@ -825,29 +833,51 @@ void drawRotatedBitmap(int16_t x, int16_t y, const uint8_t *bitmap,
                        uint16_t w, uint16_t h, float cosA, float sinA,
                        uint16_t color)
 {
-  const int16_t cx = w / 2, cy = h / 2; // Center point
+    const int16_t cx = w / 2;
+    const int16_t cy = h / 2;
+    const int byteWidth = (w + 7) >> 3;
 
-  for (int16_t j = 0; j < h; j++)
-  {
-    for (int16_t i = 0; i < w; i++)
+    const int32_t cosFixed = static_cast<int32_t>(cosA * 65536.0f);
+    const int32_t sinFixed = static_cast<int32_t>(sinA * 65536.0f);
+
+    for (uint16_t j = 0; j < h; ++j)
     {
-      if (pgm_read_byte(&bitmap[j * ((w + 7) / 8) + (i / 8)]) & (1 << (7 - (i % 8))))
-      {
-        // Calculate rotated position
-        int16_t dx = i - cx;
-        int16_t dy = j - cy;
-        int16_t newX = x + lround(dx * cosA - dy * sinA);
-        int16_t newY = y + lround(dx * sinA + dy * cosA);
+        const int16_t dy = static_cast<int16_t>(j) - cy;
+        int32_t baseXFixed = (static_cast<int32_t>(-cx) * cosFixed) - (static_cast<int32_t>(dy) * sinFixed);
+        int32_t baseYFixed = (static_cast<int32_t>(-cx) * sinFixed) + (static_cast<int32_t>(dy) * cosFixed);
 
-        // Boundary check and draw
-        if (newX >= 0 && newX < PANE_WIDTH && newY >= 0 && newY < PANE_HEIGHT)
+        baseXFixed += static_cast<int32_t>(x) << 16;
+        baseYFixed += static_cast<int32_t>(y) << 16;
+
+        int32_t pixelXFixed = baseXFixed;
+        int32_t pixelYFixed = baseYFixed;
+        uint8_t currentByte = 0;
+
+        for (uint16_t i = 0; i < w; ++i)
         {
-          dma_display->drawPixel(newX, newY, color);
+            if ((i & 7U) == 0U)
+            {
+                currentByte = pgm_read_byte(&bitmap[j * byteWidth + (i >> 3)]);
+            }
+
+            if (currentByte & (0x80U >> (i & 7U)))
+            {
+                const int16_t newX = static_cast<int16_t>(pixelXFixed >> 16);
+                const int16_t newY = static_cast<int16_t>(pixelYFixed >> 16);
+
+                if (newX >= 0 && newX < PANE_WIDTH && newY >= 0 && newY < PANE_HEIGHT)
+                {
+                    dma_display->drawPixel(newX, newY, color);
+                }
+            }
+
+            pixelXFixed += cosFixed;
+            pixelYFixed += sinFixed;
         }
-      }
     }
-  }
 }
+
+
 
 void updateRotatingSpiral() {
   static unsigned long lastUpdate = 0;
@@ -2067,7 +2097,7 @@ void updateMouthMovement() {
         mawBrightness = 20; // Minimum brightness
 
         // --- TELEPLOT for no data/error ---
-        #if DEBUG_MODE
+        #if DEBUG_MICROPHONE
         Serial.printf(">mic_avg_abs_signal:0\n");
         Serial.printf(">mic_smoothed_signal:%.0f\n", smoothedSignalLevel);
         Serial.printf(">mic_ambient_noise:%.0f\n", ambientNoiseLevel);
@@ -2166,7 +2196,7 @@ void updateMouthMovement() {
 
 
     // --- TELEPLOT LINES ---
-    #if DEBUG_MODE
+    #if DEBUG_MICROPHONE 
     Serial.printf(">mic_avg_abs_signal:%.0f\n", currentAvgAbsSignal);
     Serial.printf(">mic_smoothed_signal:%.0f\n", smoothedSignalLevel);
     Serial.printf(">mic_ambient_noise:%.0f\n", ambientNoiseLevel);
@@ -2361,32 +2391,27 @@ void displayCurrentView(int view) {
   case 4: // Normal
     baseFace();
     updatePlasmaFace();
-    updateBlinkAnimation(); // Update blink animation progress
     //delay(10);              // Short delay for smoother animation
     break;
 
   case 5: // Blush with fade in effect
     baseFace();
     updatePlasmaFace();
-    updateBlinkAnimation(); // Update blink animation progress
     break;
 
   case 6: // Dialated pupils
     baseFace();
     updatePlasmaFace();
-    updateBlinkAnimation(); // Update blink animation progress
     break;
 
   case 7: // X eyes
     baseFace();
     updatePlasmaFace();
-    updateBlinkAnimation(); // Update blink animation progress
     break;
 
   case 8: // Slant eyes
     baseFace();
     updatePlasmaFace();
-    updateBlinkAnimation(); // Update blink animation progress
     break;
 
   case 9: // Spiral eyes
@@ -2398,13 +2423,11 @@ void displayCurrentView(int view) {
   case 10: // Plasma bitmap test
     drawPlasmaFace();
     updatePlasmaFace();
-    updateBlinkAnimation();
     break;
 
   case 11: // UwU eyes
     baseFace();
     updatePlasmaFace();
-    updateBlinkAnimation(); // Update blink animation progress
     break;
 
   case 12: // Starfield
@@ -2449,7 +2472,6 @@ void displayCurrentView(int view) {
   case 17: // Circle eyes
     baseFace();
     updatePlasmaFace();
-    updateBlinkAnimation(); // Update blink animation progress
     break;
 case 18: //Spiral view
     updateAndDrawFullScreenSpiral(SPIRAL_COLOR_PALETTE); // Call with palette mode
@@ -2467,7 +2489,8 @@ case 19:
   }
   // Only flip buffer if not spiral view (spiral handles its own flip)
   // if (view != 9)
-/*
+
+#ifdef DEBUG_VIEWS
   // --- Begin FPS counter overlay ---
   static unsigned long lastFpsTime = 0;
   static int frameCount = 0;
@@ -2488,7 +2511,7 @@ case 19:
   dma_display->setCursor(37, 5); // Adjust position
   dma_display->print(fpsText);
   // --- End FPS counter overlay ---
-*/
+#endif
 
   if (!sleepModeActive) {
     dma_display->flipDMABuffer();
@@ -2739,7 +2762,7 @@ void loop() {
         // Manual brightness is applied immediately on BLE write if autoBrightness is off.
 
         // --- Update Animation States ---
-        updateBlinkAnimation(); // Update blink animation progress
+        updateBlinkAnimation(); // Update blink animation once per loop
         updateEyeBounceAnimation(); // NEW: Update eye bounce animation progress
         updateIdleHoverAnimation();   // NEW: Update idle eye hover animation progress
         
@@ -2790,3 +2813,4 @@ if (currentView == 2 || currentView == 10) {
 }
 */
 }
+

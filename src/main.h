@@ -36,8 +36,10 @@ bool configApplyAccelerometer = true;
 bool configApplyConstantColor = false; // Variable to track constant color application
 
 ////////////////////// DEBUG MODE //////////////////////
-#define DEBUG_MODE 0 // Set to 1 to enable debug outputs
-
+#define DEBUG_MODE 1 // Set to 1 to enable debug outputs
+#define DEBUG_MICROPHONE 0 // Set to 1 to enable microphone debug outputs
+#define DEBUG_ACCELEROMETER 0 // Set to 1 to enable accelerometer debug outputs
+#define DEBUG_BRIGHTNESS 0 // Set to 1 to enable brightness debug outputs
 #if DEBUG_MODE
 #define DEBUG_BLE
 #define DEBUG_VIEWS
@@ -222,10 +224,14 @@ uint16_t getRawClearChannelValue()
   {
     uint16_t r, g, b, c;
     apds.getColorData(&r, &g, &b, &c);
+    #if DEBUG_BRIGHTNESS
     Serial.print("Ambient light level (clear channel): ");
     lastKnownClearValue = c;
     Serial.println(c);
-return c; // Return the raw clear channel value
+    #else
+    lastKnownClearValue = c; // Update last known good value
+    #endif
+    return c; // Return the raw clear channel value
   } else {
         return lastKnownClearValue; // Return the last good value if current not available
     }
@@ -255,15 +261,17 @@ void updateAdaptiveBrightness()
                                   min_brightness_output,
                                   max_brightness_output);
   int targetBrightnessCalc = constrain(static_cast<int>(targetBrightnessLong), min_brightness_output, max_brightness_output);
-
+  #if DEBUG_BRIGHTNESS
   Serial.printf("ADAPT: RawC=%u, SmoothC=%.1f, TargetBr=%d, LastBr=%d, Thr=%d\n",
                 rawClearValue, smoothedLux, targetBrightnessCalc, lastBrightness, brightnessThreshold); // Corrected variable name
-
+  #endif
   if (abs(targetBrightnessCalc - lastBrightness) >= brightnessThreshold)
   {
     dma_display->setBrightness8(static_cast<uint8_t>(targetBrightnessCalc));
     lastBrightness = targetBrightnessCalc; // Update lastBrightness ONLY when a display change is made
+    #if DEBUG_BRIGHTNESS
     Serial.printf(">>>> ADAPT: BRIGHTNESS SET TO %d <<<<\n", targetBrightnessCalc);
+    #endif
   }
   else
   {
