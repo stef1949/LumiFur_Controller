@@ -25,9 +25,9 @@
 #define BAUD_RATE 115200 // serial debug port baud rate
 // #define CONFIG_BT_NIMBLE_PINNED_TO_CORE 1 // Pinning NimBLE to core 1
 
-
 // Enum for all available views. This allows for automatic counting.
-enum View {
+enum View
+{
   VIEW_DEBUG_SQUARES,
   VIEW_LOADING_BAR,
   VIEW_PATTERN_PLASMA,
@@ -49,10 +49,10 @@ enum View {
   VIEW_FULLSCREEN_SPIRAL_PALETTE,
   VIEW_FULLSCREEN_SPIRAL_WHITE,
   VIEW_SCROLLING_TEXT,
-  
+
   // This special entry will automatically hold the total number of views.
   // It must always be the last item in the enum.
-  TOTAL_VIEWS 
+  TOTAL_VIEWS
 };
 
 // Global variables to store the accessory settings.
@@ -69,7 +69,6 @@ bool configApplyAuroraMode = false;
 bool configApplyAccelerometer = true;
 bool configApplyConstantColor = false; // Variable to track constant color application
 
-
 /*------------------------------------------------------------------------------
   OTA instances & variables
   ----------------------------------------------------------------------------*/
@@ -80,12 +79,11 @@ uint8_t txValue = 0;
 int bufferCount = 0;
 bool downloadFlag = false;
 
-
 ////////////////////// DEBUG MODE //////////////////////
-#define DEBUG_MODE 1 // Set to 1 to enable debug outputs
-#define DEBUG_MICROPHONE 0 // Set to 1 to enable microphone debug outputs
+#define DEBUG_MODE 1          // Set to 1 to enable debug outputs
+#define DEBUG_MICROPHONE 0    // Set to 1 to enable microphone debug outputs
 #define DEBUG_ACCELEROMETER 0 // Set to 1 to enable accelerometer debug outputs
-#define DEBUG_BRIGHTNESS 0 // Set to 1 to enable brightness debug outputs
+#define DEBUG_BRIGHTNESS 0    // Set to 1 to enable brightness debug outputs
 #if DEBUG_MODE
 #define DEBUG_BLE
 #define DEBUG_VIEWS
@@ -123,8 +121,10 @@ float easeInQuad(float t)
 // Easing functions with bounds checking
 float easeInQuad(float t)
 {
-  if (t < 0.0f) return 0.0f;
-  if (t > 1.0f) return 1.0f;
+  if (t < 0.0f)
+    return 0.0f;
+  if (t > 1.0f)
+    return 1.0f;
   return t * t;
 }
 
@@ -137,8 +137,10 @@ float easeOutQuad(float t)
 
 float easeOutQuad(float t)
 {
-  if (t < 0.0f) return 0.0f;
-  if (t > 1.0f) return 1.0f;
+  if (t < 0.0f)
+    return 0.0f;
+  if (t > 1.0f)
+    return 1.0f;
   return 1.0f - (1.0f - t) * (1.0f - t);
 }
 // non-blocking LED status functions (Neopixel)
@@ -262,13 +264,13 @@ uint8_t targetBrightness = userBrightness;       // target brightness for adapti
 // float ambientLux = 0.0;
 static uint16_t lastKnownClearValue = 0; // Initialize to a sensible default
 float smoothedLux = 50.0f;
-const float luxSmoothingFactor = 0.15f; // Adjust between 0.05 - 0.3
-float currentBrightness = 128.0f; // NEW: Current brightness as a float for smoothing
+const float luxSmoothingFactor = 0.15f;        // Adjust between 0.05 - 0.3
+float currentBrightness = 128.0f;              // NEW: Current brightness as a float for smoothing
 const float brightnessSmoothingFactor = 0.05f; // NEW: How quickly brightness adapts (0.01-0.1)
 int lastBrightness = 0;
 const int brightnessThreshold = 3; // Only update if change > X
 unsigned long lastLuxUpdate = 0;
-const unsigned long luxUpdateInterval = 100;  // NEW: every 100 milliseconds (10Hz) - ADJUST THIS!
+const unsigned long luxUpdateInterval = 100; // NEW: every 100 milliseconds (10Hz) - ADJUST THIS!
 
 void setupAdaptiveBrightness()
 {
@@ -297,13 +299,13 @@ uint16_t getRawClearChannelValue()
     uint16_t r, g, b, c;
     apds.getColorData(&r, &g, &b, &c);
 
-    #if DEBUG_BRIGHTNESS
+#if DEBUG_BRIGHTNESS
     Serial.print("Ambient light level (clear channel): ");
     lastKnownClearValue = c;
     Serial.println(c);
-    #else
+#else
     lastKnownClearValue = c; // Update last known good value
-    #endif
+#endif
     return c; // Return the raw clear channel value
   }
   else
@@ -318,7 +320,8 @@ void updateAdaptiveBrightness()
   if (!autoBrightnessEnabled)
   {
     // Only set brightness if it has changed to avoid unnecessary calls
-    if (lastBrightness != userBrightness) {
+    if (lastBrightness != userBrightness)
+    {
       dma_display->setBrightness8(userBrightness);
       lastBrightness = userBrightness;
 #ifdef DEBUG_BRIGHTNESS
@@ -336,11 +339,11 @@ void updateAdaptiveBrightness()
 
   // --- CRITICAL CALIBRATION SECTION ---
 
-  const int min_brightness_output = userBrightness;   // Fall back to user-set brightness when dark
-  const int max_brightness_output = 255;  // Preserve full-range capability
-  const float min_clear_for_map = 150.0f;  // Adjusted dark threshold
-  const float max_clear_for_map = 1200.0f; // Adjusted bright threshold
-                                    // OBSERVE rawClearValue via Serial.print to refine these.
+  const int min_brightness_output = userBrightness; // Fall back to user-set brightness when dark
+  const int max_brightness_output = 255;            // Preserve full-range capability
+  const float min_clear_for_map = 150.0f;           // Adjusted dark threshold
+  const float max_clear_for_map = 1200.0f;          // Adjusted bright threshold
+                                                    // OBSERVE rawClearValue via Serial.print to refine these.
   // --- END CRITICAL CALIBRATION SECTION ---
 
   long targetBrightnessLong = map(static_cast<long>(smoothedLux),
@@ -350,26 +353,26 @@ void updateAdaptiveBrightness()
                                   max_brightness_output);
   int targetBrightnessCalc = constrain(static_cast<int>(targetBrightnessLong), min_brightness_output, max_brightness_output);
 
-  #if DEBUG_BRIGHTNESS
+#if DEBUG_BRIGHTNESS
   Serial.printf("ADAPT: RawC=%u, SmoothC=%.1f, TargetBr=%d, LastBr=%d, Thr=%d\n",
                 rawClearValue, smoothedLux, targetBrightnessCalc, lastBrightness, brightnessThreshold); // Corrected variable name
-  #endif
+#endif
   if (abs(targetBrightnessCalc - lastBrightness) >= brightnessThreshold)
   {
     uint8_t currentBrightness = static_cast<uint8_t>(targetBrightnessCalc);
     dma_display->setBrightness8(currentBrightness);
     updateGlobalBrightnessScale(currentBrightness);
     lastBrightness = targetBrightnessCalc; // Update lastBrightness ONLY when a display change is made
-    #if DEBUG_BRIGHTNESS
+#if DEBUG_BRIGHTNESS
     Serial.printf(">>>> ADAPT: BRIGHTNESS SET TO %d <<<<\n", targetBrightnessCalc);
-    #endif
+#endif
   }
   else
   {
     // Change is below threshold: keep the previously applied brightness (no-op)
     // No action needed; brightness remains unchanged.
     // lastBrightness remains unchanged because we didn't apply a new value
-#ifdef DEBUG_BRIGHTNESS
+#if DEBUG_BRIGHTNESS
     Serial.printf(">>>> ADAPT: BRIGHTNESS KEPT AT %d <<<<\n", lastBrightness);
 #endif
   }
@@ -527,4 +530,3 @@ int dvdVX2 = 1, dvdVY2 = 1;
 uint16_t dvdColor2;
 
 #endif /* MAIN_H */
-
