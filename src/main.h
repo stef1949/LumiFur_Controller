@@ -367,7 +367,7 @@ void updateAdaptiveBrightness()
   else
   {
     // Change is below threshold: keep the previously applied brightness (no-op)
-    dma_display->setBrightness8(static_cast<uint8_t>(lastBrightness));
+    // No action needed; brightness remains unchanged.
     // lastBrightness remains unchanged because we didn't apply a new value
 #ifdef DEBUG_BRIGHTNESS
     Serial.printf(">>>> ADAPT: BRIGHTNESS KEPT AT %d <<<<\n", lastBrightness);
