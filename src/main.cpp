@@ -139,8 +139,8 @@ BlushState blushState = BLUSH_INACTIVE;
 
 // Blush effect variables
 unsigned long blushStateStartTime = 0;
-const unsigned long fadeInDuration = 1000; // Duration for fade-in (1 second)
-const unsigned long fullDuration = 4000;   // Full brightness time after fade-in (4 seconds)
+const unsigned long fadeInDuration = 2000; // Duration for fade-in (2 seconds)
+const unsigned long fullDuration = 6000;   // Full brightness time after fade-in (6 seconds)
 // Total time from trigger to start fade-out is fadeInDuration + fullDuration = 8 seconds.
 const unsigned long fadeOutDuration = 2000; // Duration for fade-out (2 seconds)
 bool isBlushFadingIn = false;               // Flag to indicate we are in the fade‑in phase
@@ -567,8 +567,11 @@ const float term2_factor = scaleHalf;
                 uint8_t sin_val2 = sin8(tempSum + i * scaleHalf + t3);
                 uint8_t v = sin_val + cos_val + sin_val2;
 
-                // Retrieve the color from the palette
+                // Retrieve the color from the palette and apply a brightness scale
                 CRGB color = ColorFromPalette(currentPalette, v + time_offset);
+                color.r = (uint8_t)(color.r * globalBrightnessScale);
+                color.g = (uint8_t)(color.g * globalBrightnessScale);
+                color.b = (uint8_t)(color.b * globalBrightnessScale);
 
                 // Convert to display format and draw the pixel
                 uint16_t rgb565 = dma_display->color565(color.r, color.g, color.b);
@@ -733,9 +736,6 @@ void updateIdleHoverAnimation() {
     // With different periods, it will naturally create a complex path.
     float radians_x = progress_x * TWO_PI; // + (PI / 2.0f) if you want X to lead Y by 90 degrees if periods were same
     idleEyeXOffset = round(cos(radians_x) * IDLE_HOVER_AMPLITUDE_X); // Using cos for X and sin for Y gives a circular/elliptical path
-    
-    blinkState.holdDuration = 20;
-  blinkState.openDuration = 50;
 }
 
 // NEW: Update eye bounce animation (Modified for multiple bounces)
@@ -2140,7 +2140,8 @@ digitalWrite(MIC_PD_PIN, HIGH);
       NULL,
       1,
       &bleNotifyTaskHandle,
-      CONFIG_BT_NIMBLE_PINNED_TO_CORE);
+      CONFIG_BT_NIMBLE_PINNED_TO_CORE
+    );
 
   // Now spawn the display task pinned to the other core (we'll pick core 1):
   xTaskCreatePinnedToCore(
@@ -2228,7 +2229,7 @@ if (bounced) {
 
 // Define a threshold for microphone amplitude to trigger mouth open/close
 #ifndef MIC_THRESHOLD
-#define MIC_THRESHOLD 300000 // Adjust this value as needed for your microphone sensitivity
+#define MIC_THRESHOLD 450000 // Adjust this value as needed for your microphone sensitivity
 #endif
 
 static uint8_t mawBrightness = 0; // new: scaled 0–255 based on mic level
