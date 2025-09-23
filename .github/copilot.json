@@ -1,0 +1,38 @@
+{
+  "copilot": {
+    "instructions": [
+      ".github/copilot-instructions.md",
+      ".github/copilot-chat-instructions.md"
+    ],
+    "project": {
+      "name": "LumiFur Controller",
+      "type": "embedded-cpp",
+      "platform": "esp32",
+      "framework": "arduino-platformio"
+    },
+    "contexts": [
+      {
+        "pattern": "src/**/*.cpp",
+        "instructions": "Apply embedded C++ patterns with ESP32 constraints"
+      },
+      {
+        "pattern": "src/**/*.h", 
+        "instructions": "Use header-only patterns appropriate for embedded systems"
+      },
+      {
+        "pattern": "test/**/*",
+        "instructions": "Generate Unity or GoogleTest compatible test code"
+      },
+      {
+        "pattern": "platformio.ini",
+        "instructions": "Maintain PlatformIO configuration standards"
+      }
+    ],
+    "features": {
+      "memory_awareness": true,
+      "hardware_constraints": true,
+      "real_time_requirements": true,
+      "power_efficiency": true
+    }
+  }
+}

@@ -61,5 +61,30 @@
   "C_Cpp_Runner.showCompilationTime": false,
   "C_Cpp_Runner.useLinkTimeOptimization": false,
   "C_Cpp_Runner.msvcSecureNoWarnings": false,
-  "codeQL.createQuery.qlPackLocation": "/Users/stephanritchie/Documents/PlatformIO/Projects/LumiFur_Controller"
+  
+  // GitHub Copilot configuration
+  "github.copilot.enable": {
+    "*": true,
+    "yaml": false,
+    "plaintext": false,
+    "markdown": true,
+    "cpp": true,
+    "c": true
+  },
+  "github.copilot.advanced": {
+    "debug.overrideEngine": "codex",
+    "debug.testOverrideProxyUrl": "",
+    "debug.overrideProxyUrl": ""
+  },
+  
+  // PlatformIO specific settings
+  "platformio-ide.useBuiltinPIOCore": true,
+  "platformio-ide.useDevelopmentPIOCore": false,
+  
+  // C/C++ IntelliSense configuration for embedded development
+  "C_Cpp.default.cppStandard": "c++17",
+  "C_Cpp.default.cStandard": "c11",
+  "C_Cpp.default.compilerPath": "",
+  "C_Cpp.default.intelliSenseMode": "gcc-x64",
+  "C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: LLVM, UseTab: Never, IndentWidth: 2, TabWidth: 2, BreakBeforeBraces: Attach }"
 }
