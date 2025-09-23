@@ -28,18 +28,18 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 - 🤝 [Contributing](#contributing)
 - 📜 [License](#license)
 
-## Features ✨
+## ✨ Features
 - Multiple facial expressions (idle, happy, angry, playful, silly, lewd, and more)
 - Smooth blinking animations
 - Bluetooth Low Energy (BLE) connectivity to switch expressions remotely
 - Boot-up animation with scrolling text
   
-## Hardware Requirements 🛠️
+## 🛠️ Hardware Requirements
 - ESP32 development board
 - 2 x Hub75 64x32 LED matrix displays
 - Connecting wires and power supply
   
-## Software Requirements 💻
+## 💻 Software Requirements
 - VSCode with PlatformIO Extension 
 - MatrixPanel-DMA library
 - FastLED Library
@@ -47,7 +47,7 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 - Adafruit GFX Library
 - Adafruit NeoPixel Library
 
-## Installation ⚙️
+## ⚙ Installation
 
 1. Clone the repository:
     ```sh
@@ -73,7 +73,7 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 
 - Check the pin definitions (CLK_PIN, DATA_PIN, CS_PIN) and adjust them to match your setup.
 
-## Usage 📖
+## 📖 Usage
 
 1. Connect your ESP32 to the computer via USB.
 2. Select the correct board and port in the Arduino IDE.
@@ -90,7 +90,7 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 3. Use the LumiFur app to connect to 'LumiFur_Controller'.
 4. Send values between 1 and 8 to change facial expressions.
 
-### Facial Expressions 😃
+### 😃 Facial Expressions
 
 - 1 - Idle Face
 - 2 - Happy Face
@@ -101,7 +101,7 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 - 7 - Death Face
 - 8 - Edgy Face
 
-## GitHub Copilot Integration 🤖
+## 🤖 GitHub Copilot Integration
 
 This project includes comprehensive GitHub Copilot instructions to help you develop more efficiently. The instructions provide context about:
 
@@ -127,8 +127,8 @@ This project includes comprehensive GitHub Copilot instructions to help you deve
 
 The Copilot instructions are designed to help both new contributors and experienced developers work more effectively with this embedded codebase.
 
-## Contributing 🤝
+## 🤝 Contributing
 Contributions are welcome! Please fork the repository and submit a pull request with your improvements.
 
-## License 📜
+## 📜 License 
 This project is licensed under the BSD 3-Clause License - see the LICENSE file for details.
