@@ -431,3 +431,4 @@ int dvdVX2 = 1, dvdVY2 = 1;
 uint16_t dvdColor2;
 
 #endif /* MAIN_H */
+

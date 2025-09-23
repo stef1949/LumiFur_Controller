@@ -92,6 +92,15 @@ const int minBlinkDuration = 300; // Minimum time for a full blink (ms)
 const int maxBlinkDuration = 800; // Maximum time for a full blink (ms)
 const int minBlinkDelay = 250;   // Minimum time between blinks (ms)
 const int maxBlinkDelay = 5000;   // Maximum time between blinks (ms)
+constexpr uint16_t SCROLL_TEXT_INTERVAL_MS = 18;
+constexpr uint16_t SCROLL_BACKGROUND_INTERVAL_MS = 45;
+constexpr int16_t SCROLL_TEXT_GAP = 12;
+static unsigned long lastScrollTick = 0;
+static unsigned long lastBackgroundTick = 0;
+static uint8_t scrollingBackgroundOffset = 0;
+static uint8_t scrollingColorOffset = 0;
+static bool scrollingTextInitialized = false;
+
 
 float globalBrightnessScale = 0.0f;
 uint16_t globalBrightnessScaleFixed = 256;
@@ -537,6 +546,102 @@ void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t c
   }
 }
 
+uint16_t colorWheel(uint8_t pos) {
+  if (pos < 85) {
+    return dma_display->color565(pos * 3, 255 - pos * 3, 0);
+  } else if (pos < 170) {
+    pos -= 85;
+    return dma_display->color565(255 - pos * 3, 0, pos * 3);
+  }
+  pos -= 170;
+  return dma_display->color565(0, pos * 3, 255 - pos * 3);
+}
+
+static void initializeScrollingText() {
+  if (!dma_display) {
+    return;
+  }
+
+  dma_display->setFont(&FreeSans9pt7b);
+  dma_display->setTextSize(1);
+  dma_display->setTextWrap(false);
+
+  int16_t x1 = 0;
+  int16_t y1 = 0;
+  uint16_t w = 0;
+  uint16_t h = 0;
+  dma_display->getTextBounds(txt, 0, 0, &x1, &y1, &w, &h);
+
+  textX = dma_display->width();
+  textY = ((dma_display->height() - h) / 2) - y1;
+  textMin = -static_cast<int16_t>(w + SCROLL_TEXT_GAP);
+
+  scrollingBackgroundOffset = 0;
+  scrollingColorOffset = 0;
+  lastScrollTick = millis();
+  lastBackgroundTick = lastScrollTick;
+  scrollingTextInitialized = true;
+}
+
+static void drawScrollingBackground(uint8_t offset) {
+  if (!dma_display) {
+    return;
+  }
+
+  const int width = dma_display->width();
+  const int height = dma_display->height();
+
+  for (int y = 0; y < height; ++y) {
+    const uint8_t paletteIndex = sin8(static_cast<uint8_t>(y * 8) + offset);
+    const CRGB color = ColorFromPalette(CloudColors_p, paletteIndex);
+    dma_display->drawFastHLine(0, y, width, dma_display->color565(color.r, color.g, color.b));
+  }
+}
+
+void drawText(int colorWheelOffset) {
+  if (!dma_display) {
+    return;
+  }
+
+  dma_display->setFont(&FreeSans9pt7b);
+  dma_display->setTextSize(1);
+  dma_display->setTextWrap(false);
+  dma_display->setCursor(textX, textY);
+
+  const size_t len = strnlen(txt, sizeof(txt));
+  for (size_t i = 0; i < len; ++i) {
+    const uint8_t offset = static_cast<uint8_t>(i * 16 + colorWheelOffset);
+    dma_display->setTextColor(colorWheel(offset));
+    dma_display->write(txt[i]);
+  }
+}
+
+static void renderScrollingTextView() {
+  if (!scrollingTextInitialized) {
+    initializeScrollingText();
+  }
+
+  const unsigned long now = millis();
+
+  if (now - lastBackgroundTick >= SCROLL_BACKGROUND_INTERVAL_MS) {
+    lastBackgroundTick = now;
+    ++scrollingBackgroundOffset;
+  }
+
+  drawScrollingBackground(scrollingBackgroundOffset);
+
+  if (now - lastScrollTick >= SCROLL_TEXT_INTERVAL_MS) {
+    lastScrollTick = now;
+    --textX;
+    if (textX <= textMin) {
+      textX = dma_display->width() + SCROLL_TEXT_GAP;
+    }
+    scrollingColorOffset = static_cast<uint8_t>(scrollingColorOffset + 3);
+  }
+
+  drawText(scrollingColorOffset);
+}
+
 uint16_t plasmaSpeed = 2; // Lower = slower animation
 
 void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
@@ -685,6 +790,7 @@ void updateEyeBounceAnimation() {
         facePlasmaDirty = true;
     }
 }
+
 void drawPlasmaFace() {
    // Combine bounce and idle hover offsets
   // Combine bounce and idle hover offsets
@@ -1875,7 +1981,10 @@ if (!pixelDustEffectInstance) {
   currentPalette = RainbowColors_p;
 
 
-  ////////Setup Bouncing Squares////////
+  snprintf(txt, sizeof(txt), "HAVE A WONDERFUL DAY!");
+  initializeScrollingText();
+
+////////Setup Bouncing Squares////////
   myDARK = dma_display->color565(64, 64, 64);
   myWHITE = dma_display->color565(192, 192, 192);
   myRED = dma_display->color565(255, 0, 0);
@@ -2567,8 +2676,10 @@ case 19:
     updateAndDrawFullScreenSpiral(SPIRAL_COLOR_WHITE);   // Call with white mode
     // case 17: // Pixel Dust Effect (new view number)
     // PixelDustEffect();
-    // break;
-
+    break;
+    case 20: // Scrolling text
+    renderScrollingTextView();
+    
   default:
     // Optional: Handle unsupported views
     // dma_display->clearScreen();
