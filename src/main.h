@@ -80,6 +80,7 @@ bool configApplyAuroraMode = false;
 bool configApplyAccelerometer = true;
 bool configApplyConstantColor = false; // Variable to track constant color application
 
+
 /*------------------------------------------------------------------------------
   OTA instances & variables
   ----------------------------------------------------------------------------*/
@@ -89,6 +90,18 @@ static const esp_partition_t *update_partition = NULL;
 uint8_t txValue = 0;
 int bufferCount = 0;
 bool downloadFlag = false;
+
+
+////////////////////// DEBUG MODE //////////////////////
+#define DEBUG_MODE 1 // Set to 1 to enable debug outputs
+#define DEBUG_MICROPHONE 0 // Set to 1 to enable microphone debug outputs
+#define DEBUG_ACCELEROMETER 0 // Set to 1 to enable accelerometer debug outputs
+#define DEBUG_BRIGHTNESS 0 // Set to 1 to enable brightness debug outputs
+#if DEBUG_MODE
+#define DEBUG_BLE
+#define DEBUG_VIEWS
+#endif
+
 
 // Button config --------------------------------------------------------------
 bool debounceButton(int pin)
@@ -248,7 +261,9 @@ int sliderBrightness = map(userBrightness, 1, 255, 1, 100);
 
 // Convert the userBrightness into a scale factor (0.0 to 1.0)
 // Here, we simply divide userBrightness by 255.0 to get a proportion.
-float globalBrightnessScale = userBrightness / 255.0;
+extern float globalBrightnessScale;
+extern uint16_t globalBrightnessScaleFixed;
+void updateGlobalBrightnessScale(uint8_t brightness);
 
 unsigned long lastAmbientUpdateTime = 0;
 const unsigned long ambientUpdateInterval = 500; // update every 500 milliseconds
@@ -292,14 +307,17 @@ uint16_t getRawClearChannelValue()
   {
     uint16_t r, g, b, c;
     apds.getColorData(&r, &g, &b, &c);
-    lastKnownClearValue = c;
 
-    unsigned long currentTime = millis();
-    if (currentTime - lastLogTime >= logInterval)
-    {
-      Serial.print("Ambient light level (clear channel): ");
-      Serial.println(c);
-      lastLogTime = currentTime;
+    #if DEBUG_BRIGHTNESS
+    Serial.print("Ambient light level (clear channel): ");
+    lastKnownClearValue = c;
+    Serial.println(c);
+    #else
+    lastKnownClearValue = c; // Update last known good value
+    #endif
+    return c; // Return the raw clear channel value
+  } else {
+        return lastKnownClearValue; // Return the last good value if current not available
     }
     return c; // Return the raw clear channel value
   }
@@ -332,13 +350,12 @@ void updateAdaptiveBrightness()
   smoothedLux = (luxSmoothingFactor * currentLuxEquivalent) + ((1.0f - luxSmoothingFactor) * smoothedLux);
 
   // --- CRITICAL CALIBRATION SECTION ---
-  int min_brightness_output = 10;   // Min brightness display should go to (e.g., 10-25)
-  int max_brightness_output = 255;  // Max brightness (usually 255)
-  float min_clear_for_map = 50.0f;  // CALIBRATE: Raw clear value for "very dark" (e.g., 20-100)
-  float max_clear_for_map = 700.0f; // CALIBRATE: Raw clear value for "bright enough for max display brightness"
-                                    // OBSERVE rawClearValue via Serial.print to set this.
-                                    // Example: if typical indoor bright is C=600, set this to ~600-800.
-                                    // If C values are typically 0-2000, then 700 is too low.
+
+  const int min_brightness_output = userBrightness;   // Fall back to user-set brightness when dark
+  const int max_brightness_output = 255;  // Preserve full-range capability
+  const float min_clear_for_map = 150.0f;  // Adjusted dark threshold
+  const float max_clear_for_map = 1200.0f; // Adjusted bright threshold
+                                    // OBSERVE rawClearValue via Serial.print to refine these.
   // --- END CRITICAL CALIBRATION SECTION ---
 
   long targetBrightnessLong = map(static_cast<long>(smoothedLux),
@@ -348,17 +365,21 @@ void updateAdaptiveBrightness()
                                   max_brightness_output);
   int targetBrightnessCalc = constrain(static_cast<int>(targetBrightnessLong), min_brightness_output, max_brightness_output);
 
-  // --- NEW: Smooth the brightness transition ---
-  currentBrightness = (brightnessSmoothingFactor * targetBrightnessCalc) + ((1.0f - brightnessSmoothingFactor) * currentBrightness);
-  uint8_t newBrightness = static_cast<uint8_t>(currentBrightness + 0.5f); // Round to nearest integer
-
-#ifdef DEBUG_BRIGHTNESS
-  Serial.printf("ADAPT: RawC=%u, SmoothC=%.1f, TargetBr=%d, CurrentBr=%.1f, NewBr=%u, LastSetBr=%d\n",
-                rawClearValue, smoothedLux, targetBrightnessCalc, currentBrightness, newBrightness, lastBrightness);
-#endif
-
-  // Only update the display's brightness if it has changed since the last update
-  if (newBrightness != lastBrightness)
+  #if DEBUG_BRIGHTNESS
+  Serial.printf("ADAPT: RawC=%u, SmoothC=%.1f, TargetBr=%d, LastBr=%d, Thr=%d\n",
+                rawClearValue, smoothedLux, targetBrightnessCalc, lastBrightness, brightnessThreshold); // Corrected variable name
+  #endif
+  if (abs(targetBrightnessCalc - lastBrightness) >= brightnessThreshold)
+  {
+    uint8_t currentBrightness = static_cast<uint8_t>(targetBrightnessCalc);
+    dma_display->setBrightness8(currentBrightness);
+    updateGlobalBrightnessScale(currentBrightness);
+    lastBrightness = targetBrightnessCalc; // Update lastBrightness ONLY when a display change is made
+    #if DEBUG_BRIGHTNESS
+    Serial.printf(">>>> ADAPT: BRIGHTNESS SET TO %d <<<<\n", targetBrightnessCalc);
+    #endif
+  }
+  else
   {
     dma_display->setBrightness8(newBrightness);
     lastBrightness = newBrightness; // Update lastBrightness ONLY when a display change is made
@@ -414,6 +435,7 @@ void applyConfigOptions()
   {
     Serial.println("Auto brightness disabled. Applying user-set brightness.");
     dma_display->setBrightness8(userBrightness);
+    updateGlobalBrightnessScale(userBrightness);
     Serial.printf("Applied manual brightness: %u\n", userBrightness);
   }
 
@@ -447,13 +469,13 @@ void applyConfigOptions()
     Serial.println("Aurora mode enabled: switching to aurora palette.");
     // Assume auroraPalette and defaultPalette are defined globally.
     // currentPalette = auroraPalette;
-    bool configApplyAuroraMode = true;
+    configApplyAuroraMode = true;
   }
   else
   {
     Serial.println("Aurora mode disabled: using default palette.");
     // currentPalette = defaultPalette;
-    bool configApplyAuroraMode = false;
+    configApplyAuroraMode = false;
   }
 
   if (constantColorConfig)
@@ -519,3 +541,4 @@ int dvdVX2 = 1, dvdVY2 = 1;
 uint16_t dvdColor2;
 
 #endif /* MAIN_H */
+

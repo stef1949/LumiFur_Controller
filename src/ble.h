@@ -18,6 +18,7 @@ bool deviceConnected = false;
 bool oldDeviceConnected = false;
 
 // BLE UUIDs
+
 #define SERVICE_UUID                                "01931c44-3867-7740-9867-c822cb7df308"
 #define CHARACTERISTIC_UUID                         "01931c44-3867-7427-96ab-8d7ac0ae09fe"
 #define CONFIG_CHARACTERISTIC_UUID                  "01931c44-3867-7427-96ab-8d7ac0ae09ff"
@@ -28,7 +29,6 @@ bool oldDeviceConnected = false;
 
 #define OTA_CHARACTERISTIC_UUID                     "01931c44-3867-7427-96ab-8d7ac0ae09ee"
 #define INFO_CHARACTERISTIC_UUID                    "cba1d466-344c-4be3-ab3f-189f80dd7599"
-
 
 //#define ULTRASOUND_CHARACTERISTIC_UUID  "01931c44-3867-7b5d-9732-12460e3a35db"
 
@@ -54,8 +54,10 @@ NimBLECharacteristic* pConfigCharacteristic = nullptr;
 NimBLECharacteristic* pCommandCharacteristic;
 NimBLECharacteristic* pTemperatureLogsCharacteristic = nullptr; // New Command UUID
 NimBLECharacteristic* pBrightnessCharacteristic = nullptr;
+
 NimBLECharacteristic* pOTACharacteristic = nullptr;
 static NimBLECharacteristic* pInfoCharacteristic;
+
 
 void triggerHistoryTransfer();
 void clearHistoryBuffer();
