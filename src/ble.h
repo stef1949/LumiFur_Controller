@@ -27,6 +27,8 @@ bool oldDeviceConnected = false;
 #define COMMAND_CHARACTERISTIC_UUID                 "0195eec3-06d2-7fd4-a561-49493be3ee41"
 #define BRIGHTNESS_CHARACTERISTIC_UUID              "01931c44-3867-7427-96ab-8d7ac0ae09ef"
 
+#define SCROLL_SPEED_CHARACTERISTIC_UUID            "7f9b8b12-1234-4c55-9b77-a19d55aa0011"
+
 #define OTA_CHARACTERISTIC_UUID                     "01931c44-3867-7427-96ab-8d7ac0ae09ee"
 #define INFO_CHARACTERISTIC_UUID                    "cba1d466-344c-4be3-ab3f-189f80dd7599"
 
@@ -55,9 +57,14 @@ NimBLECharacteristic* pCommandCharacteristic;
 NimBLECharacteristic* pTemperatureLogsCharacteristic = nullptr; // New Command UUID
 NimBLECharacteristic* pBrightnessCharacteristic = nullptr;
 
+NimBLECharacteristic* pScrollSpeedCharacteristic = nullptr; // NEW
+
 NimBLECharacteristic* pOtaCharacteristic = nullptr;
 static NimBLECharacteristic* pInfoCharacteristic;
 
+extern uint8_t scrollSpeedSetting;      // 1–100
+extern uint16_t scrollTextIntervalMs;   // ms per pixel
+extern void updateScrollIntervalFromSetting(); // helper
 
 void triggerHistoryTransfer();
 void clearHistoryBuffer();
@@ -316,6 +323,29 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     }
 
 } serverCallbacks;
+
+class ScrollSpeedCallbacks : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* pChr, NimBLEConnInfo& connInfo) override {
+      const auto &val = pChr->getValue(); // getValue() returns a temporary; bind as const reference
+      if (val.size() >= 1) {
+          uint8_t incoming = static_cast<uint8_t>(val[0]);
+          if (incoming < 1) incoming = 1;
+          if (incoming > 100) incoming = 100;
+          scrollSpeedSetting = incoming;
+          updateScrollIntervalFromSetting();
+#if DEBUG_MODE
+          Serial.printf("BLE: New scroll speed=%u (interval=%u ms)\n", scrollSpeedSetting, scrollTextIntervalMs);
+#endif
+          // Echo back & notify (optional)
+          pChr->setValue(&scrollSpeedSetting, 1);
+          pChr->notify();
+      }
+  }
+  void onRead(NimBLECharacteristic* pChr, NimBLEConnInfo& connInfo) override {
+      pChr->setValue(&scrollSpeedSetting, 1);
+  }
+};
+static ScrollSpeedCallbacks scrollSpeedCallbacks;
 
 //Temp Non-Blocking Variables
 unsigned long temperatureMillis = 0;

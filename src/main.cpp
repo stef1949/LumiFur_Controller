@@ -104,7 +104,7 @@ const int minBlinkDuration = 300; // Minimum time for a full blink (ms)
 const int maxBlinkDuration = 800; // Maximum time for a full blink (ms)
 const int minBlinkDelay = 250;   // Minimum time between blinks (ms)
 const int maxBlinkDelay = 5000;   // Maximum time between blinks (ms)
-constexpr uint16_t SCROLL_TEXT_INTERVAL_MS = 36;
+// constexpr uint16_t SCROLL_TEXT_INTERVAL_MS = 36; // Removal of constexpr
 constexpr uint16_t SCROLL_BACKGROUND_INTERVAL_MS = 45;
 constexpr int16_t SCROLL_TEXT_GAP = 12;
 static unsigned long lastScrollTick = 0;
@@ -113,6 +113,19 @@ static uint8_t scrollingBackgroundOffset = 0;
 static uint8_t scrollingColorOffset = 0;
 static bool scrollingTextInitialized = false;
 
+uint8_t scrollSpeedSetting = 50;        // NEW: mid value (1–100)
+uint16_t scrollTextIntervalMs = 100;    // NEW: actual interval in ms (updated by helper)
+
+void updateScrollIntervalFromSetting() { // NEW helper
+    // Map 1..100 (fast->slow) to 15..250 ms
+    // Invert so low number = fast scroll
+    uint8_t s = scrollSpeedSetting < 1 ? 1 : (scrollSpeedSetting > 100 ? 100 : scrollSpeedSetting);
+    // Linear invert: speed 1 => 15ms, speed 100 => 250ms
+    scrollTextIntervalMs = map(s, 1, 100, 15, 250);
+#if DEBUG_MODE
+    Serial.printf("Scroll speed setting=%u => interval=%u ms\n", s, scrollTextIntervalMs);
+#endif
+}
 
 float globalBrightnessScale = 0.0f;
 uint16_t globalBrightnessScaleFixed = 256;
@@ -227,6 +240,8 @@ const float SPIRAL_ARM_COLOR_FACTOR = 5.0f; // Could be based on 'r' now instead
 const float SPIRAL_THICKNESS_RADIUS = 1.0f;    // Start with 0 for performance, then increase
 
 static TaskHandle_t bleNotifyTaskHandle = NULL;
+
+struct _InitScrollSpeed { _InitScrollSpeed(){ updateScrollIntervalFromSetting(); } } _initScrollSpeedOnce; // Ensure scroll interval is set at startup
 
 void calculateFPS() {
     frameCounter++;
@@ -619,11 +634,12 @@ static void renderScrollingTextView() {
 
   drawScrollingBackground(scrollingBackgroundOffset);
 
-  if (now - lastScrollTick >= SCROLL_TEXT_INTERVAL_MS) {
+// CHANGED: use scrollTextIntervalMs instead of fixed constant
+  if (now - lastScrollTick >= scrollTextIntervalMs) {
     lastScrollTick = now;
     --textX;
     if (textX <= textMin) {
-      textX = dma_display->width() + SCROLL_TEXT_GAP;
+        textX = dma_display->width();
     }
     scrollingColorOffset = static_cast<uint8_t>(scrollingColorOffset + 3);
   }
