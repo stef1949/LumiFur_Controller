@@ -104,7 +104,7 @@ const int minBlinkDuration = 300; // Minimum time for a full blink (ms)
 const int maxBlinkDuration = 800; // Maximum time for a full blink (ms)
 const int minBlinkDelay = 250;   // Minimum time between blinks (ms)
 const int maxBlinkDelay = 5000;   // Maximum time between blinks (ms)
-constexpr uint16_t SCROLL_TEXT_INTERVAL_MS = 18;
+constexpr uint16_t SCROLL_TEXT_INTERVAL_MS = 36;
 constexpr uint16_t SCROLL_BACKGROUND_INTERVAL_MS = 45;
 constexpr int16_t SCROLL_TEXT_GAP = 12;
 static unsigned long lastScrollTick = 0;
@@ -328,14 +328,6 @@ class CommandCallbacks : public NimBLECharacteristicCallbacks {
   }
 } cmdCallbacks;
 
-class OtaCallbacks : public NimBLECharacteristicCallbacks {
-  void onWrite(NimBLECharacteristic* characteristic) {
-    const auto &value = characteristic->getValue();
-    Serial.printf("OTA characteristic received %u bytes\n", static_cast<unsigned>(value.size()));
-  }
-};
-OtaCallbacks otaCallbacks;
-
 // New Callback class for handling notifications related to Temperature Logs
 class TemperatureLogsCallbacks : public NimBLECharacteristicCallbacks {
   public:
@@ -529,10 +521,13 @@ void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t c
   }
 
   // Calculate visible region to avoid per-pixel boundary checks
-  int startX = max(0, -x);
-  int startY = max(0, -y);
-  int endX = min(width, dma_display->width() - x);
-  int endY = min(height, dma_display->height() - y);
+  // Use explicit conditionals instead of min/max to avoid overload or macro conflicts.
+  int startX = (0 > -x) ? 0 : -x;
+  int startY = (0 > -y) ? 0 : -y;
+  int tmpEndX = dma_display->width() - x;
+  int endX = (width < tmpEndX) ? width : tmpEndX;
+  int tmpEndY = dma_display->height() - y;
+  int endY = (height < tmpEndY) ? height : tmpEndY;
 
   for (int j = startY; j < endY; j++)
   {
@@ -607,24 +602,6 @@ static void drawScrollingBackground(uint8_t offset) {
     const uint8_t paletteIndex = sin8(static_cast<uint8_t>(y * 8) + offset);
     const CRGB color = ColorFromPalette(CloudColors_p, paletteIndex);
     dma_display->drawFastHLine(0, y, width, dma_display->color565(color.r, color.g, color.b));
-  }
-}
-
-void drawText(int colorWheelOffset) {
-  if (!dma_display) {
-    return;
-  }
-
-  dma_display->setFont(&FreeSans9pt7b);
-  dma_display->setTextSize(1);
-  dma_display->setTextWrap(false);
-  dma_display->setCursor(textX, textY);
-
-  const size_t len = strnlen(txt, sizeof(txt));
-  for (size_t i = 0; i < len; ++i) {
-    const uint8_t offset = static_cast<uint8_t>(i * 16 + colorWheelOffset);
-    dma_display->setTextColor(colorWheel(offset));
-    dma_display->write(txt[i]);
   }
 }
 
@@ -713,21 +690,6 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
             tempFixed += scaleHalfFixed;
         }
     }
-}
-
-
-// Input a value 0 to 255 to get a color value.
-// The colours are a transition r - g - b - back to r.
-uint16_t colorWheel(uint8_t pos) {
-  if(pos < 85) {
-    return dma_display->color565(pos * 3, 255 - pos * 3, 0);
-  } else if(pos < 170) {
-    pos -= 85;
-    return dma_display->color565(255 - pos * 3, 0, pos * 3);
-  } else {
-    pos -= 170;
-    return dma_display->color565(0, pos * 3, 255 - pos * 3);
-  }
 }
 
 void drawText(int colorWheelOffset) {
@@ -1296,29 +1258,12 @@ void blinkingEyes() {
       rightEyeX = 10; rightEyeY = 2;
       leftEyeX = 93; leftEyeY = 2;
       break;
-    // Default case uses the slanteyes defined before the switch
+  // Default case uses the slanteyes defined before the switch
+
   }
 
-  else if (currentView == 6)
-  {
-    drawPlasmaXbm(2 + final_x_offset_right, 2 + final_y_offset, 32, 12, semicircleeyes, 0, 1.0);    // Right eye
-    drawPlasmaXbm(94 + final_x_offset_left, 2 + final_y_offset, 32, 12, semicircleeyes, 128, 1.0); // Left eye (phase offset)
-  }
-  else if (currentView == 7)
-  {
-    drawPlasmaXbm(0 + final_x_offset_right, 0 + final_y_offset, 31, 15, x_eyes, 0, 1.0);    // Right eye
-    drawPlasmaXbm(96 + final_x_offset_left, 0 + final_y_offset, 31, 15, x_eyes, 128, 1.0); // Left eye (phase offset)
-  }
-  else if (currentView == 8)
-  {
-    drawPlasmaXbm(2 + final_x_offset_right, 0 + final_y_offset, 24, 16, slanteyes, 0, 1.0);      // Right eye
-    drawPlasmaXbm(102 + final_x_offset_left, 0 + final_y_offset, 24, 16, slanteyesL, 128, 1.0); // Left eye (phase offset)
-  }
-  else if (currentView == 17)
-  {
-    drawPlasmaXbm(10 + final_x_offset_right, 2 + final_y_offset, 25, 21, circleeyes, 0, 1.0);    // Right eye
-    drawPlasmaXbm(93 + final_x_offset_left, 2 + final_y_offset, 25, 21, circleeyes, 128, 1.0); // Left eye (phase offset)
-  }
+  // Redundant direct draw branches removed — the switch above sets the correct bitmaps/positions
+  // and the subsequent drawBitmapAdvanced calls handle drawing for the selected view.
 
   // Draw the right eye (viewer's perspective)
   drawBitmapAdvanced(rightEyeX + final_x_offset, rightEyeY + final_y_offset, 
@@ -1328,7 +1273,7 @@ void blinkingEyes() {
   // Draw the left eye with a plasma phase offset if plasma is used
   drawBitmapAdvanced(leftEyeX + final_x_offset, leftEyeY + final_y_offset, 
                      eyeWidth, eyeHeight, leftEyeBitmap, solidColor, 
-                     leftEyeProgress, usePlasma, 128);
+                     blinkProgress, usePlasma, 128);
 }
 
 // Function to disable/clear the blush display when the effect is over
@@ -2038,25 +1983,6 @@ Serial.print("Temperature Logs Characteristic created, UUID: ");
 Serial.println(pTemperatureLogsCharacteristic->getUUID().toString().c_str());
 Serial.print("Properties: ");
 Serial.println(pTemperatureLogsCharacteristic->getProperties()); // Print properties as integer
-
-  // OTA Characteristic
-  pOTACharacteristic = pService->createCharacteristic(
-      OTA_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::WRITE | 
-      NIMBLE_PROPERTY::NOTIFY
-  );
-  pOTACharacteristic->setCallbacks(&otaCallbacks); // Use the static instance from ble.h
-  // Add a descriptor for OTA characteristic
-  NimBLEDescriptor* pOtaDesc = pOTACharacteristic->createDescriptor(
-        "2901", // Standard UUID for Characteristic User Description
-        NIMBLE_PROPERTY::READ,
-        20 // Max length
-    );
-  pOtaDesc->setValue("OTA Update");
-
-#if DEBUG_MODE
-  Serial.println("OTA Characteristic created");
-#endif
 
 // Set up descriptors
 NimBLE2904 *faceDesc = pFaceCharacteristic->create2904();

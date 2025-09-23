@@ -55,7 +55,7 @@ NimBLECharacteristic* pCommandCharacteristic;
 NimBLECharacteristic* pTemperatureLogsCharacteristic = nullptr; // New Command UUID
 NimBLECharacteristic* pBrightnessCharacteristic = nullptr;
 
-NimBLECharacteristic* pOTACharacteristic = nullptr;
+NimBLECharacteristic* pOtaCharacteristic = nullptr;
 static NimBLECharacteristic* pInfoCharacteristic;
 
 
