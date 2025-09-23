@@ -25,6 +25,7 @@
 #include <NimBLEDevice.h>
 
 #include <vector> //For chunking example
+#include <cstring>
 
 //#define PIXEL_COLOR_DEPTH_BITS 16 // 16 bits per pixel
 
@@ -48,14 +49,15 @@ bool g_accelerometer_initialized = false;
 
 // --- Performance Tuning ---
 // Target ~50-60 FPS. Adjust as needed based on view complexity.
-const unsigned long targetFrameIntervalMillis = 1; // 1000ms / 50 FPS = 20ms per frame
+const unsigned long targetFrameIntervalMillis = 10; // ~100 FPS pacing
 // ---
 
 bool brightnessChanged = false;
 
 // View switching
-uint8_t currentView = 15;   // Current & initial view being displayed
-const int totalViews = 20; // Total number of views to cycle through
+// View switching
+uint8_t currentView = VIEW_FLAME_EFFECT;   // Current & initial view being displayed
+const int totalViews = TOTAL_VIEWS; // Total number of views is now calculated automatically
 // int userBrightness = 20; // Default brightness level (0-255)
 
 
@@ -85,12 +87,49 @@ unsigned long lastEyeBlinkTime = 0;  // Last time the eyes blinked
 unsigned long nextBlinkDelay = 1000; // Random delay between blinks
 int blinkProgress = 0;               // Progress of the blink (0-100%)
 bool isBlinking = false;             // Whether a blink is in progress
+bool manualBlinkTrigger = false;     // To trigger a blink manually
+
+// Blink animation control with initialization
+struct blinkState
+{
+  unsigned long startTime = 0;
+  unsigned long durationMs = 700; // Default duration
+  unsigned long closeDuration = 50;
+  unsigned long holdDuration = 20;
+  unsigned long openDuration = 50;
+} blinkState;
 
 int blinkDuration = 700;          // Initial time for a full blink (milliseconds)
 const int minBlinkDuration = 300; // Minimum time for a full blink (ms)
 const int maxBlinkDuration = 800; // Maximum time for a full blink (ms)
 const int minBlinkDelay = 250;   // Minimum time between blinks (ms)
 const int maxBlinkDelay = 5000;   // Maximum time between blinks (ms)
+constexpr uint16_t SCROLL_TEXT_INTERVAL_MS = 36;
+constexpr uint16_t SCROLL_BACKGROUND_INTERVAL_MS = 45;
+constexpr int16_t SCROLL_TEXT_GAP = 12;
+static unsigned long lastScrollTick = 0;
+static unsigned long lastBackgroundTick = 0;
+static uint8_t scrollingBackgroundOffset = 0;
+static uint8_t scrollingColorOffset = 0;
+static bool scrollingTextInitialized = false;
+
+
+float globalBrightnessScale = 0.0f;
+uint16_t globalBrightnessScaleFixed = 256;
+bool facePlasmaDirty = true;
+
+inline void updateGlobalBrightnessScale(uint8_t brightness) {
+    globalBrightnessScale = brightness / 255.0f;
+    globalBrightnessScaleFixed = static_cast<uint16_t>((static_cast<uint32_t>(brightness) * 256u + 127u) / 255u);
+    facePlasmaDirty = true;
+}
+
+inline void setBlinkProgress(int newValue) {
+    if (blinkProgress != newValue) {
+        facePlasmaDirty = true;
+    }
+    blinkProgress = newValue;
+}
 
 // Eye bounce effect variables
 bool isEyeBouncing = false;
@@ -111,8 +150,8 @@ int idleEyeYOffset = 0;                     // Vertical offset from idle hover
 int idleEyeXOffset = 0;                     // Horizontal offset from idle hover (NEW)
 
 // Global constants for each sensitivity level
-const float SLEEP_THRESHOLD = 4.0;  // for sleep mode detection
-const float SHAKE_THRESHOLD = 10.0; // for shake detection
+const float SLEEP_THRESHOLD = 1.0;  // for sleep mode detection
+const float SHAKE_THRESHOLD = 1.0; // for shake detection
 // Global flag to control which threshold to use
 bool useShakeSensitivity = true;
 
@@ -203,10 +242,11 @@ void calculateFPS() {
 void maybeUpdateTemperature() {
   unsigned long lastTempUpdate = 0;
 const unsigned long tempUpdateInterval = 5000; // 5 seconds
-  if (millis() - lastTempUpdate >= tempUpdateInterval) {
+  if (deviceConnected && (millis() - lastTempUpdate >= tempUpdateInterval)) {
     updateTemperature();
     lastTempUpdate = millis();
-  }}
+  }
+}
 
 void displayCurrentView(int view);
 
@@ -226,6 +266,7 @@ void wakeFromSleepMode() {
 
   // Restore normal brightness
   dma_display->setBrightness8(userBrightness);
+  updateGlobalBrightnessScale(userBrightness);
 
   lastActivityTime = millis(); // Reset activity timer
 
@@ -405,6 +446,7 @@ class ConfigCallbacks : public NimBLECharacteristicCallbacks {
         } else {
              Serial.println("Auto brightness has been DISABLED. Applying user-set brightness.");
              dma_display->setBrightness8(userBrightness);
+             updateGlobalBrightnessScale(userBrightness);
              Serial.printf("Applied manual brightness: %u\n", userBrightness);
          }
       }
@@ -427,6 +469,7 @@ class BrightnessCallbacks : public NimBLECharacteristicCallbacks {
       // ADDED: Apply brightness immediately if auto-brightness is off
       if (!autoBrightnessEnabled) {
         dma_display->setBrightness8(userBrightness);
+        updateGlobalBrightnessScale(userBrightness);
         Serial.printf("Applied manual brightness: %u\n", userBrightness);
       }
       Serial.printf("Brightness set to %u\n", userBrightness);
@@ -478,10 +521,13 @@ void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t c
   }
 
   // Calculate visible region to avoid per-pixel boundary checks
-  int startX = max(0, -x);
-  int startY = max(0, -y);
-  int endX = min(width, dma_display->width() - x);
-  int endY = min(height, dma_display->height() - y);
+  // Use explicit conditionals instead of min/max to avoid overload or macro conflicts.
+  int startX = (0 > -x) ? 0 : -x;
+  int startY = (0 > -y) ? 0 : -y;
+  int tmpEndX = dma_display->width() - x;
+  int endX = (width < tmpEndX) ? width : tmpEndX;
+  int tmpEndY = dma_display->height() - y;
+  int endY = (height < tmpEndY) ? height : tmpEndY;
 
   for (int j = startY; j < endY; j++)
   {
@@ -507,130 +553,354 @@ void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t c
   }
 }
 
+uint16_t colorWheel(uint8_t pos) {
+  if (pos < 85) {
+    return dma_display->color565(pos * 3, 255 - pos * 3, 0);
+  } else if (pos < 170) {
+    pos -= 85;
+    return dma_display->color565(255 - pos * 3, 0, pos * 3);
+  }
+  pos -= 170;
+  return dma_display->color565(0, pos * 3, 255 - pos * 3);
+}
+
+static void initializeScrollingText() {
+  if (!dma_display) {
+    return;
+  }
+
+  dma_display->setFont(&FreeSans9pt7b);
+  dma_display->setTextSize(1);
+  dma_display->setTextWrap(false);
+
+  int16_t x1 = 0;
+  int16_t y1 = 0;
+  uint16_t w = 0;
+  uint16_t h = 0;
+  dma_display->getTextBounds(txt, 0, 0, &x1, &y1, &w, &h);
+
+  textX = dma_display->width();
+  textY = ((dma_display->height() - h) / 2) - y1;
+  textMin = -static_cast<int16_t>(w + SCROLL_TEXT_GAP);
+
+  scrollingBackgroundOffset = 0;
+  scrollingColorOffset = 0;
+  lastScrollTick = millis();
+  lastBackgroundTick = lastScrollTick;
+  scrollingTextInitialized = true;
+}
+
+static void drawScrollingBackground(uint8_t offset) {
+  if (!dma_display) {
+    return;
+  }
+
+  const int width = dma_display->width();
+  const int height = dma_display->height();
+
+  for (int y = 0; y < height; ++y) {
+    const uint8_t paletteIndex = sin8(static_cast<uint8_t>(y * 8) + offset);
+    const CRGB color = ColorFromPalette(CloudColors_p, paletteIndex);
+    dma_display->drawFastHLine(0, y, width, dma_display->color565(color.r, color.g, color.b));
+  }
+}
+
+static void renderScrollingTextView() {
+  if (!scrollingTextInitialized) {
+    initializeScrollingText();
+  }
+
+  const unsigned long now = millis();
+
+  if (now - lastBackgroundTick >= SCROLL_BACKGROUND_INTERVAL_MS) {
+    lastBackgroundTick = now;
+    ++scrollingBackgroundOffset;
+  }
+
+  drawScrollingBackground(scrollingBackgroundOffset);
+
+  if (now - lastScrollTick >= SCROLL_TEXT_INTERVAL_MS) {
+    lastScrollTick = now;
+    --textX;
+    if (textX <= textMin) {
+      textX = dma_display->width() + SCROLL_TEXT_GAP;
+    }
+    scrollingColorOffset = static_cast<uint8_t>(scrollingColorOffset + 3);
+  }
+
+  drawText(scrollingColorOffset);
+}
+
 uint16_t plasmaSpeed = 2; // Lower = slower animation
 
 void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
-                   uint8_t time_offset = 0, float scale = 5.0, float animSpeed = 0.2f)
+                   uint8_t time_offset = 0, float scale = 5.0f, float animSpeed = 0.2f)
 {
-    // Calculate byte width using bit-shift instead of division
-    int byteWidth = (width + 7) >> 3;
+    const int byteWidth = (width + 7) >> 3;
+    if (byteWidth <= 0) {
+        return;
+    }
 
-    // Scale the time value for animation speed (preserving refresh rate)
-    // Effective time is slowed down when animSpeed < 1.0, and sped up when > 1.0.
-    float effectiveTimeFloat = time_counter * animSpeed;
-    uint8_t t  = (uint8_t) effectiveTimeFloat;
-    uint8_t t2 = (uint8_t)(effectiveTimeFloat / 2);
-    uint8_t t3 = (uint8_t)(effectiveTimeFloat / 3);
-    
-    const float scaleHalf = scale * 0.5f;
-    // Precompute the scaled starting x-coordinate for efficiency
-    const float startX = x * scale;
+    const uint16_t scaleFixed = static_cast<uint16_t>(scale * 256.0f);
+    if (scaleFixed == 0) {
+        return;
+    }
+    const uint16_t scaleHalfFixed = scaleFixed >> 1;
+    int32_t startXFixed = static_cast<int32_t>(x) * static_cast<int32_t>(scaleFixed);
 
-// Precompute values that are reused multiple times within loops
-const float cos8_val_shifted = cos8(t2);
-const float term2_factor = scaleHalf;
-    // Loop over each row of the XBM image
-    for (int j = 0; j < height; j++)
+    const uint16_t animSpeedFixed = static_cast<uint16_t>(animSpeed * 256.0f);
+    const uint32_t effectiveTimeFixed = static_cast<uint32_t>(time_counter) * animSpeedFixed;
+    const uint8_t t = static_cast<uint8_t>(effectiveTimeFixed >> 8);
+    const uint8_t t2 = static_cast<uint8_t>(t >> 1);
+    const uint8_t t3 = static_cast<uint8_t>(((effectiveTimeFixed / 3U) >> 8) & 0xFF);
+
+    const uint16_t brightnessScale = globalBrightnessScaleFixed;
+
+    for (int j = 0; j < height; ++j)
     {
-        int yj = y + j;
-        float yScale = yj * scale;
-        // Precompute the cos component for this row using t2
-        uint8_t cos_val = cos8(yScale + t2);
-        // Precompute a portion of the third sine term
-        float tempSum = (x + yj) * scaleHalf;
-        // Setup the starting x value for the sin calculation
-        float x_val = startX;
+        const int yj = y + j;
+        const int32_t yScaleFixed = static_cast<int32_t>(yj) * scaleFixed;
+        const uint8_t cos_val = cos8(static_cast<uint8_t>((yScaleFixed >> 8) + t2));
+        int32_t tempFixed = static_cast<int32_t>(x + yj) * scaleHalfFixed;
+        int32_t xFixed = startXFixed;
+        const uint8_t *rowPtr = reinterpret_cast<const uint8_t *>(xbm) + j * byteWidth;
 
-        // Loop over each column
-        for (int i = 0; i < width; i++)
+        for (int i = 0; i < width; ++i)
         {
-            // Use bitwise arithmetic for efficiency
-            int byteIndex = i >> 3;         // same as i / 8
-            int bitMask = 1 << (7 - (i & 7)); // same as (1 << (7 - (i % 8)))
-            
-            if (pgm_read_byte(xbm + j * byteWidth + byteIndex) & bitMask)
+            const int byteIndex = i >> 3;
+            const uint8_t bitMask = static_cast<uint8_t>(1U << (7 - (i & 7)));
+
+            if (rowPtr[byteIndex] & bitMask)
             {
-                // Calculate plasma components with the scaled time value
-                uint8_t sin_val = sin8(x_val + t);
-                uint8_t sin_val2 = sin8(tempSum + i * scaleHalf + t3);
-                uint8_t v = sin_val + cos_val + sin_val2;
+                const uint8_t sin_val = sin8(static_cast<uint8_t>((xFixed >> 8) + t));
+                const uint8_t sin_val2 = sin8(static_cast<uint8_t>((tempFixed >> 8) + t3));
+                const uint8_t v = sin_val + cos_val + sin_val2;
 
-                // Retrieve the color from the palette and apply a brightness scale
-                CRGB color = ColorFromPalette(currentPalette, v + time_offset);
-                color.r = (uint8_t)(color.r * globalBrightnessScale);
-                color.g = (uint8_t)(color.g * globalBrightnessScale);
-                color.b = (uint8_t)(color.b * globalBrightnessScale);
+                const uint8_t paletteIndex = static_cast<uint8_t>(v + time_offset);
+                CRGB color = ColorFromPalette(currentPalette, paletteIndex);
+                const uint16_t scale = brightnessScale;
+                color.r = static_cast<uint8_t>((static_cast<uint16_t>(color.r) * scale + 128) >> 8);
+                color.g = static_cast<uint8_t>((static_cast<uint16_t>(color.g) * scale + 128) >> 8);
+                color.b = static_cast<uint8_t>((static_cast<uint16_t>(color.b) * scale + 128) >> 8);
 
-                // Convert to display format and draw the pixel
-                uint16_t rgb565 = dma_display->color565(color.r, color.g, color.b);
-                dma_display->drawPixel(x + i, yj, rgb565);
+                dma_display->drawPixel(x + i, yj, dma_display->color565(color.r, color.g, color.b));
             }
-            // Increment the scaled x value for the next column
-            x_val += scale;
+
+            xFixed += scaleFixed;
+            tempFixed += scaleHalfFixed;
+        }
+    }
+}
+
+void drawText(int colorWheelOffset) {
+    // Update text position
+    textX--;
+
+    // Check if text has scrolled off screen and reset
+    if (textX < textMin) {
+        textX = dma_display->width();
+    }
+
+    // Set text properties
+    dma_display->setFont(&FreeSans9pt7b);
+    dma_display->setTextSize(1);
+    
+    // Use the color wheel for text color
+    uint16_t textColor = colorWheel(colorWheelOffset);
+    dma_display->setTextColor(textColor);
+
+    // Set cursor and print text
+    dma_display->setCursor(textX, textY);
+    dma_display->print(txt);
+}
+
+// NEW function to draw bitmap with blink squash effect
+void drawBitmapWithBlink(int x, int y, int width, int height, const uint8_t *bitmap, uint16_t color, int progress) {
+    int byteWidth = (width + 7) / 8;
+    float center_y = (height - 1) / 2.0f;
+    
+    // This formula replicates the "w" calculation from the emulator for the squash effect
+    float w = 0.005f + (1.0f - 0.005f) * (progress / 100.0f);
+
+    for (int j = 0; j < height; j++) {
+        for (int i = 0; i < width; i++) {
+            if (pgm_read_byte(&bitmap[j * byteWidth + i / 8]) & (0x80 >> (i % 8))) {
+                // Calculate brightness based on vertical distance from center, modulated by 'w'
+                float blinkBrightness = pow(2, -w * pow(j - center_y, 2));
+                if (blinkBrightness < 0.01) continue;
+
+                // Apply the main color modulated by the blink brightness
+                uint8_t r = (color >> 11) & 0x1F;
+                uint8_t g = (color >> 5) & 0x3F;
+                uint8_t b = color & 0x1F;
+
+                r = r * blinkBrightness;
+                g = g * blinkBrightness;
+                b = b * blinkBrightness;
+
+                dma_display->drawPixel(x + i, y + j, dma_display->color565(r << 3, g << 2, b << 3));
+            }
+        }
+    }
+}
+
+// NEW ADVANCED function to draw a bitmap with optional plasma and blink squash effects
+void drawBitmapAdvanced(int x, int y, int width, int height, const uint8_t *bitmap, 
+                        uint16_t color, int progress, bool usePlasma, 
+                        uint8_t time_offset = 0, float scale = 5.0, float animSpeed = 0.2f) {
+    int byteWidth = (width + 7) / 8;
+    float center_y = (height - 1) / 2.0f;
+    
+    // --- Blink Effect Calculation ---
+    float w = 0.005f + (1.0f - 0.005f) * (progress / 100.0f);
+
+    // --- Plasma Effect Setup (if enabled) ---
+    uint8_t t = 0, t2 = 0, t3 = 0;
+    float scaleHalf = 0;
+    if (usePlasma) {
+        float effectiveTimeFloat = time_counter * animSpeed;
+        t = (uint8_t)effectiveTimeFloat;
+        t2 = (uint8_t)(effectiveTimeFloat / 2);
+        t3 = (uint8_t)(effectiveTimeFloat / 3);
+        scaleHalf = scale * 0.5f;
+    }
+
+    for (int j = 0; j < height; j++) {
+        // --- OPTIMIZATION: Calculate blink brightness once per row ---
+        float blinkBrightness = powf(2.0f, -w * powf(j - center_y, 2));
+        // If the entire row is too dim to be visible, skip it completely.
+        if (blinkBrightness < 0.01f) continue;
+
+        // Pre-calculate plasma values that are constant for the row
+        float y_val_plasma = (y + j) * scale;
+        float tempSum_plasma = (x + y + j) * scaleHalf;
+        float x_val_plasma = x * scale;
+        uint8_t cos_val_plasma = 0;
+        if (usePlasma) {
+            cos_val_plasma = cos8(y_val_plasma + t2);
+        }
+
+        for (int i = 0; i < width; i++) {
+            // Check if the pixel in the bitmap is set
+            if (pgm_read_byte(&bitmap[j * byteWidth + i / 8]) & (0x80 >> (i % 8))) {
+                
+                CRGB final_color;
+
+                if (usePlasma) {
+                    // --- Plasma Color Calculation ---
+                    uint8_t sin_val = sin8(x_val_plasma + t);
+                    uint8_t sin_val2 = sin8(tempSum_plasma + i * scaleHalf + t3);
+                    uint8_t v = sin_val + cos_val_plasma + sin_val2;
+                    final_color = ColorFromPalette(currentPalette, v + time_offset);
+                } else {
+                    // --- Solid Color Calculation ---
+                    uint8_t r = (color >> 11) & 0x1F;
+                    uint8_t g = (color >> 5) & 0x3F;
+                    uint8_t b = color & 0x1F;
+                    final_color = CRGB((r * 255) / 31, (g * 255) / 63, (b * 255) / 31);
+                }
+
+                // Apply blink brightness and global brightness scale
+                final_color.r = (uint8_t)(final_color.r * blinkBrightness * globalBrightnessScale);
+                final_color.g = (uint8_t)(final_color.g * blinkBrightness * globalBrightnessScale);
+                final_color.b = (uint8_t)(final_color.b * blinkBrightness * globalBrightnessScale);
+
+                dma_display->drawPixel(x + i, y + j, dma_display->color565(final_color.r, final_color.g, final_color.b));
+            }
+            // This must remain in the inner loop
+            if (usePlasma) {
+                x_val_plasma += scale;
+            }
         }
     }
 }
 
 // NEW: Update idle eye hover animation
 void updateIdleHoverAnimation() {
- unsigned long current_ms = millis();
+    const uint32_t currentMs = millis();
 
-    // Calculate Y offset (vertical hover)
-    float progress_y = (float)(current_ms % IDLE_HOVER_PERIOD_MS_Y) / IDLE_HOVER_PERIOD_MS_Y; // 0.0 to 1.0
-    float radians_y = progress_y * TWO_PI; // 0 to 2*PI
-    idleEyeYOffset = round(sin(radians_y) * IDLE_HOVER_AMPLITUDE_Y);
+    const int prevIdleYOffset = idleEyeYOffset;
+    const int prevIdleXOffset = idleEyeXOffset;
 
-    // Calculate X offset (horizontal hover) - NEW
-    float progress_x = (float)(current_ms % IDLE_HOVER_PERIOD_MS_X) / IDLE_HOVER_PERIOD_MS_X; // 0.0 to 1.0
-    // To make the X movement slightly out of phase with Y for a more circular/oval path,
-    // you could add a phase shift to radians_x, e.g., + PI/2 for circular if periods were same.
-    // With different periods, it will naturally create a complex path.
-    float radians_x = progress_x * TWO_PI; // + (PI / 2.0f) if you want X to lead Y by 90 degrees if periods were same
-    idleEyeXOffset = round(cos(radians_x) * IDLE_HOVER_AMPLITUDE_X); // Using cos for X and sin for Y gives a circular/elliptical path
+    if (IDLE_HOVER_PERIOD_MS_Y > 0) {
+        const uint32_t phaseY = (static_cast<uint64_t>(currentMs % IDLE_HOVER_PERIOD_MS_Y) << 16) / IDLE_HOVER_PERIOD_MS_Y;
+        const int32_t sinY = sin16(static_cast<uint16_t>(phaseY));
+        idleEyeYOffset = static_cast<int>((sinY * IDLE_HOVER_AMPLITUDE_Y + 16384) >> 15);
+    } else {
+        idleEyeYOffset = 0;
+    }
+
+    if (IDLE_HOVER_PERIOD_MS_X > 0) {
+        const uint32_t phaseX = (static_cast<uint64_t>(currentMs % IDLE_HOVER_PERIOD_MS_X) << 16) / IDLE_HOVER_PERIOD_MS_X;
+        const int32_t cosX = cos16(static_cast<uint16_t>(phaseX));
+        idleEyeXOffset = static_cast<int>((cosX * IDLE_HOVER_AMPLITUDE_X + 16384) >> 15);
+    } else {
+        idleEyeXOffset = 0;
+    }
+
+    if (idleEyeYOffset != prevIdleYOffset || idleEyeXOffset != prevIdleXOffset) {
+        facePlasmaDirty = true;
+    }
 }
+
+
 
 // NEW: Update eye bounce animation (Modified for multiple bounces)
 void updateEyeBounceAnimation() {
+    int newOffset = currentEyeYOffset;
+
     if (!isEyeBouncing) {
-        currentEyeYOffset = 0; // Ensure offset is zero when not bouncing
-        eyeBounceCount = 0;    // Reset count when not bouncing
+        eyeBounceCount = 0;
+        if (newOffset != 0) {
+            newOffset = 0;
+            facePlasmaDirty = true;
+        }
+        currentEyeYOffset = newOffset;
         return;
     }
 
     unsigned long elapsed = millis() - eyeBounceStartTime;
 
-if (elapsed >= EYE_BOUNCE_DURATION) {
-        eyeBounceCount++; // Increment bounce counter
+    if (elapsed >= EYE_BOUNCE_DURATION) {
+        eyeBounceCount++;
         if (eyeBounceCount >= MAX_EYE_BOUNCES) {
             isEyeBouncing = false;
-            currentEyeYOffset = 0;
-            eyeBounceCount = 0; // Reset for next trigger
+            newOffset = 0;
+            eyeBounceCount = 0;
 
-            // Revert to the previous view (NEW)
-            if (currentView == 17) { // Only revert if we are in the "Spooked" view due to bounce
-                currentView = viewBeforeEyeBounce; // <<< MODIFIED: Revert using the dedicated variable
-                saveLastView(currentView); // Persist the view change
+            if (currentView == 17) {
+                currentView = viewBeforeEyeBounce;
+                saveLastView(currentView);
                 Serial.printf("Eye bounce finished. Reverting to view: %d\n", currentView);
                 if (deviceConnected) {
-                    xTaskNotifyGive(bleNotifyTaskHandle); // Notify BLE client of view change
+                    xTaskNotifyGive(bleNotifyTaskHandle);
                 }
             }
+
+            if (currentEyeYOffset != newOffset) {
+                facePlasmaDirty = true;
+            }
+            currentEyeYOffset = newOffset;
             return;
         } else {
-            // Start the next bounce in the sequence
-            eyeBounceStartTime = millis(); // Reset start time for the new bounce
-            elapsed = 0; // Reset elapsed time for the new bounce calculation
+            eyeBounceStartTime = millis();
+            elapsed = 0;
         }
     }
 
-    // Simple "down then up" triangular wave for the current bounce:
-    unsigned long halfDuration = EYE_BOUNCE_DURATION / 2;
-    if (elapsed < halfDuration) { // Going down
-        currentEyeYOffset = map(elapsed, 0, halfDuration, 0, EYE_BOUNCE_AMPLITUDE);
-    } else { // Going back up
-        currentEyeYOffset = map(elapsed, halfDuration, EYE_BOUNCE_DURATION, EYE_BOUNCE_AMPLITUDE, 0);
+    const unsigned long halfDuration = EYE_BOUNCE_DURATION / 2;
+    if (elapsed < halfDuration) {
+        newOffset = map(elapsed, 0, halfDuration, 0, EYE_BOUNCE_AMPLITUDE);
+    } else {
+        newOffset = map(elapsed, halfDuration, EYE_BOUNCE_DURATION, EYE_BOUNCE_AMPLITUDE, 0);
+    }
+
+    if (newOffset != currentEyeYOffset) {
+        currentEyeYOffset = newOffset;
+        facePlasmaDirty = true;
     }
 }
+
 void drawPlasmaFace() {
    // Combine bounce and idle hover offsets
   // Combine bounce and idle hover offsets
@@ -666,12 +936,14 @@ void updatePlasmaFace()
   {
     lastUpdate = now;
     time_counter += plasmaSpeed; // Update plasma animation counter
+    facePlasmaDirty = true;
   }
 
   if (now - lastPaletteChange > paletteInterval)
   {
     lastPaletteChange = now;
     currentPalette = palettes[random(0, sizeof(palettes) / sizeof(palettes[0]))];
+    facePlasmaDirty = true;
   }
 }
 
@@ -732,16 +1004,6 @@ void displayLoadingBar()
   dma_display->fillRect((barX + 1) + 64, (barY * 2) + 1, progressWidth, barHeight - 2, dma_display->color565(255, 255, 255));
 }
 
-// Blink animation control with initialization
-struct blinkState
-{
-  unsigned long startTime = 0;
-  unsigned long durationMs = 700; // Default duration
-  unsigned long closeDuration = 50;
-  unsigned long holdDuration = 20;
-  unsigned long openDuration = 50;
-} blinkState;
-
 void initBlinkState()
 {
   blinkState.startTime = 0;
@@ -751,7 +1013,7 @@ void initBlinkState()
   blinkState.openDuration = 50;
 }
 
-void updateBlinkAnimation() {
+void updateBlinkAnimationOld() {
   static bool initialized = false;
   if (!initialized) {
       initBlinkState();
@@ -769,7 +1031,7 @@ void updateBlinkAnimation() {
       // Safety and validity checks: terminate blink if too much time has elapsed or if phase durations are invalid.
       if (elapsed > blinkState.durationMs * 2 || totalDuration == 0) {
           isBlinking = false;
-          blinkProgress = 0;
+          setBlinkProgress(0);
           lastEyeBlinkTime = now;
           nextBlinkDelay = random(minBlinkDelay, maxBlinkDelay);
           return;
@@ -780,44 +1042,88 @@ void updateBlinkAnimation() {
       const unsigned long phase2End = closeDur + holdDur;     // End of hold phase.
 
       if (elapsed < phase1End) {
-          // Closing phase with ease-in.
-          const float progress = static_cast<float>(elapsed) / closeDur;
-          blinkProgress = 100 * easeInQuad(progress);
+          // Closing phase with integer ease-in.
+          const unsigned long scaledProgress = (elapsed * 100UL) / closeDur;
+          const unsigned long eased = (scaledProgress * scaledProgress + 50UL) / 100UL;
+          setBlinkProgress(static_cast<int>(eased > 100UL ? 100UL : eased));
       }
       else if (elapsed < phase2End) {
           // Hold phase – full blink.
-          blinkProgress = 100;
+          setBlinkProgress(100);
       }
       else if (elapsed < totalDuration) {
-          // Opening phase with ease-out.
+          // Opening phase with integer ease-out.
           const unsigned long openElapsed = elapsed - phase2End;
-          const float progress = static_cast<float>(openElapsed) / openDur;
-          blinkProgress = 100 * (1.0f - easeOutQuad(progress));
+          const unsigned long scaledProgress = (openElapsed * 100UL) / openDur;
+          const unsigned long inv = (scaledProgress > 100UL) ? 0UL : (100UL - scaledProgress);
+          const unsigned long eased = 100UL - ((inv * inv + 50UL) / 100UL);
+          setBlinkProgress(static_cast<int>(eased > 100UL ? 100UL : eased));
       }
       else {
           // Blink cycle complete; reset variables.
           isBlinking = false;
-          blinkProgress = 0;
+          setBlinkProgress(0);
           lastEyeBlinkTime = now;
           nextBlinkDelay = random(minBlinkDelay, maxBlinkDelay);
       }
   }
   else if (now - lastEyeBlinkTime >= nextBlinkDelay) {
-      // Start a new blink cycle.
-      isBlinking = true;
-      blinkState.startTime = now;
-      blinkState.durationMs = constrain(random(minBlinkDuration, maxBlinkDuration), 50, 1000);
-
-      // Set phase durations as percentages of the overall blink duration.
-      blinkState.closeDuration = blinkState.durationMs * random(25, 35) / 100;
-      blinkState.holdDuration  = blinkState.durationMs * random(5, 15) / 100;
-      blinkState.openDuration  = blinkState.durationMs - blinkState.closeDuration - blinkState.holdDuration;
-
-      // Ensure each phase has a minimum duration (e.g. 16 ms for one frame at ~60 Hz).
-      blinkState.closeDuration = max(blinkState.closeDuration, 16UL);
-      blinkState.holdDuration  = max(blinkState.holdDuration, 16UL);
-      blinkState.openDuration  = max(blinkState.openDuration, 16UL);
+    isBlinking = true;
+    blinkState.startTime = now;
+    blinkState.durationMs = random(minBlinkDuration, maxBlinkDuration);
+    blinkState.closeDuration = blinkState.durationMs * 0.30;
+    blinkState.holdDuration = blinkState.durationMs * 0.15;
+    blinkState.openDuration = blinkState.durationMs * 0.55;
+    blinkProgress = 0;
   }
+}
+
+void updateBlinkAnimation() {
+ const unsigned long now = millis();
+
+    // Check if it's time to start a new blink
+    if (manualBlinkTrigger || (!isBlinking && (now - lastEyeBlinkTime >= nextBlinkDelay))) {
+        isBlinking = true;
+        manualBlinkTrigger = false;
+        blinkState.startTime = now;
+
+        // Randomize total blink duration and phase ratios, like in the emulator
+        unsigned long totalDuration = 400 + random(301); // 400 to 700 ms
+        float closeRatio = 0.2f + (random(21) / 100.0f); // 0.2 to 0.4
+        float holdRatio = 0.05f + (random(11) / 100.0f); // 0.05 to 0.15
+
+        blinkState.closeDuration = totalDuration * closeRatio;
+        blinkState.holdDuration = totalDuration * holdRatio;
+        blinkState.openDuration = totalDuration * (1.0f - closeRatio - holdRatio);
+        blinkProgress = 0;
+    }
+
+    // If a blink is in progress, update its state
+    if (isBlinking) {
+        const unsigned long elapsed = now - blinkState.startTime;
+        const unsigned long totalDuration = blinkState.closeDuration + blinkState.holdDuration + blinkState.openDuration;
+
+        if (elapsed < blinkState.closeDuration) {
+            float t = (float)elapsed / blinkState.closeDuration;
+            blinkProgress = 100 * easeInQuad(t);
+        } else if (elapsed < blinkState.closeDuration + blinkState.holdDuration) {
+            blinkProgress = 100;
+        } else if (elapsed < totalDuration) {
+            float t = (float)(elapsed - blinkState.closeDuration - blinkState.holdDuration) / blinkState.openDuration;
+            blinkProgress = 100 * (1.0f - easeOutQuad(t));
+        } else {
+            // Blink finished
+            isBlinking = false;
+            blinkProgress = 0;
+            lastEyeBlinkTime = now;
+            // Calculate delay for the next blink
+            nextBlinkDelay = minBlinkDelay + random(maxBlinkDelay - minBlinkDelay + 1);
+            // 15% chance of a quick "double blink"
+            if (random(100) < 15) {
+                nextBlinkDelay = 100 + random(151);
+            }
+        }
+    }
 }
 
 // Optimized rotation function
@@ -825,29 +1131,51 @@ void drawRotatedBitmap(int16_t x, int16_t y, const uint8_t *bitmap,
                        uint16_t w, uint16_t h, float cosA, float sinA,
                        uint16_t color)
 {
-  const int16_t cx = w / 2, cy = h / 2; // Center point
+    const int16_t cx = w / 2;
+    const int16_t cy = h / 2;
+    const int byteWidth = (w + 7) >> 3;
 
-  for (int16_t j = 0; j < h; j++)
-  {
-    for (int16_t i = 0; i < w; i++)
+    const int32_t cosFixed = static_cast<int32_t>(cosA * 65536.0f);
+    const int32_t sinFixed = static_cast<int32_t>(sinA * 65536.0f);
+
+    for (uint16_t j = 0; j < h; ++j)
     {
-      if (pgm_read_byte(&bitmap[j * ((w + 7) / 8) + (i / 8)]) & (1 << (7 - (i % 8))))
-      {
-        // Calculate rotated position
-        int16_t dx = i - cx;
-        int16_t dy = j - cy;
-        int16_t newX = x + lround(dx * cosA - dy * sinA);
-        int16_t newY = y + lround(dx * sinA + dy * cosA);
+        const int16_t dy = static_cast<int16_t>(j) - cy;
+        int32_t baseXFixed = (static_cast<int32_t>(-cx) * cosFixed) - (static_cast<int32_t>(dy) * sinFixed);
+        int32_t baseYFixed = (static_cast<int32_t>(-cx) * sinFixed) + (static_cast<int32_t>(dy) * cosFixed);
 
-        // Boundary check and draw
-        if (newX >= 0 && newX < PANE_WIDTH && newY >= 0 && newY < PANE_HEIGHT)
+        baseXFixed += static_cast<int32_t>(x) << 16;
+        baseYFixed += static_cast<int32_t>(y) << 16;
+
+        int32_t pixelXFixed = baseXFixed;
+        int32_t pixelYFixed = baseYFixed;
+        uint8_t currentByte = 0;
+
+        for (uint16_t i = 0; i < w; ++i)
         {
-          dma_display->drawPixel(newX, newY, color);
+            if ((i & 7U) == 0U)
+            {
+                currentByte = pgm_read_byte(&bitmap[j * byteWidth + (i >> 3)]);
+            }
+
+            if (currentByte & (0x80U >> (i & 7U)))
+            {
+                const int16_t newX = static_cast<int16_t>(pixelXFixed >> 16);
+                const int16_t newY = static_cast<int16_t>(pixelYFixed >> 16);
+
+                if (newX >= 0 && newX < PANE_WIDTH && newY >= 0 && newY < PANE_HEIGHT)
+                {
+                    dma_display->drawPixel(newX, newY, color);
+                }
+            }
+
+            pixelXFixed += cosFixed;
+            pixelYFixed += sinFixed;
         }
-      }
     }
-  }
 }
+
+
 
 void updateRotatingSpiral() {
   static unsigned long lastUpdate = 0;
@@ -881,63 +1209,73 @@ void updateRotatingSpiral() {
 
 // Draw the blinking eyes
 void blinkingEyes() {
-  // dma_display->clearScreen(); // Clear the display
-// Combine bounce and idle hover offsets
+  // Combine bounce and idle hover offsets
   int final_y_offset = currentEyeYOffset + idleEyeYOffset;
-  int final_x_offset_right = idleEyeXOffset; // X offset for the right eye section
-  int final_x_offset_left = idleEyeXOffset;  // X offset for the left eye section
+  int final_x_offset = idleEyeXOffset;
 
-// Draw  eyes
-  if (currentView == 4 || currentView == 5)
-  {
-    drawPlasmaXbm(0 + final_x_offset_right, 0 + final_y_offset, 32, 16, Eye, 0, 1.0);     // Right eye
-    drawPlasmaXbm(96 + final_x_offset_left, 0 + final_y_offset, 32, 16, EyeL, 128, 1.0); // Left eye (phase offset)
-  }
-  else if (currentView == 6)
-  {
-    drawPlasmaXbm(2 + final_x_offset_right, 2 + final_y_offset, 32, 12, semicircleeyes, 0, 1.0);    // Right eye
-    drawPlasmaXbm(94 + final_x_offset_left, 2 + final_y_offset, 32, 12, semicircleeyes, 128, 1.0); // Left eye (phase offset)
-  }
-  else if (currentView == 7)
-  {
-    drawPlasmaXbm(0 + final_x_offset_right, 0 + final_y_offset, 31, 15, x_eyes, 0, 1.0);    // Right eye
-    drawPlasmaXbm(96 + final_x_offset_left, 0 + final_y_offset, 31, 15, x_eyes, 128, 1.0); // Left eye (phase offset)
-  }
-  else if (currentView == 8)
-  {
-    drawPlasmaXbm(2 + final_x_offset_right, 0 + final_y_offset, 24, 16, slanteyes, 0, 1.0);      // Right eye
-    drawPlasmaXbm(102 + final_x_offset_left, 0 + final_y_offset, 24, 16, slanteyesL, 128, 1.0); // Left eye (phase offset)
-  }
-  else if (currentView == 9)
-  {
+  // --- Eye Configuration ---
+  const uint8_t* rightEyeBitmap = (const uint8_t*)slanteyes; // Default
+  const uint8_t* leftEyeBitmap = (const uint8_t*)slanteyesL;   // Default
+  int eyeWidth = 24, eyeHeight = 16;
+  int rightEyeX = 2, rightEyeY = 0;
+  int leftEyeX = 102, leftEyeY = 0;
+  bool usePlasma = true; // Most views use plasma
+  uint16_t solidColor = dma_display->color565(0, 255, 255); // Default cyan, not used if usePlasma is true
+
+  // Select eye assets and properties based on the current view
+  switch (currentView) {
+    case 4: // Normal
+    case 5: // Blush
+      rightEyeBitmap = (const uint8_t*)Eye;
+      leftEyeBitmap = (const uint8_t*)EyeL;
+      eyeWidth = 32; eyeHeight = 16;
+      rightEyeX = 0; rightEyeY = 0;
+      leftEyeX = 96; leftEyeY = 0;
+      break;
+    case 6: // Semicircle
+      rightEyeBitmap = (const uint8_t*)semicircleeyes;
+      leftEyeBitmap = (const uint8_t*)semicircleeyes; // Same bitmap, different plasma offset
+      eyeWidth = 32; eyeHeight = 12;
+      rightEyeX = 2; rightEyeY = 2;
+      leftEyeX = 94; leftEyeY = 2;
+      break;
+    case 7: // X eyes
+      rightEyeBitmap = (const uint8_t*)x_eyes;
+      leftEyeBitmap = (const uint8_t*)x_eyes; // Same bitmap
+      eyeWidth = 31; eyeHeight = 15;
+      rightEyeX = 0; rightEyeY = 0;
+      leftEyeX = 96; leftEyeY = 0;
+      break;
+    case 8: // Slant eyes (This is also the default)
+      // Values are already set by default
+      break;
+    case 9: // Spiral eyes
+      return; // Spiral view handles its own drawing, so we exit here.
+    case 17: // Circle eyes
+      rightEyeBitmap = (const uint8_t*)circleeyes;
+      leftEyeBitmap = (const uint8_t*)circleeyes; // Same bitmap
+      eyeWidth = 25; eyeHeight = 21;
+      rightEyeX = 10; rightEyeY = 2;
+      leftEyeX = 93; leftEyeY = 2;
+      break;
+  // Default case uses the slanteyes defined before the switch
 
   }
-  else if (currentView == 17)
-  {
-    drawPlasmaXbm(10 + final_x_offset_right, 2 + final_y_offset, 25, 21, circleeyes, 0, 1.0);    // Right eye
-    drawPlasmaXbm(93 + final_x_offset_left, 2 + final_y_offset, 25, 21, circleeyes, 128, 1.0); // Left eye (phase offset)
-  }
 
-  if (isBlinking)
-  {
-    // Calculate the height of the black box
-    int boxHeight = map(blinkProgress, 0, 100, 0, 16); // Maybe use 16 (original panel height?) instead of 20? Check eye bitmap height.
-    // Let's use 16 as the max height to cover typical eye bitmaps
-    //boxHeight = map(blinkProgress, 0, 100, 0, 16);
-    // Draw black boxes over the eyes - Only draw if height > 0
-    if (boxHeight > 0) {
-      // Determine the coordinates precisely based on where Eye and EyeL are drawn (0,0 and 96,0 ?)
-      // Assume Eye is 32x16 drawn at (0,0) and EyeL is 32x16 drawn at (96,0)
-      if (currentView == 17) {
-        // For the "Spooked" view, we need to cover the eyes differently
-        dma_display->fillRect(10 + final_x_offset_right, 2 + final_y_offset, 25, boxHeight, 0);  // Cover the right eye (coords match drawPlasmaXbm)
-        dma_display->fillRect(93 + final_x_offset_left, 2 + final_y_offset, 25, boxHeight, 0); // Cover the left eye (coords match drawPlasmaXbm)
-      } else {
-      dma_display->fillRect(0 + final_x_offset_right, 0 + final_y_offset, 32, boxHeight, 0);  // Cover the right eye (coords match drawPlasmaXbm)
-      dma_display->fillRect(96 + final_x_offset_left, 0 + final_y_offset, 32, boxHeight, 0); // Cover the left eye (coords match drawPlasmaXbm)
-  }}
+  // Redundant direct draw branches removed — the switch above sets the correct bitmaps/positions
+  // and the subsequent drawBitmapAdvanced calls handle drawing for the selected view.
+
+  // Draw the right eye (viewer's perspective)
+  drawBitmapAdvanced(rightEyeX + final_x_offset, rightEyeY + final_y_offset, 
+                     eyeWidth, eyeHeight, rightEyeBitmap, solidColor, 
+                     blinkProgress, usePlasma, 0);
+
+  // Draw the left eye with a plasma phase offset if plasma is used
+  drawBitmapAdvanced(leftEyeX + final_x_offset, leftEyeY + final_y_offset, 
+                     eyeWidth, eyeHeight, leftEyeBitmap, solidColor, 
+                     blinkProgress, usePlasma, 128);
 }
-}
+
 // Function to disable/clear the blush display when the effect is over
 void disableBlush()
 {
@@ -952,19 +1290,15 @@ void updateBlush()
 {
   unsigned long now = millis();
   unsigned long elapsed = now - blushStateStartTime;
-  bool revertViewAfterBlush = false; // Flag to indicate if we should revert
-  uint8_t viewBeforeBlushOverlay = previousView; // Capture what previousView was at start of this blush cycle
-
-static uint8_t originalViewBeforeBlush = 0; // Store the view that was active when an overlay blush started
-  static bool wasBlushOverlay = false; // Flag to know if this blush cycle was an overlay
 
   switch (blushState)
   {
   case BLUSH_FADE_IN:
     if (elapsed < fadeInDuration)
     {
-      // Gradually increase brightness from 0 to 255
-      blushBrightness = map(elapsed, 0, fadeInDuration, 0, 255);
+      // Use ease-in for a smooth start
+      float progress = (float)elapsed / fadeInDuration;
+      blushBrightness = 255 * easeInQuad(progress);
     }
     else
     {
@@ -977,9 +1311,9 @@ static uint8_t originalViewBeforeBlush = 0; // Store the view that was active wh
   case BLUSH_FULL:
     if (elapsed >= fullDuration)
     {
-      // After 6 seconds at full brightness, start fading out
+      // After full brightness time, start fading out
       blushState = BLUSH_FADE_OUT;
-      blushStateStartTime = now; // Restart timer for fade‑out
+      blushStateStartTime = now; // Restart timer for fade-out
     }
     // Brightness remains at 255 during this phase.
     break;
@@ -987,8 +1321,9 @@ static uint8_t originalViewBeforeBlush = 0; // Store the view that was active wh
   case BLUSH_FADE_OUT:
     if (elapsed < fadeOutDuration)
     {
-      // Decrease brightness gradually from 255 to 0
-      blushBrightness = map(elapsed, 0, fadeOutDuration, 255, 0);
+      // Use ease-out for a smooth end
+      float progress = (float)elapsed / fadeOutDuration;
+      blushBrightness = 255 * (1.0f - easeOutQuad(progress));
     }
     else
     {
@@ -996,10 +1331,10 @@ static uint8_t originalViewBeforeBlush = 0; // Store the view that was active wh
       blushState = BLUSH_INACTIVE;
       disableBlush();
 
-      // NEW: Revert to previous view if this was an overlay blush
-      if (wasBlushOverlay) { // Check the flag set at trigger time
-          currentView = originalViewBeforeBlush; // Revert to the view stored at the start of overlay
-          saveLastView(currentView); // Persist the view change
+      // Revert to previous view if this was an overlay blush
+      if (wasBlushOverlay) {
+          currentView = originalViewBeforeBlush;
+          saveLastView(currentView);
           Serial.printf("Blush overlay finished. Reverting to view: %d\n", currentView);
           if (deviceConnected) {
               xTaskNotifyGive(bleNotifyTaskHandle);
@@ -1010,7 +1345,7 @@ static uint8_t originalViewBeforeBlush = 0; // Store the view that was active wh
     break;
 
   default:
-  wasBlushOverlay = false; // Ensure flag is reset if state becomes inactive for other reasons
+    wasBlushOverlay = false; // Ensure flag is reset if state becomes inactive
     break;
   }
 }
@@ -1054,8 +1389,12 @@ void drawTransFlag() {
 }
 
 void baseFace() {
-  int final_y_offset = currentEyeYOffset + idleEyeYOffset; // (NEW)
-  blinkingEyes(); // Handles drawing eyes (which now includes y_offset if bouncing)
+  // Combine all offsets for final positioning.
+  // These will be used for any facial feature that should move with the hover/bounce effect.
+  int final_y_offset = currentEyeYOffset + idleEyeYOffset;
+  int final_x_offset = idleEyeXOffset;
+
+  blinkingEyes(); // This function now correctly uses the global offsets internally
 
   if (mouthOpen) {
     drawPlasmaXbm(0, 10, 64, 22, maw2, 0, 1.0);
@@ -1064,23 +1403,45 @@ void baseFace() {
     drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 0, 1.0);     // Right eye
     drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0); // Left eye (phase offset)
   }
-  if (currentView > 3)
-  { // Only draw blush effect for face views, not utility views
-   if (blushState != BLUSH_INACTIVE) { // Only draw if blush is active
-        drawBlush();
-    }
-  }
+
   drawPlasmaXbm(56, 4 + final_y_offset, 8, 8, nose, 64, 2.0);
   drawPlasmaXbm(64, 4 + final_y_offset, 8, 8, noseL, 64, 2.0);
+
+  if (currentView > 3)
+  { // Only draw blush effect for face views, not utility views
+    if (blushState != BLUSH_INACTIVE) { // Only draw if blush is active
+      drawBlush();
+    }
+  }
+  facePlasmaDirty = false;
 }
 
 void patternPlasma() {
+  static uint16_t paletteLUT[256];
+  static CRGBPalette16 cachedPalette;
+  static uint16_t cachedBrightnessScale = 0;
+  static bool paletteLUTValid = false;
+
+  if (!paletteLUTValid || cachedBrightnessScale != globalBrightnessScaleFixed || std::memcmp(&cachedPalette, &currentPalette, sizeof(CRGBPalette16)) != 0) {
+    const uint16_t scale = globalBrightnessScaleFixed;
+    for (int i = 0; i < 256; ++i) {
+      CRGB color = ColorFromPalette(currentPalette, static_cast<uint8_t>(i));
+      color.r = static_cast<uint8_t>((static_cast<uint16_t>(color.r) * scale + 128) >> 8);
+      color.g = static_cast<uint8_t>((static_cast<uint16_t>(color.g) * scale + 128) >> 8);
+      color.b = static_cast<uint8_t>((static_cast<uint16_t>(color.b) * scale + 128) >> 8);
+      paletteLUT[i] = dma_display->color565(color.r, color.g, color.b);
+    }
+    cachedPalette = currentPalette;
+    cachedBrightnessScale = scale;
+    paletteLUTValid = true;
+  }
+
   // Pre-calculate values that only depend on time_counter
   // These are constant for the entire frame draw
   const uint8_t wibble = sin8(time_counter);
   // Pre-calculate the cosine term and the division by 8 (as shift)
   // Note: cos8 argument is uint8_t, so -time_counter wraps around correctly.
-  const uint8_t cos8_val_shifted = cos8((uint8_t)(-time_counter)) >> 3; // Calculate cos8(-t)/8 once
+  const uint8_t cos8_val_shifted = cos8(static_cast<uint8_t>(-time_counter)) >> 3; // Calculate cos8(-t)/8 once
   const uint16_t time_val = time_counter; // Use a local copy for calculations
   const uint16_t term2_factor = 128 - wibble; // Calculate 128 - sin8(t) once
 
@@ -1105,35 +1466,12 @@ void patternPlasma() {
           v += cos16(y * term2_factor + time_val); // cos16(y*(128-wibble) + t)
           v += sin16(y * term3_x_factor);          // sin16(y * (x * cos8(-t) >> 3))
 
-          // Get color from palette using the upper 8 bits of 'v'
-          // The >> 8 effectively scales and wraps the 16-bit value to 8 bits for palette lookup
-          currentColor = ColorFromPalette(currentPalette, (uint8_t)(v >> 8));
-
-          // Draw the pixel using RGB565 format directly if possible
-          // This is often faster than drawPixelRGB888 as it might avoid internal conversion.
-          uint16_t color565 = dma_display->color565(currentColor.r, currentColor.g, currentColor.b);
+          const uint16_t color565 = paletteLUT[static_cast<uint8_t>(v >> 8)];
           dma_display->drawPixel(x, y, color565);
-
-          // Original drawing call (keep for reference or if color565 doesn't work as expected)
-          // dma_display->drawPixelRGB888(x, y, currentColor.r, currentColor.g, currentColor.b);
       }
   }
-
-  // Increment counters (outside the loops)
-  ++time_counter;
-  // ++cycles; // If 'cycles' is purely for palette change, handle it there
-  // ++fps; // FPS should be calculated globally in the main loop, not here per-effect
-
-  // Palette changing logic (moved cycle counting here)
-  static uint16_t plasma_cycles = 0; // Use a static local counter for this effect
-  plasma_cycles++;
-  if (plasma_cycles >= 1024) {
-      // time_counter = 0; // Resetting time_counter might make the animation jump? Optional.
-      plasma_cycles = 0; // Reset cycle counter for this effect
-      // Select next palette randomly
-      currentPalette = palettes[random(0, sizeof(palettes) / sizeof(palettes[0]))];
-  }
 }
+
 
 void displaySleepMode() {
   static unsigned long lastBlinkTime = 0;
@@ -1168,6 +1506,7 @@ void displaySleepMode() {
     // Apply breathing effect to overall brightness
     uint8_t currentBrightness = sleepBrightness * brightness;
     dma_display->setBrightness8(currentBrightness);
+    updateGlobalBrightnessScale(currentBrightness);
   }
 
   dma_display->clearScreen();
@@ -1423,58 +1762,67 @@ void updateAndDrawFullScreenSpiral(SpiralColorMode colorMode) { // Added colorMo
     // Update animation parameters (rotation, color scroll - color scroll only if palette mode)
     fullScreenSpiralAngle += FULL_SPIRAL_ROTATION_SPEED_RAD_PER_UPDATE;
     if (fullScreenSpiralAngle >= TWO_PI) fullScreenSpiralAngle -= TWO_PI;
-    
+
     if (colorMode == SPIRAL_COLOR_PALETTE) { // Only update color offset if using palette
         fullScreenSpiralColorOffset += FULL_SPIRAL_COLOR_SCROLL_SPEED;
     }
 
     const int centerX = PANE_WIDTH / 2;
     const int centerY = PANE_HEIGHT / 2;
-    const float max_r_squared = powf(hypotf(PANE_WIDTH / 2.0f, PANE_HEIGHT / 2.0f) * 1.1f, 2);
-    const float delta_theta_arm = 0.05f;
-    float min_r_to_draw = 1.2f;
+    const float maxRadiusSquared = powf(hypotf(PANE_WIDTH / 2.0f, PANE_HEIGHT / 2.0f) * 1.1f, 2.0f);
+    const float deltaTheta = 0.05f;
+    const float growthFactor = expf(LOG_SPIRAL_B_COEFF * deltaTheta);
+    const float rotCos = cosf(deltaTheta);
+    const float rotSin = sinf(deltaTheta);
 
-    for (float theta_arm = 0.0f; ; theta_arm += delta_theta_arm) {
-        float r = LOG_SPIRAL_A_COEFF * expf(LOG_SPIRAL_B_COEFF * theta_arm);
+    float radius = LOG_SPIRAL_A_COEFF;
+    float sinAngle = sinf(fullScreenSpiralAngle);
+    float cosAngle = cosf(fullScreenSpiralAngle);
 
-        if ((r * r) > max_r_squared) {
-            break;
-        }
-        if (theta_arm > 20 * TWO_PI) {
-             break;
-        }
+    float x = radius * cosAngle;
+    float y = radius * sinAngle;
 
-        float display_angle_rad = theta_arm + fullScreenSpiralAngle;
-        float cos_val = cosf(display_angle_rad);
-        float sin_val = sinf(display_angle_rad);
+    float colorPhase = fullScreenSpiralColorOffset;
+    const float colorPhaseStep = deltaTheta * SPIRAL_ARM_COLOR_FACTOR;
 
-        int x = static_cast<int>(centerX + r * cos_val + 0.5f);
-        int y = static_cast<int>(centerY + r * sin_val + 0.5f);
+    const int maxSteps = 512;
+    for (int step = 0; step < maxSteps; ++step) {
+        const int drawX = static_cast<int>(centerX + x + 0.5f);
+        const int drawY = static_cast<int>(centerY + y + 0.5f);
 
-        uint16_t pixel_color; // Declare pixel_color
-
+        uint16_t pixel_color;
         if (colorMode == SPIRAL_COLOR_WHITE) {
-            pixel_color = dma_display->color565(255, 255, 255); // Pure white
-        } else // SPIRAL_COLOR_PALETTE (default)
-        {
-            uint8_t color_index = static_cast<uint8_t>(theta_arm * SPIRAL_ARM_COLOR_FACTOR + fullScreenSpiralColorOffset);
+            pixel_color = dma_display->color565(255, 255, 255);
+        } else {
+            const uint8_t color_index = static_cast<uint8_t>(colorPhase);
             CRGB crgb_color = ColorFromPalette(RainbowColors_p, color_index, 255, LINEARBLEND);
             pixel_color = dma_display->color565(crgb_color.r, crgb_color.g, crgb_color.b);
         }
-        
-        // Thickness drawing (same optimized logic as before)
+
         if (SPIRAL_THICKNESS_RADIUS == 0) {
-            if (x >= 0 && x < PANE_WIDTH && y >= 0 && y < PANE_HEIGHT) {
-                dma_display->drawPixel(x, y, pixel_color);
+            if (drawX >= 0 && drawX < PANE_WIDTH && drawY >= 0 && drawY < PANE_HEIGHT) {
+                dma_display->drawPixel(drawX, drawY, pixel_color);
             }
-        } else { 
-            int side_length = SPIRAL_THICKNESS_RADIUS * 2 + 1;
-            int start_x = x - SPIRAL_THICKNESS_RADIUS;
-            int start_y = y - SPIRAL_THICKNESS_RADIUS;
+        } else {
+            const int side_length = SPIRAL_THICKNESS_RADIUS * 2 + 1;
+            const int start_x = drawX - SPIRAL_THICKNESS_RADIUS;
+            const int start_y = drawY - SPIRAL_THICKNESS_RADIUS;
             dma_display->fillRect(start_x, start_y, side_length, side_length, pixel_color);
+        }
+
+        colorPhase += colorPhaseStep;
+
+        const float rotatedX = x * rotCos - y * rotSin;
+        const float rotatedY = x * rotSin + y * rotCos;
+        x = rotatedX * growthFactor;
+        y = rotatedY * growthFactor;
+
+        if ((x * x + y * y) > maxRadiusSquared) {
+            break;
         }
     }
 }
+
 
 
 void setup() {
@@ -1493,8 +1841,14 @@ void setup() {
   Serial.println(" ");
   Serial.println(" ");
 
+  updateGlobalBrightnessScale(userBrightness);
+
 #if DEBUG_MODE
   Serial.println("DEBUG MODE ENABLED");
+  Serial.printf("Firmware: %s\n", FIRMWARE_VERSION);
+Serial.printf("Commit: %s\n", GIT_COMMIT);
+Serial.printf("Branch: %s\n", GIT_BRANCH);
+Serial.printf("Build: %s %s\n", BUILD_DATE, BUILD_TIME);
 #endif
 
   initTempSensor(); // Initialize Temperature Sensor
@@ -1512,18 +1866,49 @@ void setup() {
   // int hwBrightness = map(userBrightness, 1, 100, 1, 255);
   Serial.printf("Stored brightness: %d\n", userBrightness);
 
+/*
+// --- Initialize Scrolling Text ---
+  dma_display->setFont(&FreeSans9pt7b); // Set font to measure text width
+  dma_display->setTextSize(1);
+  strcpy(txt, "LumiFur Controller - FW v" FIRMWARE_VERSION);
+  int16_t x1, y1;
+  uint16_t w, h;
+  dma_display->getTextBounds(txt, 0, 0, &x1, &y1, &w, &h);
+  textMin = -w;
+  textX = dma_display->width();
+  textY = (dma_display->height() - h) / 2 + h; // Center vertically
+*/
   ///////////////////// Setup BLE ////////////////////////
   Serial.println("Initializing BLE...");
   //NimBLEDevice::init("LumiFur_Controller");
   NimBLEDevice::init("LF-052618");
-  //NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
-  //NimBLEDevice::setPower(ESP_PWR_LVL_P21, NimBLETxPowerType::All); // Power level 21 (highest) for best range
+  // NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
+  // NimBLEDevice::setPower(ESP_PWR_LVL_P21, NimBLETxPowerType::All); // Power level 21 (highest) for best range
   NimBLEDevice::setPower(ESP_PWR_LVL_P9, NimBLETxPowerType::All); // Power level 21 (highest) for best range
   NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(&serverCallbacks);
 
   NimBLEService *pService = pServer->createService(SERVICE_UUID);
+
+  NimBLECharacteristic *pDeviceInfoCharacteristic = pService->createCharacteristic(
+      INFO_CHARACTERISTIC_UUID,
+      NIMBLE_PROPERTY::READ);
+
+  // Construct JSON string
+  std::string jsonInfo = std::string("{") +
+                         "\"fw\":\"" + std::string(FIRMWARE_VERSION) + "\"," +
+                         "\"commit\":\"" + std::string(GIT_COMMIT) + "\"," +
+                         "\"branch\":\"" + std::string(GIT_BRANCH) + "\"," +
+                         "\"build\":\"" + std::string(BUILD_DATE) + " " + BUILD_TIME + "\"," +
+                         "\"model\":\"" + std::string(DEVICE_MODEL) + "\"," +
+                         "\"compat\":\"" + std::string(APP_COMPAT_VERSION) + "\"," +
+                         "\"id\":\"" + NimBLEDevice::getAddress().toString() + "\"" +
+                         "}";
+
+  pDeviceInfoCharacteristic->setValue(jsonInfo.c_str());
+  Serial.println("Device Info Service started");
+  Serial.println(jsonInfo.c_str());
 
   // Face control characteristic with encryption
   pFaceCharacteristic = pService->createCharacteristic(
@@ -1599,8 +1984,6 @@ Serial.println(pTemperatureLogsCharacteristic->getUUID().toString().c_str());
 Serial.print("Properties: ");
 Serial.println(pTemperatureLogsCharacteristic->getProperties()); // Print properties as integer
 
-
-
 // Set up descriptors
 NimBLE2904 *faceDesc = pFaceCharacteristic->create2904();
 faceDesc->setFormat(NimBLE2904::FORMAT_UINT8);
@@ -1638,6 +2021,19 @@ pBrightnessCharacteristic = pService->createCharacteristic(
       NIMBLE_PROPERTY::WRITE_NR);
 pBrightnessCharacteristic->setCallbacks(&brightnessCallbacks);
 // initialize with current brightness
+
+pOtaCharacteristic = pService->createCharacteristic(
+    OTA_CHARACTERISTIC_UUID,
+    NIMBLE_PROPERTY::READ |
+        NIMBLE_PROPERTY::WRITE |
+        NIMBLE_PROPERTY::WRITE_NR |
+        NIMBLE_PROPERTY::NOTIFY);
+pOtaCharacteristic->setCallbacks(&otaCallbacks);
+NimBLEDescriptor *otaDesc = pOtaCharacteristic->createDescriptor(
+    "2901",
+    NIMBLE_PROPERTY::READ,
+    20);
+otaDesc->setValue("OTA Control");
 pBrightnessCharacteristic->setValue(&userBrightness, 1);
 
 // nimBLEService* pBaadService = pServer->createService("BAAD");
@@ -1679,10 +2075,12 @@ mxconfig.double_buff = true; // <------------- Turn on double buffer
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   dma_display->begin();
   dma_display->setBrightness8(userBrightness);
+  updateGlobalBrightnessScale(userBrightness);
 #else
   chain = new MatrixPanel_I2S_DMA(mxconfig);
   chain->begin();
   chain->setBrightness8(userBrightness);
+  updateGlobalBrightnessScale(userBrightness);
   // create VirtualDisplay object based on our newly created dma_display object
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
 #endif
@@ -1771,7 +2169,10 @@ if (!pixelDustEffectInstance) {
   currentPalette = RainbowColors_p;
 
 
-  ////////Setup Bouncing Squares////////
+  snprintf(txt, sizeof(txt), "HAVE A WONDERFUL DAY!");
+  initializeScrollingText();
+
+////////Setup Bouncing Squares////////
   myDARK = dma_display->color565(64, 64, 64);
   myWHITE = dma_display->color565(192, 192, 192);
   myRED = dma_display->color565(255, 0, 0);
@@ -1864,6 +2265,7 @@ digitalWrite(MIC_PD_PIN, HIGH);
   setupAdaptiveBrightness();
   // uint8_t wheelval = 0; // Wheel value for color cycling
 
+//  #if DEBUG_MODE
   while (loadingProgress <= loadingMax)
   {
     // Boot screen
@@ -1873,31 +2275,31 @@ digitalWrite(MIC_PD_PIN, HIGH);
     dma_display->setCursor(0, 10);
     dma_display->print("LumiFur");
     dma_display->setCursor(64, 10);
-    dma_display->print("LumiFur"); 
-    dma_display->setTextSize(1);  
+    dma_display->print("LumiFur");
+    dma_display->setTextSize(1);
     dma_display->setCursor(0, 20);
     dma_display->setTextColor(dma_display->color565(255, 255, 255));
     dma_display->setFont(&TomThumb); // Set font
-    dma_display->print("Booting..."); 
+    dma_display->print("Booting...");
     dma_display->setCursor(64, 20);
-    dma_display->print("Booting..."); 
-      displayLoadingBar();
-      dma_display->flipDMABuffer();
-      loadingProgress++;
-      delay(15); // ~1.5 s total at loadingMax=100
-    
+    dma_display->print("Booting...");
+    displayLoadingBar();
+    dma_display->flipDMABuffer();
+    loadingProgress++;
+    delay(15); // ~1.5 s total at loadingMax=100
   }
+//#endif
 
-   // Spawn BLE notify task (you already have):
-   xTaskCreatePinnedToCore(
-    bleNotifyTask,
-    "BLE Task",
-    4096,
-    NULL,
-    1,
-    &bleNotifyTaskHandle,
-    CONFIG_BT_NIMBLE_PINNED_TO_CORE
-  );
+  // Spawn BLE notify task (you already have):
+  xTaskCreatePinnedToCore(
+      bleNotifyTask,
+      "BLE Task",
+      4096,
+      NULL,
+      1,
+      &bleNotifyTaskHandle,
+      CONFIG_BT_NIMBLE_PINNED_TO_CORE
+    );
 
   // Now spawn the display task pinned to the other core (we'll pick core 1):
   xTaskCreatePinnedToCore(
@@ -2041,12 +2443,14 @@ static unsigned long lastSoundTime = 0;      // When the mouth was last consider
 
 void updateMouthMovement() {
     unsigned long now = millis();
+    const bool initialMouthOpen = mouthOpen;
     size_t bytesRead = 0;
 
     esp_err_t err = i2s_read(
         I2S_PORT,
         mouthBuf,
         sizeof(mouthBuf),
+
         &bytesRead,
         pdMS_TO_TICKS(10) // Using a small timeout instead of portMAX_DELAY to prevent blocking indefinitely
     );
@@ -2067,7 +2471,8 @@ void updateMouthMovement() {
         mawBrightness = 20; // Minimum brightness
 
         // --- TELEPLOT for no data/error ---
-        #if DEBUG_MODE
+
+        #if DEBUG_MICROPHONE
         Serial.printf(">mic_avg_abs_signal:0\n");
         Serial.printf(">mic_smoothed_signal:%.0f\n", smoothedSignalLevel);
         Serial.printf(">mic_ambient_noise:%.0f\n", ambientNoiseLevel);
@@ -2075,6 +2480,9 @@ void updateMouthMovement() {
         Serial.printf(">mic_maw_brightness:%u\n", mawBrightness);
         Serial.printf(">mic_mouth_open:%d\n", mouthOpen ? 1 : 0);
         #endif
+        if (mouthOpen != initialMouthOpen) {
+            facePlasmaDirty = true;
+        }
         return;
         
     }
@@ -2087,11 +2495,14 @@ void updateMouthMovement() {
         }
         smoothedSignalLevel *= (1.0f - SIGNAL_EMA_ALPHA);
         mawBrightness = 20;
-        #if DEBUG_MODE
+        #ifdef DEBUG_MIC
         Serial.printf(">mic_avg_abs_signal:0\n");
         Serial.printf(">mic_smoothed_signal:%.0f\n", smoothedSignalLevel);
         # endif
         // ... (rest of teleplot for no samples)
+        if (mouthOpen != initialMouthOpen) {
+            facePlasmaDirty = true;
+        }
         return;
     }
 
@@ -2166,7 +2577,8 @@ void updateMouthMovement() {
 
 
     // --- TELEPLOT LINES ---
-    #if DEBUG_MODE
+
+    #if DEBUG_MICROPHONE 
     Serial.printf(">mic_avg_abs_signal:%.0f\n", currentAvgAbsSignal);
     Serial.printf(">mic_smoothed_signal:%.0f\n", smoothedSignalLevel);
     Serial.printf(">mic_ambient_noise:%.0f\n", ambientNoiseLevel);
@@ -2174,6 +2586,10 @@ void updateMouthMovement() {
     Serial.printf(">mic_maw_brightness:%u\n", mawBrightness);
     Serial.printf(">mic_mouth_open:%d\n", mouthOpen ? 1 : 0);
     # endif
+
+    if (mouthOpen != initialMouthOpen) {
+        facePlasmaDirty = true;
+    }
 }
 // Runs one frame of the Pixel Dust animation
 void PixelDustEffect() {
@@ -2275,6 +2691,7 @@ void PixelDustEffect() {
 
 void displayCurrentView(int view) {
   static int previousViewLocal = -1;           // Track the last active view
+  static uint8_t colorWheelOffset = 0; // For scrolling text color
 
   // If we're in sleep mode, don't display the normal view
   if (sleepModeActive) {
@@ -2285,6 +2702,7 @@ void displayCurrentView(int view) {
 
   if (view != previousViewLocal)
   { // Check if the view has changed
+    facePlasmaDirty = true;
     if (view == 5)
     {
       // Reset fade logic when entering the blush view
@@ -2304,7 +2722,7 @@ void displayCurrentView(int view) {
 
   switch (view) {
 
-  case 0: // Scrolling text Debug View
+  case VIEW_DEBUG_SQUARES: // Scrolling text Debug View
     // Every frame, we clear the background and draw everything anew.
     // This happens "in the background" with double buffering, that's
     // why you don't see everything flicker. It requires double the RAM,
@@ -2336,7 +2754,7 @@ void displayCurrentView(int view) {
   }
     break;
 
-  case 1: // Loading bar effect
+  case VIEW_LOADING_BAR: // Loading bar effect
   //  Draw Apple Logos
   drawXbm565(23, 2, 18, 21, appleLogoApple_logo_black, dma_display->color565(255, 255, 255));
   drawXbm565(88, 2, 18, 21, appleLogoApple_logo_black, dma_display->color565(255, 255, 255));
@@ -2349,69 +2767,62 @@ void displayCurrentView(int view) {
     }
     break;
 
-  case 2: // Pattern plasma
+  case VIEW_PATTERN_PLASMA: // Pattern plasma
     patternPlasma();
     //delay(10); // Short delay for smoother animation
     break;
 
-  case 3:
+  case VIEW_TRANS_FLAG:
     drawTransFlag();
     break;
 
-  case 4: // Normal
+  case VIEW_NORMAL_FACE:
     baseFace();
     updatePlasmaFace();
-    updateBlinkAnimation(); // Update blink animation progress
     //delay(10);              // Short delay for smoother animation
     break;
 
-  case 5: // Blush with fade in effect
+  case VIEW_BLUSH_FACE: // Blush with fade in effect
     baseFace();
     updatePlasmaFace();
-    updateBlinkAnimation(); // Update blink animation progress
     break;
 
-  case 6: // Dialated pupils
+  case VIEW_SEMICIRCLE_EYES: // Dialated pupils
     baseFace();
     updatePlasmaFace();
-    updateBlinkAnimation(); // Update blink animation progress
     break;
 
-  case 7: // X eyes
+  case VIEW_X_EYES: // X eyes
     baseFace();
     updatePlasmaFace();
-    updateBlinkAnimation(); // Update blink animation progress
     break;
 
-  case 8: // Slant eyes
+  case VIEW_SLANT_EYES: // Slant eyes
     baseFace();
     updatePlasmaFace();
-    updateBlinkAnimation(); // Update blink animation progress
     break;
 
-  case 9: // Spiral eyes
+  case VIEW_SPIRAL_EYES: // Spiral eyes
     updatePlasmaFace();
     baseFace();
     updateRotatingSpiral();
     break;
 
-  case 10: // Plasma bitmap test
+  case VIEW_PLASMA_FACE: // Plasma bitmap test
     drawPlasmaFace();
     updatePlasmaFace();
-    updateBlinkAnimation();
     break;
 
-  case 11: // UwU eyes
+  case VIEW_UWU_EYES: // UwU eyes
     baseFace();
     updatePlasmaFace();
-    updateBlinkAnimation(); // Update blink animation progress
     break;
 
-  case 12: // Starfield
+  case VIEW_STARFIELD: // Starfield
     updateStarfield();
     break;
 
-  case 13:                                                           // BSOD
+  case VIEW_BSOD:                                                           // BSOD
     dma_display->fillScreen(dma_display->color565(0, 0, 255));       // Blue screen
     dma_display->setTextColor(dma_display->color565(255, 255, 255)); // White text
     dma_display->setTextSize(2);                                     // Set text size
@@ -2421,14 +2832,15 @@ void displayCurrentView(int view) {
     dma_display->print(":(");
     break;
 
-  case 14: // DvD Logo
+  case VIEW_DVD_LOGO: // DvD Logo
     updateDVDLogos();
     break;
-  case 15: // Flame effect
+
+  case VIEW_FLAME_EFFECT: // Flame effect
     //updateAndDrawFlameEffect();
     break;
 
-  case 16: // Fluid Animation
+  case VIEW_FLUID_EFFECT: // Fluid Animation
   /*
     if (fluidEffectInstance)
     {
@@ -2445,20 +2857,26 @@ void displayCurrentView(int view) {
       dma_display->print("Fluid Err");
       */
      break;
-    
-  case 17: // Circle eyes
+
+  case VIEW_CIRCLE_EYES: // Circle eyes
     baseFace();
     updatePlasmaFace();
-    updateBlinkAnimation(); // Update blink animation progress
     break;
-case 18: //Spiral view
+
+case VIEW_FULLSCREEN_SPIRAL_PALETTE: //Spiral view
     updateAndDrawFullScreenSpiral(SPIRAL_COLOR_PALETTE); // Call with palette mode
     break;
-case 19:
+
+case VIEW_FULLSCREEN_SPIRAL_WHITE:
     updateAndDrawFullScreenSpiral(SPIRAL_COLOR_WHITE);   // Call with white mode
     // case 17: // Pixel Dust Effect (new view number)
     // PixelDustEffect();
-    // break;
+    break;
+
+
+case VIEW_SCROLLING_TEXT: // Scrolling text view
+    drawText(colorWheelOffset++);
+    break;
 
   default:
     // Optional: Handle unsupported views
@@ -2467,7 +2885,9 @@ case 19:
   }
   // Only flip buffer if not spiral view (spiral handles its own flip)
   // if (view != 9)
-/*
+
+#ifdef DEBUG_VIEWS
+
   // --- Begin FPS counter overlay ---
   static unsigned long lastFpsTime = 0;
   static int frameCount = 0;
@@ -2488,7 +2908,9 @@ case 19:
   dma_display->setCursor(37, 5); // Adjust position
   dma_display->print(fpsText);
   // --- End FPS counter overlay ---
-*/
+
+#endif
+
 
   if (!sleepModeActive) {
     dma_display->flipDMABuffer();
@@ -2539,6 +2961,7 @@ void enterSleepMode() {
   sleepModeActive = true;
   preSleepView = currentView; // Save current view
   dma_display->setBrightness8(sleepBrightness); // Lower display brightness
+  updateGlobalBrightnessScale(sleepBrightness);
 
   reduceCPUSpeed(); // Reduce CPU speed for power saving
 
@@ -2739,7 +3162,7 @@ void loop() {
         // Manual brightness is applied immediately on BLE write if autoBrightness is off.
 
         // --- Update Animation States ---
-        updateBlinkAnimation(); // Update blink animation progress
+        updateBlinkAnimation(); // Update blink animation once per loop
         updateEyeBounceAnimation(); // NEW: Update eye bounce animation progress
         updateIdleHoverAnimation();   // NEW: Update idle eye hover animation progress
         
@@ -2790,3 +3213,4 @@ if (currentView == 2 || currentView == 10) {
 }
 */
 }
+

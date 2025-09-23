@@ -268,3 +268,25 @@ MatrixPanel_I2S_DMA(mxconfig);
 #endif
 ```
 
+
+## License: MIT
+https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-DMA/blob/1e4b46e9399c774b0d0603381ea894a42bfb77ac/examples/ChainedPanelsScreenBuffer/ChainedPanelsScreenBuffer.ino
+
+```
+colorWheel(uint8_t pos) {
+  if(pos < 85) {
+    return dma_display->color565(pos * 3, 255 - pos * 3, 0);
+  
+```
+
+
+## License: MIT
+https://github.com/mrfaptastic/ESP32-HUB75-MatrixPanel-DMA/blob/1e4b46e9399c774b0d0603381ea894a42bfb77ac/examples/1_SimpleTestShapes/1_SimpleTestShapes.ino
+
+```
+colorWheel(uint8_t pos) {
+  if(pos < 85) {
+    return dma_display->color565(pos * 3, 255 - pos * 3, 0);
+  
+```
+

@@ -9,17 +9,51 @@
 #include "xtensa/core-macros.h"
 #include "bitmaps.h"
 #include <stdio.h>
+#include "esp_ota_ops.h"
+#include "nvs_flash.h"
+#include "nvs.h"
+#include <esp_task_wdt.h>
 
-//#include "customFonts/lequahyper20pt7b.h" // Stylized font
-//#include <Fonts/FreeSansBold18pt7b.h>     // Larger font
-//#include <Fonts/FreeMonoBold12pt7b.h>    // Smaller font
-//#include <Fonts/Picopixel.h>     // Smallest font
+// #include "customFonts/lequahyper20pt7b.h" // Stylized font
+// #include <Fonts/FreeSansBold18pt7b.h>     // Larger font
+// #include <Fonts/FreeMonoBold12pt7b.h>    // Smaller font
+// #include <Fonts/Picopixel.h>     // Smallest font
 #include <Fonts/TomThumb.h> // Smallest font
-//#include <Fonts/FreeMonoBold9pt7b.h> // Small font
+// #include <Fonts/FreeMonoBold9pt7b.h> // Small font
 #include <Fonts/FreeSans9pt7b.h> // Medium font
 
-#define BAUD_RATE 115200                  // serial debug port baud rate
+#define BAUD_RATE 115200 // serial debug port baud rate
 // #define CONFIG_BT_NIMBLE_PINNED_TO_CORE 1 // Pinning NimBLE to core 1
+
+
+// Enum for all available views. This allows for automatic counting.
+enum View {
+  VIEW_DEBUG_SQUARES,
+  VIEW_LOADING_BAR,
+  VIEW_PATTERN_PLASMA,
+  VIEW_TRANS_FLAG,
+  VIEW_NORMAL_FACE,
+  VIEW_BLUSH_FACE,
+  VIEW_SEMICIRCLE_EYES,
+  VIEW_X_EYES,
+  VIEW_SLANT_EYES,
+  VIEW_SPIRAL_EYES,
+  VIEW_PLASMA_FACE,
+  VIEW_UWU_EYES,
+  VIEW_STARFIELD,
+  VIEW_BSOD,
+  VIEW_DVD_LOGO,
+  VIEW_FLAME_EFFECT,
+  VIEW_FLUID_EFFECT,
+  VIEW_CIRCLE_EYES,
+  VIEW_FULLSCREEN_SPIRAL_PALETTE,
+  VIEW_FULLSCREEN_SPIRAL_WHITE,
+  VIEW_SCROLLING_TEXT,
+  
+  // This special entry will automatically hold the total number of views.
+  // It must always be the last item in the enum.
+  TOTAL_VIEWS 
+};
 
 // Global variables to store the accessory settings.
 bool autoBrightnessEnabled = true;
@@ -35,13 +69,28 @@ bool configApplyAuroraMode = false;
 bool configApplyAccelerometer = true;
 bool configApplyConstantColor = false; // Variable to track constant color application
 
-////////////////////// DEBUG MODE //////////////////////
-#define DEBUG_MODE 0 // Set to 1 to enable debug outputs
 
+/*------------------------------------------------------------------------------
+  OTA instances & variables
+  ----------------------------------------------------------------------------*/
+static esp_ota_handle_t otaHandler = 0;
+static const esp_partition_t *update_partition = NULL;
+
+uint8_t txValue = 0;
+int bufferCount = 0;
+bool downloadFlag = false;
+
+
+////////////////////// DEBUG MODE //////////////////////
+#define DEBUG_MODE 1 // Set to 1 to enable debug outputs
+#define DEBUG_MICROPHONE 0 // Set to 1 to enable microphone debug outputs
+#define DEBUG_ACCELEROMETER 0 // Set to 1 to enable accelerometer debug outputs
+#define DEBUG_BRIGHTNESS 0 // Set to 1 to enable brightness debug outputs
 #if DEBUG_MODE
 #define DEBUG_BLE
 #define DEBUG_VIEWS
 #endif
+////////////////////////////////////////////////////////
 
 // Button config --------------------------------------------------------------
 bool debounceButton(int pin)
@@ -63,17 +112,35 @@ float easeInOutQuad(float t)
   return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 }
 
+/*
 // Easing functions with bounds checking
 float easeInQuad(float t)
 {
   return (t >= 1.0f) ? 1.0f : t * t;
 }
+*/
 
+// Easing functions with bounds checking
+float easeInQuad(float t)
+{
+  if (t < 0.0f) return 0.0f;
+  if (t > 1.0f) return 1.0f;
+  return t * t;
+}
+
+/*
 float easeOutQuad(float t)
 {
   return (t <= 0.0f) ? 0.0f : 1.0f - (1.0f - t) * (1.0f - t);
 }
+*/
 
+float easeOutQuad(float t)
+{
+  if (t < 0.0f) return 0.0f;
+  if (t > 1.0f) return 1.0f;
+  return 1.0f - (1.0f - t) * (1.0f - t);
+}
 // non-blocking LED status functions (Neopixel)
 void fadeInAndOutLED(uint8_t r, uint8_t g, uint8_t b)
 {
@@ -183,17 +250,21 @@ int sliderBrightness = map(userBrightness, 1, 255, 1, 100);
 
 // Convert the userBrightness into a scale factor (0.0 to 1.0)
 // Here, we simply divide userBrightness by 255.0 to get a proportion.
-float globalBrightnessScale = userBrightness / 255.0;
+extern float globalBrightnessScale;
+extern uint16_t globalBrightnessScaleFixed;
+void updateGlobalBrightnessScale(uint8_t brightness);
 
 unsigned long lastAmbientUpdateTime = 0;
 const unsigned long ambientUpdateInterval = 500; // update every 500 milliseconds
 uint8_t adaptiveBrightness = userBrightness;     // current brightness used by the system
 uint8_t targetBrightness = userBrightness;       // target brightness for adaptive adjustment
 
-//float ambientLux = 0.0;
+// float ambientLux = 0.0;
 static uint16_t lastKnownClearValue = 0; // Initialize to a sensible default
 float smoothedLux = 50.0f;
 const float luxSmoothingFactor = 0.15f; // Adjust between 0.05 - 0.3
+float currentBrightness = 128.0f; // NEW: Current brightness as a float for smoothing
+const float brightnessSmoothingFactor = 0.05f; // NEW: How quickly brightness adapts (0.01-0.1)
 int lastBrightness = 0;
 const int brightnessThreshold = 3; // Only update if change > X
 unsigned long lastLuxUpdate = 0;
@@ -218,21 +289,45 @@ void setupAdaptiveBrightness()
 // Setup functions for adaptive brightness & proximity sensing using APDS9960:
 uint16_t getRawClearChannelValue()
 {
+  static unsigned long lastLogTime = 0;
+  const unsigned long logInterval = 500; // Log 2 times per second
+
   if (apds.colorDataReady())
   {
     uint16_t r, g, b, c;
     apds.getColorData(&r, &g, &b, &c);
+
+    #if DEBUG_BRIGHTNESS
     Serial.print("Ambient light level (clear channel): ");
     lastKnownClearValue = c;
     Serial.println(c);
-return c; // Return the raw clear channel value
-  } else {
-        return lastKnownClearValue; // Return the last good value if current not available
-    }
+    #else
+    lastKnownClearValue = c; // Update last known good value
+    #endif
+    return c; // Return the raw clear channel value
+  }
+  else
+  {
+    return lastKnownClearValue; // Return the last good value if current not available
+  }
 }
 
 void updateAdaptiveBrightness()
 {
+  // If auto brightness is disabled, just apply the manual user brightness and exit.
+  if (!autoBrightnessEnabled)
+  {
+    // Only set brightness if it has changed to avoid unnecessary calls
+    if (lastBrightness != userBrightness) {
+      dma_display->setBrightness8(userBrightness);
+      lastBrightness = userBrightness;
+#ifdef DEBUG_BRIGHTNESS
+      Serial.printf(">>>> MANUAL: BRIGHTNESS SET TO %d <<<<\n", userBrightness);
+#endif
+    }
+    return;
+  }
+
   uint16_t rawClearValue = getRawClearChannelValue();
 
   float currentLuxEquivalent = static_cast<float>(rawClearValue);
@@ -240,13 +335,12 @@ void updateAdaptiveBrightness()
   smoothedLux = (luxSmoothingFactor * currentLuxEquivalent) + ((1.0f - luxSmoothingFactor) * smoothedLux);
 
   // --- CRITICAL CALIBRATION SECTION ---
-  int min_brightness_output = 20;   // Min brightness display should go to (e.g., 10-25)
-  int max_brightness_output = 255;  // Max brightness (usually 255)
-  float min_clear_for_map = 50.0f;  // CALIBRATE: Raw clear value for "very dark" (e.g., 20-100)
-  float max_clear_for_map = 700.0f; // CALIBRATE: Raw clear value for "bright enough for max display brightness"
-                                    // OBSERVE rawClearValue via Serial.print to set this.
-                                    // Example: if typical indoor bright is C=600, set this to ~600-800.
-                                    // If C values are typically 0-2000, then 700 is too low.
+
+  const int min_brightness_output = userBrightness;   // Fall back to user-set brightness when dark
+  const int max_brightness_output = 255;  // Preserve full-range capability
+  const float min_clear_for_map = 150.0f;  // Adjusted dark threshold
+  const float max_clear_for_map = 1200.0f; // Adjusted bright threshold
+                                    // OBSERVE rawClearValue via Serial.print to refine these.
   // --- END CRITICAL CALIBRATION SECTION ---
 
   long targetBrightnessLong = map(static_cast<long>(smoothedLux),
@@ -256,24 +350,36 @@ void updateAdaptiveBrightness()
                                   max_brightness_output);
   int targetBrightnessCalc = constrain(static_cast<int>(targetBrightnessLong), min_brightness_output, max_brightness_output);
 
+  #if DEBUG_BRIGHTNESS
   Serial.printf("ADAPT: RawC=%u, SmoothC=%.1f, TargetBr=%d, LastBr=%d, Thr=%d\n",
                 rawClearValue, smoothedLux, targetBrightnessCalc, lastBrightness, brightnessThreshold); // Corrected variable name
-
+  #endif
   if (abs(targetBrightnessCalc - lastBrightness) >= brightnessThreshold)
   {
-    dma_display->setBrightness8(static_cast<uint8_t>(targetBrightnessCalc));
+    uint8_t currentBrightness = static_cast<uint8_t>(targetBrightnessCalc);
+    dma_display->setBrightness8(currentBrightness);
+    updateGlobalBrightnessScale(currentBrightness);
     lastBrightness = targetBrightnessCalc; // Update lastBrightness ONLY when a display change is made
+    #if DEBUG_BRIGHTNESS
     Serial.printf(">>>> ADAPT: BRIGHTNESS SET TO %d <<<<\n", targetBrightnessCalc);
+    #endif
   }
   else
   {
-    // Serial.printf("ADAPT: No change needed, diff %d < threshold %d\n", abs(targetBrightness - lastBrightness), brightnessThreshold);
+    // Change is below threshold: keep the previously applied brightness (no-op)
+    // No action needed; brightness remains unchanged.
+    // lastBrightness remains unchanged because we didn't apply a new value
+#ifdef DEBUG_BRIGHTNESS
+    Serial.printf(">>>> ADAPT: BRIGHTNESS KEPT AT %d <<<<\n", lastBrightness);
+#endif
   }
 }
 
 void maybeUpdateBrightness()
 {
-  if (autoBrightnessEnabled && millis() - lastLuxUpdate >= luxUpdateInterval)
+  // Always call updateAdaptiveBrightness to handle both manual and auto modes.
+  // The function itself will decide what to do based on autoBrightnessEnabled.
+  if (millis() - lastLuxUpdate >= luxUpdateInterval)
   {
     updateAdaptiveBrightness();
     lastLuxUpdate = millis();
@@ -315,6 +421,7 @@ void applyConfigOptions()
   {
     Serial.println("Auto brightness disabled. Applying user-set brightness.");
     dma_display->setBrightness8(userBrightness);
+    updateGlobalBrightnessScale(userBrightness);
     Serial.printf("Applied manual brightness: %u\n", userBrightness);
   }
 
@@ -420,3 +527,4 @@ int dvdVX2 = 1, dvdVY2 = 1;
 uint16_t dvdColor2;
 
 #endif /* MAIN_H */
+

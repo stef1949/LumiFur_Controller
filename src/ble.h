@@ -4,6 +4,7 @@
 #include "main.h"
 #include <NimBLEDevice.h>
 #include "driver/temp_sensor.h"
+#include <esp_ota_ops.h> // For OTA_SIZE_UNKNOWN
 
 // expose the userBrightness defined in main.h
 extern uint8_t userBrightness;
@@ -17,13 +18,17 @@ bool deviceConnected = false;
 bool oldDeviceConnected = false;
 
 // BLE UUIDs
-#define SERVICE_UUID                    "01931c44-3867-7740-9867-c822cb7df308"
-#define CHARACTERISTIC_UUID             "01931c44-3867-7427-96ab-8d7ac0ae09fe"
-#define CONFIG_CHARACTERISTIC_UUID      "01931c44-3867-7427-96ab-8d7ac0ae09ff"
-#define TEMPERATURE_CHARACTERISTIC_UUID "01931c44-3867-7b5d-9774-18350e3e27db"
-#define TEMPERATURE_LOGS_CHARACTERISTIC_UUID   "0195eec2-ae6e-74a1-bcd5-215e2365477c" // New Command UUID
-#define COMMAND_CHARACTERISTIC_UUID     "0195eec3-06d2-7fd4-a561-49493be3ee41"
-#define BRIGHTNESS_CHARACTERISTIC_UUID  "01931c44-3867-7427-96ab-8d7ac0ae09ef"
+
+#define SERVICE_UUID                                "01931c44-3867-7740-9867-c822cb7df308"
+#define CHARACTERISTIC_UUID                         "01931c44-3867-7427-96ab-8d7ac0ae09fe"
+#define CONFIG_CHARACTERISTIC_UUID                  "01931c44-3867-7427-96ab-8d7ac0ae09ff"
+#define TEMPERATURE_CHARACTERISTIC_UUID             "01931c44-3867-7b5d-9774-18350e3e27db"
+#define TEMPERATURE_LOGS_CHARACTERISTIC_UUID        "0195eec2-ae6e-74a1-bcd5-215e2365477c" // New Command UUID
+#define COMMAND_CHARACTERISTIC_UUID                 "0195eec3-06d2-7fd4-a561-49493be3ee41"
+#define BRIGHTNESS_CHARACTERISTIC_UUID              "01931c44-3867-7427-96ab-8d7ac0ae09ef"
+
+#define OTA_CHARACTERISTIC_UUID                     "01931c44-3867-7427-96ab-8d7ac0ae09ee"
+#define INFO_CHARACTERISTIC_UUID                    "cba1d466-344c-4be3-ab3f-189f80dd7599"
 
 //#define ULTRASOUND_CHARACTERISTIC_UUID  "01931c44-3867-7b5d-9732-12460e3a35db"
 
@@ -50,10 +55,212 @@ NimBLECharacteristic* pCommandCharacteristic;
 NimBLECharacteristic* pTemperatureLogsCharacteristic = nullptr; // New Command UUID
 NimBLECharacteristic* pBrightnessCharacteristic = nullptr;
 
+NimBLECharacteristic* pOtaCharacteristic = nullptr;
+static NimBLECharacteristic* pInfoCharacteristic;
+
+
 void triggerHistoryTransfer();
 void clearHistoryBuffer();
 void storeTemperatureInHistory(float temp); // Good practice to declare static/helper functions if only used in .cpp
 void updateTemperature();
+
+// Fallback defines in case PlatformIO doesn't inject them
+#ifndef FIRMWARE_VERSION
+//#define FIRMWARE_VERSION "unknown"
+#define FIRMWARE_VERSION "2.2.0" // Default version if not defined
+#endif
+
+#ifndef GIT_COMMIT
+#define GIT_COMMIT "unknown"
+#endif
+
+#ifndef GIT_BRANCH
+#ifdef DEBUG_MODE
+#define GIT_BRANCH "dev"
+#else
+#define GIT_BRANCH "main"
+#endif
+#endif
+
+#ifndef BUILD_DATE
+#define BUILD_DATE __DATE__
+#endif
+
+#ifndef BUILD_TIME
+#define BUILD_TIME __TIME__
+#endif
+
+#ifndef DEVICE_MODEL
+#define DEVICE_MODEL "mps3"
+#endif
+
+#ifndef APP_COMPAT_VERSION
+#define APP_COMPAT_VERSION "6.0"
+#endif
+
+std::string fwVersion = FIRMWARE_VERSION;
+std::string deviceModel = DEVICE_MODEL;
+std::string appCompat = APP_COMPAT_VERSION;
+std::string buildTime = std::string(BUILD_DATE) + " " + BUILD_TIME;
+
+
+class OTACallbacks : public NimBLECharacteristicCallbacks {
+    esp_ota_handle_t ota_handle = 0;
+    const esp_partition_t* update_partition = nullptr;
+    int bytes_received = 0;
+    int total_size = 0;
+    bool ota_started = false;
+
+public:
+    void onWrite(NimBLECharacteristic* pCharacteristic, NimBLEConnInfo& connInfo) override {
+        std::string value = pCharacteristic->getValue();
+        const uint8_t* data = (const uint8_t*)value.data();
+        size_t len = value.length();
+
+        if (len == 0) {
+            Serial.println("OTA: Received empty packet");
+            return;
+        }
+
+        uint8_t command = data[0];
+
+        if (command == 0x01) { // START OTA
+            if (ota_started) {
+                Serial.println("OTA: Already started, ignoring START command.");
+                // Notify client of error if needed
+                uint8_t response[] = {0xFF, 0x01}; // Error: Already started
+                pCharacteristic->setValue(response, sizeof(response));
+                pCharacteristic->notify();
+                return;
+            }
+            if (len < 5) {
+                Serial.println("OTA: START command too short for size.");
+                 uint8_t response[] = {0xFF, 0x02}; // Error: Start packet too short
+                pCharacteristic->setValue(response, sizeof(response));
+                pCharacteristic->notify();
+                return;
+            }
+            memcpy(&total_size, &data[1], sizeof(total_size));
+            Serial.printf("OTA: Starting OTA. Total size: %d bytes\n", total_size);
+
+            update_partition = esp_ota_get_next_update_partition(NULL);
+            if (update_partition == NULL) {
+                Serial.println("OTA: No valid OTA partition found");
+                uint8_t response[] = {0xFF, 0x03}; // Error: No partition
+                pCharacteristic->setValue(response, sizeof(response));
+                pCharacteristic->notify();
+                return;
+            }
+            Serial.printf("OTA: Writing to partition subtype %d at offset 0x%x\n",
+                          update_partition->subtype, update_partition->address);
+
+            esp_err_t err = esp_ota_begin(update_partition, OTA_SIZE_UNKNOWN, &ota_handle); // Or pass total_size if known and validated
+            if (err != ESP_OK) {
+                Serial.printf("OTA: esp_ota_begin failed (%s)\n", esp_err_to_name(err));
+                uint8_t response[] = {0xFF, 0x04}; // Error: ota_begin failed
+                pCharacteristic->setValue(response, sizeof(response));
+                pCharacteristic->notify();
+                return;
+            }
+            ota_started = true;
+            bytes_received = 0;
+            Serial.println("OTA: esp_ota_begin succeeded. Ready for data.");
+            uint8_t response[] = {0x01, 0x00}; // ACK: OTA Started
+            pCharacteristic->setValue(response, sizeof(response));
+            pCharacteristic->notify();
+
+        } else if (command == 0x02) { // DATA
+            if (!ota_started) {
+                Serial.println("OTA: Received DATA before START.");
+                uint8_t response[] = {0xFF, 0x05}; // Error: Data before start
+                pCharacteristic->setValue(response, sizeof(response));
+                pCharacteristic->notify();
+                return;
+            }
+            if (len <= 1) {
+                 Serial.println("OTA: DATA packet has no payload.");
+                 return; // Or send error
+            }
+
+            esp_err_t err = esp_ota_write(ota_handle, &data[1], len - 1);
+            if (err != ESP_OK) {
+                Serial.printf("OTA: esp_ota_write failed (%s)\n", esp_err_to_name(err));
+                // Consider aborting OTA here
+                uint8_t response[] = {0xFF, 0x06}; // Error: ota_write failed
+                pCharacteristic->setValue(response, sizeof(response));
+                pCharacteristic->notify();
+                esp_ota_abort(ota_handle);
+                ota_started = false;
+                return;
+            }
+            bytes_received += (len - 1);
+            // Periodically notify progress if desired
+            #if DEBUG_MODE
+             Serial.printf("OTA: Received %d / %d bytes\n", bytes_received, total_size);
+             #endif
+            if (bytes_received % (1024 * 10) == 0) { // Notify every 10KB for example
+                 Serial.printf("OTA: Progress %d / %d bytes\n", bytes_received, total_size);
+            }
+
+
+        } else if (command == 0x03) { // END OTA
+            if (!ota_started) {
+                Serial.println("OTA: Received END before START.");
+                uint8_t response[] = {0xFF, 0x07}; // Error: End before start
+                pCharacteristic->setValue(response, sizeof(response));
+                pCharacteristic->notify();
+                return;
+            }
+            Serial.println("OTA: END command received.");
+            esp_err_t err = esp_ota_end(ota_handle);
+            if (err != ESP_OK) {
+                Serial.printf("OTA: esp_ota_end failed (%s)\n", esp_err_to_name(err));
+                 if (err == ESP_ERR_OTA_VALIDATE_FAILED) {
+                    Serial.println("OTA: Image validation failed, image is corrupted");
+                }
+                uint8_t response[] = {0xFF, 0x08}; // Error: ota_end failed
+                pCharacteristic->setValue(response, sizeof(response));
+                pCharacteristic->notify();
+                ota_started = false; // Reset state
+                return;
+            }
+
+            err = esp_ota_set_boot_partition(update_partition);
+            if (err != ESP_OK) {
+                Serial.printf("OTA: esp_ota_set_boot_partition failed (%s)!\n", esp_err_to_name(err));
+                uint8_t response[] = {0xFF, 0x09}; // Error: set_boot failed
+                pCharacteristic->setValue(response, sizeof(response));
+                pCharacteristic->notify();
+                ota_started = false; // Reset state
+                return;
+            }
+
+            Serial.println("OTA: Update successful! Rebooting...");
+            uint8_t response[] = {0x03, 0x00}; // ACK: OTA Success
+            pCharacteristic->setValue(response, sizeof(response));
+            pCharacteristic->notify();
+            delay(100); // Give time for BLE notification to send
+            esp_restart();
+
+        } else if (command == 0x04) { // ABORT OTA
+            Serial.println("OTA: ABORT command received.");
+            if (ota_started) {
+                esp_ota_abort(ota_handle);
+                Serial.println("OTA: esp_ota_abort called.");
+                ota_started = false;
+                uint8_t response[] = {0x04, 0x00}; // ACK: OTA Aborted
+                pCharacteristic->setValue(response, sizeof(response));
+                pCharacteristic->notify();
+            } else {
+                Serial.println("OTA: Abort called but OTA not started.");
+            }
+        } else {
+            Serial.printf("OTA: Unknown command: 0x%02X\n", command);
+        }
+    }
+}; 
+static OTACallbacks otaCallbacks; // Instantiate the callbacks
+// This is a global instance of the OTACallbacks class to handle OTA updates
 
 // Class to handle BLE server callbacks
 class ServerCallbacks : public NimBLEServerCallbacks {
