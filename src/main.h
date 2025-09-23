@@ -1,17 +1,6 @@
 #ifndef MAIN_H
 #define MAIN_H
 
-////////////////////// DEBUG MODE //////////////////////
-#define DEBUG_MODE 0 // Set to 1 to enable debug outputs
-
-#if DEBUG_MODE
-// #define DEBUG_BLE
-// #define DEBUG_MIC
-// #define DEBUG_BRIGHTNESS
-#define DEBUG_VIEWS
-#endif
-////////////////////////////////////////////////////////
-
 #include <FastLED.h>
 #include "userPreferences.h"
 #include "deviceConfig.h"
@@ -101,7 +90,7 @@ bool downloadFlag = false;
 #define DEBUG_BLE
 #define DEBUG_VIEWS
 #endif
-
+////////////////////////////////////////////////////////
 
 // Button config --------------------------------------------------------------
 bool debounceButton(int pin)
@@ -316,10 +305,6 @@ uint16_t getRawClearChannelValue()
     lastKnownClearValue = c; // Update last known good value
     #endif
     return c; // Return the raw clear channel value
-  } else {
-        return lastKnownClearValue; // Return the last good value if current not available
-    }
-    return c; // Return the raw clear channel value
   }
   else
   {
@@ -381,10 +366,11 @@ void updateAdaptiveBrightness()
   }
   else
   {
-    dma_display->setBrightness8(newBrightness);
-    lastBrightness = newBrightness; // Update lastBrightness ONLY when a display change is made
+    // Change is below threshold: keep the previously applied brightness (no-op)
+    dma_display->setBrightness8(static_cast<uint8_t>(lastBrightness));
+    // lastBrightness remains unchanged because we didn't apply a new value
 #ifdef DEBUG_BRIGHTNESS
-    Serial.printf(">>>> ADAPT: BRIGHTNESS SET TO %d <<<<\n", newBrightness);
+    Serial.printf(">>>> ADAPT: BRIGHTNESS KEPT AT %d <<<<\n", lastBrightness);
 #endif
   }
 }
