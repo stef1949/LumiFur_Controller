@@ -5,12 +5,9 @@
     "random": "cpp"
   },
   "C_Cpp_Runner.msvcBatchPath": "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Auxiliary/Build/vcvarsall.bat",
-  "C_Cpp_Runner.cCompilerPath": "gcc",
-  "C_Cpp_Runner.cppCompilerPath": "g++",
   "C_Cpp_Runner.debuggerPath": "gdb",
   "C_Cpp_Runner.cStandard": "",
   "C_Cpp_Runner.cppStandard": "",
-  "C_Cpp_Runner.useMsvc": false,
   "C_Cpp_Runner.warnings": [
     "-Wall",
     "-Wextra",
@@ -82,9 +79,8 @@
   "platformio-ide.useDevelopmentPIOCore": false,
   
   // C/C++ IntelliSense configuration for embedded development
-  "C_Cpp.default.cppStandard": "c++17",
-  "C_Cpp.default.cStandard": "c11",
+  "C_Cpp.default.cppStandard": "c++23",
+  "C_Cpp.default.cStandard": "c23",
   "C_Cpp.default.compilerPath": "",
   "C_Cpp.default.intelliSenseMode": "gcc-x64",
-  "C_Cpp.clang_format_fallbackStyle": "{ BasedOnStyle: LLVM, UseTab: Never, IndentWidth: 2, TabWidth: 2, BreakBeforeBraces: Attach }"
 }

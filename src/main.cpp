@@ -1,9 +1,11 @@
-#ifdef IDF_BUILD
+#if defined(ESP_PLATFORM) && !defined(ARDUINO)
+// Only include ESP-IDF headers when building as a pure ESP-IDF app, not under Arduino-ESP32.
 #include <stdio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <driver/gpio.h>
 #include "sdkconfig.h"
+#include "esp_assert.h"
 #endif
 
 #include <Arduino.h>

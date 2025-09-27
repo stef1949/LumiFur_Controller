@@ -1,5 +1,6 @@
 #include <unity.h>
 #include "main.h"
+#include "esp_assert.h"
 // Do not include main.cpp here; link the implementation separately in the test build.
 // Provide a minimal TimerHandle_t typedef for the unit test environment so the signature is available.
 typedef void* TimerHandle_t;
