@@ -285,11 +285,11 @@ unsigned long lastFullScreenSpiralUpdateTime = 0;
 // const unsigned long FULL_SCREEN_SPIRAL_FRAME_INTERVAL_MS = 50; // Adjusted for performance
 const unsigned long FULL_SCREEN_SPIRAL_FRAME_INTERVAL_MS = 0; // Further adjusted if needed
 
-const float FULL_SPIRAL_ROTATION_SPEED_RAD_PER_UPDATE = 0.5f; 
+const float FULL_SPIRAL_ROTATION_SPEED_RAD_PER_UPDATE = 0.2f; 
 const uint8_t FULL_SPIRAL_COLOR_SCROLL_SPEED = 2.5;
 
 // Logarithmic Spiral Coefficients (NEW/MODIFIED)
-const float LOG_SPIRAL_A_COEFF = 2.0f;   // Initial radius factor (when theta is small or exp(0))
+const float LOG_SPIRAL_A_COEFF = 4.0f;   // Initial radius factor (when theta is small or exp(0))
                                          // Smaller 'a' means it starts smaller/tighter from center.
 const float LOG_SPIRAL_B_COEFF = 0.10f;  // Controls how tightly wound the spiral is.
                                          // Smaller 'b' makes it wind more slowly (appearing tighter initially for a given theta range).
@@ -297,7 +297,7 @@ const float LOG_SPIRAL_B_COEFF = 0.10f;  // Controls how tightly wound the spira
                                          // Positive 'b' for outward spiral, negative for inward.
 
 const float SPIRAL_ARM_COLOR_FACTOR = 5.0f; // Could be based on 'r' now instead of 'theta_arm'
-const float SPIRAL_THICKNESS_RADIUS = 0.5f;    // Start with 0 for performance, then increase
+const float SPIRAL_THICKNESS_RADIUS = 1.0f;    // Start with 0 for performance, then increase
 
 static TaskHandle_t bleNotifyTaskHandle = NULL;
 

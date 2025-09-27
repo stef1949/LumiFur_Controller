@@ -336,11 +336,31 @@ void updateAdaptiveBrightness()
 
   // --- CRITICAL CALIBRATION SECTION ---
 
-  const int min_brightness_output = userBrightness;   // Fall back to user-set brightness when dark
+  const int min_brightness_output = 80;   // Fall back to user-set brightness when dark NOTE: use  userBrightness to revert to user setting
   const int max_brightness_output = 255;  // Preserve full-range capability
-  const float min_clear_for_map = 150.0f;  // Adjusted dark threshold
-  const float max_clear_for_map = 1200.0f; // Adjusted bright threshold
+  const float min_clear_for_map = 2.0f;  // Adjusted dark threshold
+  const float max_clear_for_map = 50.0f; // Adjusted bright threshold
                                     // OBSERVE rawClearValue via Serial.print to refine these.
+
+   // ADJUST THESE VALUES:
+  // For earlier dimming (dims in brighter conditions):
+  // const float min_clear_for_map = 200.0f;           // Higher value = starts dimming earlier
+  
+  // For later dimming (only dims in very dark conditions):
+  // const float min_clear_for_map = 20.0f;            // Lower value = only dims when very dark
+  
+  // For reaching full brightness sooner (in less bright conditions):
+  // const float max_clear_for_map = 800.0f;           // Lower value = reaches max brightness sooner
+  
+  // For reaching full brightness later (only in very bright conditions):
+  // const float max_clear_for_map = 2000.0f;          // Higher value = needs more light for full brightness
+  
+  // For different minimum brightness level:
+  // const int min_brightness_output = 30;             // Fixed minimum instead of user brightness
+  
+  // For different maximum brightness level:
+  // const int max_brightness_output = 200;            // Cap maximum brightness below 255
+
   // --- END CRITICAL CALIBRATION SECTION ---
 
   long targetBrightnessLong = map(static_cast<long>(smoothedLux),
