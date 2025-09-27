@@ -4,3 +4,6 @@
 .vscode/launch.json
 .vscode/ipch
 .DS_Store
+
+# Temporary firmware build artifacts (from local testing)
+firmware-artifacts/
