@@ -104,8 +104,8 @@ const int minBlinkDuration = 300; // Minimum time for a full blink (ms)
 const int maxBlinkDuration = 800; // Maximum time for a full blink (ms)
 const int minBlinkDelay = 250;   // Minimum time between blinks (ms)
 const int maxBlinkDelay = 5000;   // Maximum time between blinks (ms)
-// constexpr uint16_t SCROLL_TEXT_INTERVAL_MS = 36; // Removal of constexpr
-constexpr uint16_t SCROLL_BACKGROUND_INTERVAL_MS = 45;
+// constexpr uint16_t SCROLL_TEXT_INTERVAL_MS = 36; // NEW: Removal of constexpr for ble characteristic
+constexpr uint16_t SCROLL_BACKGROUND_INTERVAL_MS = 90;
 constexpr int16_t SCROLL_TEXT_GAP = 12;
 static unsigned long lastScrollTick = 0;
 static unsigned long lastBackgroundTick = 0;
@@ -113,7 +113,7 @@ static uint8_t scrollingBackgroundOffset = 0;
 static uint8_t scrollingColorOffset = 0;
 static bool scrollingTextInitialized = false;
 
-uint8_t scrollSpeedSetting = 50;        // NEW: mid value (1–100)
+uint8_t scrollSpeedSetting = 90;        // NEW: mid value (1–100)
 uint16_t scrollTextIntervalMs = 100;    // NEW: actual interval in ms (updated by helper)
 
 void updateScrollIntervalFromSetting() { // NEW helper
@@ -709,14 +709,6 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
 }
 
 void drawText(int colorWheelOffset) {
-    // Update text position
-    textX--;
-
-    // Check if text has scrolled off screen and reset
-    if (textX < textMin) {
-        textX = dma_display->width();
-    }
-
     // Set text properties
     dma_display->setFont(&FreeSans9pt7b);
     dma_display->setTextSize(1);
@@ -2707,7 +2699,6 @@ void PixelDustEffect() {
 
 void displayCurrentView(int view) {
   static int previousViewLocal = -1;           // Track the last active view
-  static uint8_t colorWheelOffset = 0; // For scrolling text color
 
   // If we're in sleep mode, don't display the normal view
   if (sleepModeActive) {
@@ -2891,7 +2882,7 @@ case VIEW_FULLSCREEN_SPIRAL_WHITE:
 
 
 case VIEW_SCROLLING_TEXT: // Scrolling text view
-    drawText(colorWheelOffset++);
+    renderScrollingTextView();
     break;
 
   default:
