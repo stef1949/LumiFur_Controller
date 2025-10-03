@@ -25,6 +25,7 @@ bool oldDeviceConnected = false;
 #define TEMPERATURE_LOGS_CHARACTERISTIC_UUID        "0195eec2-ae6e-74a1-bcd5-215e2365477c" // New Command UUID
 #define COMMAND_CHARACTERISTIC_UUID                 "0195eec3-06d2-7fd4-a561-49493be3ee41"
 #define BRIGHTNESS_CHARACTERISTIC_UUID              "01931c44-3867-7427-96ab-8d7ac0ae09ef"
+#define LUX_CHARACTERISTIC_UUID                     "01931c44-3867-7427-96ab-8d7ac0ae09f0"
 
 #define OTA_CHARACTERISTIC_UUID                     "01931c44-3867-7427-96ab-8d7ac0ae09ee"
 #define INFO_CHARACTERISTIC_UUID                    "cba1d466-344c-4be3-ab3f-189f80dd7599"
@@ -54,6 +55,8 @@ NimBLECharacteristic* pConfigCharacteristic = nullptr;
 NimBLECharacteristic* pCommandCharacteristic;
 NimBLECharacteristic* pTemperatureLogsCharacteristic = nullptr; // New Command UUID
 NimBLECharacteristic* pBrightnessCharacteristic = nullptr;
+NimBLECharacteristic* pLuxCharacteristic = nullptr;
+
 NimBLECharacteristic* pOTACharacteristic = nullptr;
 static NimBLECharacteristic* pInfoCharacteristic;
 
@@ -61,6 +64,7 @@ void triggerHistoryTransfer();
 void clearHistoryBuffer();
 void storeTemperatureInHistory(float temp); // Good practice to declare static/helper functions if only used in .cpp
 void updateTemperature();
+void updateLux(); // NEW: Add lux function declaration
 
 // Fallback defines in case PlatformIO doesn't inject them
 #ifndef FIRMWARE_VERSION
@@ -315,6 +319,12 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 
 } serverCallbacks;
 
+// Lux monitoring variables
+unsigned long luxMillis = 0;
+const unsigned long luxInterval = 500; // Update lux every 500ms
+uint16_t lastSentLuxValue = 0;
+const uint16_t luxChangeThreshold = 10; // Only send updates if lux changes by more than this amount
+
 //Temp Non-Blocking Variables
 unsigned long temperatureMillis = 0;
 const unsigned long temperatureInterval = 100; // 1 second interval for temperature update
@@ -460,6 +470,42 @@ void updateTemperature() {
     }
 }
 
+void updateLux() {
+    unsigned long currentMillis = millis();
+
+    // Check if enough time has passed to update lux
+    if (currentMillis - luxMillis >= luxInterval) {
+        luxMillis = currentMillis;
+
+        // Verify that the device is connected and the lux characteristic pointer is valid.
+        if (deviceConnected && pLuxCharacteristic != nullptr) {
+            // Get current lux value from the APDS9960 sensor
+            extern uint16_t getRawClearChannelValue(); // Function from main.h
+            uint16_t currentLux = getRawClearChannelValue();
+
+            // Only send update if lux has changed significantly to avoid spam
+            if (abs((int)currentLux - (int)lastSentLuxValue) >= luxChangeThreshold) {
+                // Send as 2-byte value (uint16_t)
+                uint8_t luxBytes[2];
+                luxBytes[0] = currentLux & 0xFF;        // Low byte
+                luxBytes[1] = (currentLux >> 8) & 0xFF; // High byte
+
+                pLuxCharacteristic->setValue(luxBytes, 2);
+                pLuxCharacteristic->notify();
+
+                lastSentLuxValue = currentLux;
+
+                #if DEBUG_MODE
+                Serial.printf("Lux level sent: %u\n", currentLux);
+                #endif
+            }
+        } else {
+            // Extra safeguard: log an error if pLuxCharacteristic is null or not connected
+            if (!deviceConnected) Serial.println("Warning: updateLux called while not connected.");
+            if (pLuxCharacteristic == nullptr) Serial.println("Error: pLuxCharacteristic is null!");
+        }
+    }
+}
 void checkBrightness()
 {
     if (brightnessChanged)

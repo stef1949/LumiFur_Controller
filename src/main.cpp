@@ -1876,12 +1876,39 @@ tempFormat->setUnit(0x272F); // For example, 0x272F might represent degrees Cels
 pBrightnessCharacteristic = pService->createCharacteristic(
     BRIGHTNESS_CHARACTERISTIC_UUID,
     NIMBLE_PROPERTY::READ |
-        NIMBLE_PROPERTY::NOTIFY |
+        // NIMBLE_PROPERTY::NOTIFY |
         NIMBLE_PROPERTY::WRITE |
       NIMBLE_PROPERTY::WRITE_NR);
 pBrightnessCharacteristic->setCallbacks(&brightnessCallbacks);
 // initialize with current brightness
 pBrightnessCharacteristic->setValue(&userBrightness, 1);
+
+  setupAdaptiveBrightness();
+  
+// Create lux characteristic (read-only with notifications)
+pLuxCharacteristic = pService->createCharacteristic(
+    LUX_CHARACTERISTIC_UUID,
+    NIMBLE_PROPERTY::READ |
+        NIMBLE_PROPERTY::NOTIFY
+);
+
+// Initialize with current lux value
+uint16_t initialLux = getRawClearChannelValue();
+uint8_t luxBytes[2] = {
+    static_cast<uint8_t>(initialLux & 0xFF),
+    static_cast<uint8_t>((initialLux >> 8) & 0xFF)
+};
+pLuxCharacteristic->setValue(luxBytes, 2);
+// Add descriptor for lux characteristic
+NimBLEDescriptor *luxDesc = pLuxCharacteristic->createDescriptor(
+    "2901", // Standard UUID for Characteristic User Description
+    NIMBLE_PROPERTY::READ,
+    20 // Maximum length for the descriptor's value
+);
+luxDesc->setValue("Ambient Light Sensor");
+NimBLE2904 *luxFormat = pLuxCharacteristic->create2904();
+luxFormat->setFormat(NimBLE2904::FORMAT_UINT16);
+luxFormat->setUnit(0x2731); // 0x2731 is the standard unit for Illuminance (lux)
 
 // nimBLEService* pBaadService = pServer->createService("BAAD");
 pService->start();
@@ -2104,7 +2131,6 @@ digitalWrite(MIC_PD_PIN, HIGH);
 #endif
 #endif
 
-  setupAdaptiveBrightness();
   // uint8_t wheelval = 0; // Wheel value for color cycling
 
 //  #if DEBUG_MODE
@@ -2991,6 +3017,7 @@ void loop() {
             maybeUpdateBrightness();
         }
         // Manual brightness is applied immediately on BLE write if autoBrightness is off.
+        updateLux(); // Update lux values
 
         // --- Update Animation States ---
         updateBlinkAnimation(); // Update blink animation progress
