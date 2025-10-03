@@ -20,16 +20,19 @@ The firmware build workflow (`build-firmware.yml`) automatically runs on:
 The build system compiles firmware for three ESP32 environments:
 
 ### 1. `adafruit_matrixportal_esp32s3` (Primary Target)
+
 - **Hardware**: Adafruit MatrixPortal ESP32-S3
 - **Features**: Built-in APDS9960, LIS3DH, NeoPixel, microphone
 - **Use Case**: Primary production target for LumiFur Controller
 
 ### 2. `esp32dev` (Generic ESP32)
+
 - **Hardware**: Generic ESP32 development boards
 - **Features**: Basic ESP32 functionality
 - **Use Case**: Development and testing on standard ESP32 boards
 
 ### 3. `dev` (Development Build)
+
 - **Hardware**: Same as primary target
 - **Features**: Extra debug instrumentation and logging
 - **Use Case**: Development, debugging, and troubleshooting
@@ -39,6 +42,7 @@ The build system compiles firmware for three ESP32 environments:
 For each environment, the build system creates:
 
 ### Essential Firmware Files
+
 - **`firmware.bin`** - Main application firmware
   - Contains the complete LumiFur Controller application
   - Used for OTA updates
@@ -55,6 +59,7 @@ For each environment, the build system creates:
   - Flash address: 0x1000
 
 ### Additional Files
+
 - **`firmware.elf`** - Debug symbols (when available)
   - Contains debugging information
   - Used with debuggers like OpenOCD or ESP32 IDF Monitor
@@ -76,12 +81,14 @@ If you already have LumiFur Controller firmware running:
 3. Upload the firmware.bin file
 4. Device will automatically reboot with new firmware
 
-**Advantages**: 
+**Advantages**:
+
 - No physical connection required
 - Can be done remotely
 - Preserves user settings
 
 **Requirements**:
+
 - Device must already have LumiFur Controller firmware
 - Stable power supply during update
 - BLE connection to device
@@ -91,6 +98,7 @@ If you already have LumiFur Controller firmware running:
 For first-time installation or recovery from corrupted firmware:
 
 **Using esptool.py**:
+
 ```bash
 # Install esptool if not already installed
 pip install esptool
@@ -103,6 +111,7 @@ esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 write_flash \
 ```
 
 **Using ESP32 Flash Download Tools**:
+
 1. Open ESP32 Flash Download Tools
 2. Add three files with addresses:
    - `bootloader.bin` @ 0x1000
@@ -112,6 +121,7 @@ esptool.py --chip esp32s3 --port /dev/ttyUSB0 --baud 921600 write_flash \
 4. Click "START" to flash
 
 **Using PlatformIO**:
+
 ```bash
 # For development and source builds
 pio run -e adafruit_matrixportal_esp32s3 --target upload
@@ -160,10 +170,12 @@ When a git tag is pushed (e.g., `git tag v1.2.0 && git push --tags`):
 ### Release Bundle Contents
 
 Each release includes:
+
 - `lumifur-firmware-v1.2.0.tar.gz` - Compressed archive
 - `lumifur-firmware-v1.2.0.zip` - Windows-compatible archive
 
 Archive structure:
+
 ```
 adafruit_matrixportal_esp32s3/
   ├── firmware.bin
