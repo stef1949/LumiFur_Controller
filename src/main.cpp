@@ -65,7 +65,6 @@ const unsigned long targetFrameIntervalMillis = 10; // ~100 FPS pacing
 bool brightnessChanged = false;
 
 // View switching
-// View switching
 uint8_t currentView = VIEW_FLAME_EFFECT; // Current & initial view being displayed
 const int totalViews = TOTAL_VIEWS;      // Total number of views is now calculated automatically
 // int userBrightness = 20; // Default brightness level (0-255)
@@ -325,8 +324,15 @@ void calculateFPS()
 void maybeUpdateTemperature()
 {
   unsigned long lastTempUpdate = 0;
-  const unsigned long tempUpdateInterval = 5000; // 5 seconds
-  if (deviceConnected && (millis() - lastTempUpdate >= tempUpdateInterval))
+  const unsigned long tempUpdateInterval = 5000;       // 5 seconds
+  const unsigned long sleepTempUpdateInterval = 10000; // 10 seconds
+  if (deviceConnected && (millis() - lastTempUpdate >= tempUpdateInterval) && !sleepModeActive)
+  {
+    updateTemperature();
+    lastTempUpdate = millis();
+  }
+
+  if (deviceConnected && (millis() - lastTempUpdate >= sleepTempUpdateInterval) && sleepModeActive)
   {
     updateTemperature();
     lastTempUpdate = millis();
@@ -484,6 +490,7 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks
   {
     Serial.printf("Notification/Indication return code: %d, %s\n", code, NimBLEUtils::returnCodeToString(code));
   }
+
   void onSubscribe(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo, uint16_t subValue) override
   {
     std::string str = "Client ID: ";
@@ -1472,9 +1479,7 @@ void blinkingEyes()
 void disableBlush()
 {
   Serial.println("Blush disabled!");
-  // Clear the blush area to ensure the effect is removed
-  dma_display->fillRect(45, 1, 18, 13, 0); // Clear right blush area
-  dma_display->fillRect(72, 1, 18, 13, 0); // Clear left blush area
+  facePlasmaDirty = true; // Defer actual redraw to display task
 }
 
 // Update the blush effect state (non‑blocking)
@@ -1861,7 +1866,7 @@ static void IRAM_ATTR onSoftMillisTimer(TimerHandle_t xTimer)
 // Total grains = N_COLORS * (WIDTH / N_COLORS) * BOX_HEIGHT = WIDTH * BOX_HEIGHT
 // Original calculation: (BOX_HEIGHT * N_COLORS * 8). If WIDTH=64, N_COLORS=8, BOX_HEIGHT=8,
 // this is (8 * 8 * 8) = 512. And WIDTH * BOX_HEIGHT = 64 * 8 = 512. So they are equivalent for these values.
-#define N_GRAINS (PANE_WIDTH * BOX_HEIGHT) // Total number of sand grains
+#define N_GRAINS (PANE_WIDTH * BOX_HEIGHT / 2) // Total number of sand grains
 // #define N_GRAINS 10
 // #include "pixelDustEffect.h" // Include the header for this effect
 // #include "main.h"            // Include your main project header if it exists (e.g., for global configs)
@@ -1870,116 +1875,96 @@ static void IRAM_ATTR onSoftMillisTimer(TimerHandle_t xTimer)
 uint16_t colors[N_COLORS];
 Adafruit_PixelDust sand(PANE_WIDTH, PANE_HEIGHT, N_GRAINS, 1.0f, 128, false); // elasticity 1.0, accel_scale 128
 uint32_t prevTime = 0;
+static bool pixelDustInitialized = false;
 
 // Initializes the Pixel Dust effect settings
 void setupPixelDust()
 {
-  Serial.println("setupPixelDust: Entered function."); // DEBUG
-
-  // Check if dma_display has been initialized
   if (!dma_display)
   {
     Serial.println("PixelDust Error: dma_display is not initialized before setupPixelDust() call!");
-    // This could be a crash point if dma_display is null and then used.
-    // However, the check should prevent dereferencing a null pointer.
-    // If it crashes *before* this serial print, dma_display might be valid but its internal state is bad.
-    return; // Or better: enter an error state/loop
+    return;
   }
-  Serial.println("setupPixelDust: dma_display is not null."); // DEBUG
-
-  if (N_COLORS > 0)
-    colors[0] = dma_display->color565(64, 64, 64); // Dark Gray
-  if (N_COLORS > 1)
-    colors[1] = dma_display->color565(120, 79, 23); // Brown
-  if (N_COLORS > 2)
-    colors[2] = dma_display->color565(228, 3, 3); // Red
-  if (N_COLORS > 3)
-    colors[3] = dma_display->color565(255, 140, 0); // Orange
-  if (N_COLORS > 4)
-    colors[4] = dma_display->color565(255, 237, 0); // Yellow
-  if (N_COLORS > 5)
-    colors[5] = dma_display->color565(0, 128, 38); // Green
-  if (N_COLORS > 6)
-    colors[6] = dma_display->color565(0, 77, 255); // Blue
-  if (N_COLORS > 7)
-    colors[7] = dma_display->color565(117, 7, 135); // Purple
-  // Add more if N_COLORS > 8
-  Serial.printf("setupPixelDust: Colors initialized. N_COLORS = %d\n", N_COLORS); // DEBUG
-
-  // Set up initial sand coordinates in colored blocks at the bottom of the matrix
-  int grain_idx = 0;
-
-  // CRITICAL: Potential division by zero or incorrect logic if N_COLORS is 0 or PANE_WIDTH is small
-  if (N_COLORS == 0)
+  if (!pixelDustInitialized)
+  {
+    if (!sand.begin())
+    {
+      Serial.println("PixelDust Error: sand.begin() failed!");
+      return;
+    }
+    pixelDustInitialized = true;
+  }
+  if (N_COLORS <= 0)
   {
     Serial.println("PixelDust Error: N_COLORS is 0 in setupPixelDust! Cannot proceed.");
     return;
   }
-  int grains_per_block_width = PANE_WIDTH / N_COLORS;                                                                                     // Ensure PANE_WIDTH is used here
-  Serial.printf("setupPixelDust: PANE_WIDTH=%d, N_COLORS=%d, grains_per_block_width=%d\n", PANE_WIDTH, N_COLORS, grains_per_block_width); // DEBUG
 
-  if (grains_per_block_width == 0 && N_GRAINS > 0)
-  { // If N_COLORS > PANE_WIDTH
-    Serial.printf("PixelDust Warning: grains_per_block_width is 0! (PANE_WIDTH=%d, N_COLORS=%d). Grains may not be placed correctly.\n", PANE_WIDTH, N_COLORS);
-    // This configuration is problematic. You might want to return or handle it differently.
-  }
+  sand.clear();
 
-  for (int i = 0; i < N_COLORS; i++)
-  { // Iterate through each color block
-    int block_start_x = i * grains_per_block_width;
-    // Ensure PANE_HEIGHT is used here
-    int block_start_y = PANE_HEIGHT - BOX_HEIGHT;
-    Serial.printf("setupPixelDust: Color block %d: start_x=%d, start_y=%d\n", i, block_start_x, block_start_y); // DEBUG
+  if (N_COLORS > 0)
+    colors[0] = dma_display->color565(64, 64, 64);
+  if (N_COLORS > 1)
+    colors[1] = dma_display->color565(120, 79, 23);
+  if (N_COLORS > 2)
+    colors[2] = dma_display->color565(228, 3, 3);
+  if (N_COLORS > 3)
+    colors[3] = dma_display->color565(255, 140, 0);
+  if (N_COLORS > 4)
+    colors[4] = dma_display->color565(255, 237, 0);
+  if (N_COLORS > 5)
+    colors[5] = dma_display->color565(0, 128, 38);
+  if (N_COLORS > 6)
+    colors[6] = dma_display->color565(0, 77, 255);
+  if (N_COLORS > 7)
+    colors[7] = dma_display->color565(117, 7, 135);
 
-    for (int y_in_block = 0; y_in_block < BOX_HEIGHT; y_in_block++)
-    {
-      for (int x_in_block = 0; x_in_block < grains_per_block_width; x_in_block++)
-      {
-        if (grain_idx < N_GRAINS)
-        {
-          // CRITICAL: This is where `sand.setPosition()` is called.
-          // If the `sand` object itself is not properly initialized (e.g., memory allocation failed
-          // when `Adafruit_PixelDust sand(...)` was declared), or if the coordinates
-          // (block_start_x + x_in_block, block_start_y + y_in_block) are outside the
-          // dimensions specified when `sand` was created (PANE_WIDTH, PANE_HEIGHT),
-          // this could cause a crash.
-          int current_x_pos = block_start_x + x_in_block;
-          int current_y_pos = block_start_y + y_in_block;
-
-          // Add boundary checks for the coordinates passed to setPosition
-          if (current_x_pos < 0 || current_x_pos >= PANE_WIDTH ||
-              current_y_pos < 0 || current_y_pos >= PANE_HEIGHT)
-          {
-            Serial.printf("PixelDust Error: Calculated position for grain %d is out of bounds! (%d, %d) for display (%d x %d)\n",
-                          grain_idx, current_x_pos, current_y_pos, PANE_WIDTH, PANE_HEIGHT);
-            // Decide how to handle this: skip, clamp, or error out
-            // For now, let's skip to avoid crashing Adafruit_PixelDust
-            // grain_idx++; // If you skip, you might need to adjust N_GRAINS or live with fewer grains
-            // continue; // Skip this grain
-          }
-
-          // Serial.printf("Setting grain %d to (%d, %d)\n", grain_idx, current_x_pos, current_y_pos); // Very verbose debug
-          sand.setPosition(grain_idx, current_x_pos, current_y_pos);
-          grain_idx++;
-        }
-        else
-        {
-          // This case should ideally not be reached if N_GRAINS is calculated correctly.
-          // If it is, it means your N_GRAINS calculation might be off or the loop structure is placing more.
-          Serial.printf("PixelDust Warning: grain_idx (%d) exceeded N_GRAINS (%d) during placement.\n", grain_idx, N_GRAINS);
-          // break; // from inner x_in_block loop
-        }
-      }
-      // if (grain_idx >= N_GRAINS && i < N_COLORS -1 ) break; // from y_in_block loop if all grains placed
-    }
-    // if (grain_idx >= N_GRAINS) break; // from i (color block) loop if all grains placed
-  }
-  Serial.printf("PixelDust: Initialized %d grains.\n", grain_idx);
-  if (grain_idx != N_GRAINS)
+  int grains_per_block_width = PANE_WIDTH / N_COLORS;
+  if (grains_per_block_width <= 0)
   {
-    Serial.printf("PixelDust Warning: Mismatch! Expected %d grains, placed %d. Check N_GRAINS calculation and loop logic.\n", N_GRAINS, grain_idx);
+    Serial.printf("PixelDust Warning: grains_per_block_width is %d (PANE_WIDTH=%d, N_COLORS=%d). Clamping to 1.\n", grains_per_block_width, PANE_WIDTH, N_COLORS);
+    grains_per_block_width = 1;
   }
-  Serial.println("setupPixelDust: Exiting function."); // DEBUG
+  int block_start_y = PANE_HEIGHT - BOX_HEIGHT;
+  if (block_start_y < 0)
+  {
+    block_start_y = 0;
+  }
+  int grain_idx = 0;
+  for (int i = 0; i < N_COLORS && grain_idx < N_GRAINS; i++)
+  {
+    int block_start_x = i * grains_per_block_width;
+    if (block_start_x >= PANE_WIDTH)
+    {
+      break;
+    }
+    int block_end_x = block_start_x + grains_per_block_width;
+    if (block_end_x > PANE_WIDTH)
+    {
+      block_end_x = PANE_WIDTH;
+    }
+    if (block_end_x <= block_start_x)
+    {
+      block_end_x = block_start_x + 1;
+    }
+    for (int y_in_block = 0; y_in_block < BOX_HEIGHT && grain_idx < N_GRAINS; y_in_block++)
+    {
+      int current_y_pos = block_start_y + y_in_block;
+      if (current_y_pos >= PANE_HEIGHT)
+      {
+        current_y_pos = PANE_HEIGHT - 1;
+      }
+      for (int x = block_start_x; x < block_end_x && grain_idx < N_GRAINS; x++)
+      {
+        sand.setPosition(grain_idx++, x, current_y_pos);
+      }
+    }
+  }
+  while (grain_idx < N_GRAINS)
+  {
+    sand.setPosition(grain_idx, random(PANE_WIDTH), random(PANE_HEIGHT));
+    grain_idx++;
+  }
 }
 
 // Add an enum for clarity (optional, but good practice)
@@ -2128,6 +2113,7 @@ void setup()
     textX = dma_display->width();
     textY = (dma_display->height() - h) / 2 + h; // Center vertically
   */
+
   ///////////////////// Setup BLE ////////////////////////
   Serial.println("Initializing BLE...");
   // NimBLEDevice::init("LumiFur_Controller");
@@ -2609,9 +2595,9 @@ pScrollTextCharacteristic = pService->createCharacteristic(
   xTaskCreatePinnedToCore(
       displayTask,
       "Display Task",
-      8192, // stack bytes
+      16384, // stack bytes
       NULL,
-      3, // priority
+      2, // priority
       NULL,
       1 // pin to core 1
   );
@@ -2698,7 +2684,7 @@ void updateDVDLogos()
   }
   // dma_display->flipDMABuffer(); // Flip the buffer to show the updated logos
   //  Optional: Add a small delay for smoother animation
-  vTaskDelay(pdMS_TO_TICKS(32)); // ~60 FPS
+  vTaskDelay(pdMS_TO_TICKS(16)); // ~60 FPS
 }
 
 // Define a threshold for microphone amplitude to trigger mouth open/close
@@ -2928,119 +2914,67 @@ void updateMouthMovement()
 // Runs one frame of the Pixel Dust animation
 void PixelDustEffect()
 {
-  uint32_t t_current;
-#if (DEBUG_MODE)
-  Serial.println("PixelDustEffect: Starting..."); // DEBUG
-#endif
+  static uint32_t lastFrameMicros = 0;
 
-  // Use a static local for prevTime if this is the only place it's used for this specific effect's FPS
-  // static uint32_t effect_prev_time = 0;
-  // while (((t_current = micros()) - effect_prev_time) < (1000000L / MAX_FPS));
-  // effect_prev_time = t_current;
-  // OR if prevTime is truly global for this effect:
-  while (((t_current = micros()) - prevTime) < (1000000L / MAX_FPS))
+  const uint32_t now = micros();
+  if ((now - lastFrameMicros) < (1000000L / MAX_FPS))
   {
-    // yield or delay briefly if you suspect this loop is too tight for some reason,
-    // though usually it's fine.
-    // taskYIELD();
+    return;
   }
-  prevTime = t_current;
-  Serial.println("PixelDustEffect: FPS throttle passed."); // DEBUG
+  lastFrameMicros = now;
+
+  if (!pixelDustInitialized)
+  {
+    setupPixelDust();
+    if (!pixelDustInitialized)
+    {
+      return;
+    }
+  }
 
   if (!dma_display)
   {
-    Serial.println("PixelDust Error: dma_display is null!");
     return;
   }
-  Serial.println("PixelDustEffect: dma_display OK."); // DEBUG
 
-  Serial.printf("PixelDustEffect: accelEnabled=%d, g_accel_init=%d\n", accelerometerEnabled, g_accelerometer_initialized); // DEBUG
+  int16_t ax_scaled = 0;
+  int16_t ay_scaled = (int16_t)(0.1f * 128);
 
-  if (accelerometerEnabled)
+  if (accelerometerEnabled && g_accelerometer_initialized)
   {
-    if (g_accelerometer_initialized)
+    sensors_event_t event;
+    if (accel.getEvent(&event))
     {
-      sensors_event_t event;
-      Serial.println("PixelDustEffect: Attempting accel.getEvent()"); // DEBUG
-      if (accel.getEvent(&event))
-      {
-        Serial.println("PixelDustEffect: accel.getEvent() SUCCESS."); // DEBUG
-        int16_t ax_scaled = (int16_t)(event.acceleration.x * 1000.0);
-        int16_t ay_scaled = (int16_t)(event.acceleration.y * 1000.0);
-        Serial.println("PixelDustEffect: Before sand.iterate (with accel data)"); // DEBUG
-        sand.iterate(ax_scaled, ay_scaled, 0);
-        Serial.println("PixelDustEffect: After sand.iterate (with accel data)"); // DEBUG
-      }
-      else
-      {
-        Serial.println("PixelDust: Failed to get accelerometer event.");
-        Serial.println("PixelDustEffect: Before sand.iterate (default gravity after accel fail)"); // DEBUG
-        sand.iterate(0, (int16_t)(0.1 * 128), 0);
-        Serial.println("PixelDustEffect: After sand.iterate (default gravity after accel fail)"); // DEBUG
-      }
-    }
-    else
-    {
-      Serial.println("PixelDustEffect: Accelerometer hardware not initialized. Using default gravity."); // DEBUG
-      Serial.println("PixelDustEffect: Before sand.iterate (default gravity, accel not init)");          // DEBUG
-      sand.iterate(0, (int16_t)(0.1 * 128), 0);
-      Serial.println("PixelDustEffect: After sand.iterate (default gravity, accel not init)"); // DEBUG
+      ax_scaled = (int16_t)(event.acceleration.x * 1000.0f);
+      ay_scaled = (int16_t)(event.acceleration.y * 1000.0f);
     }
   }
-  else
-  {
-    Serial.println("PixelDustEffect: Accelerometer use disabled by config. Using default gravity."); // DEBUG
-    Serial.println("PixelDustEffect: Before sand.iterate (default gravity, accel disabled)");        // DEBUG
-    sand.iterate(0, (int16_t)(0.1 * 128), 0);
-    Serial.println("PixelDustEffect: After sand.iterate (default gravity, accel disabled)"); // DEBUG
-  }
 
-  // dma_display->clearScreen(); // is called by displayCurrentView before this effect
+  sand.iterate(ax_scaled, ay_scaled, 0);
 
   dimension_t px, py;
-  int grains_per_block_width = PANE_WIDTH / N_COLORS; // Assuming N_COLORS != 0
+  int grains_per_block_width = PANE_WIDTH / N_COLORS;
   int grains_per_color_stripe = grains_per_block_width * BOX_HEIGHT;
-
-  Serial.printf("PixelDustEffect: N_GRAINS=%d, grains_per_color_stripe=%d\n", N_GRAINS, grains_per_color_stripe); // DEBUG
-
-  if (grains_per_color_stripe == 0 && N_GRAINS > 0)
+  if (grains_per_color_stripe <= 0)
   {
-    Serial.println("PixelDust Error: grains_per_color_stripe is zero.");
-    for (int i = 0; i < N_GRAINS; i++)
-    {
-      // Serial.printf("PixelDustEffect: Loop1 - Grain %d / %d\n", i, N_GRAINS); // VERBOSE
-      sand.getPosition(i, &px, &py);
-      if (px >= 0 && px < dma_display->width() && py >= 0 && py < dma_display->height())
-      {
-        dma_display->drawPixel(px, py, colors[0]);
-      }
-    }
+    grains_per_color_stripe = N_GRAINS;
   }
-  else
+
+  for (int i = 0; i < N_GRAINS; i++)
   {
-    for (int i = 0; i < N_GRAINS; i++)
+    sand.getPosition(i, &px, &py);
+    if (px >= 0 && px < dma_display->width() && py >= 0 && py < dma_display->height())
     {
-      // Serial.printf("PixelDustEffect: Loop2 - Grain %d / %d\n", i, N_GRAINS); // VERBOSE
-      if (i % 100 == 0 && i > 0)
-      {                                                             // Print progress less frequently
-        Serial.printf("PixelDustEffect: Processing grain %d\n", i); // DEBUG
-      }
-      sand.getPosition(i, &px, &py); // Potential crash
       int color_index = (grains_per_color_stripe > 0) ? (i / grains_per_color_stripe) : 0;
       if (color_index >= N_COLORS)
-        color_index = N_COLORS - 1;
-
-      if (px >= 0 && px < dma_display->width() && py >= 0 && py < dma_display->height())
       {
-        dma_display->drawPixel(px, py, colors[color_index]);
+        color_index = N_COLORS - 1;
       }
+      dma_display->drawPixel(px, py, colors[color_index]);
     }
   }
-  Serial.println("PixelDustEffect: Drawing loop finished."); // DEBUG
-                                                             // No flipDMABuffer here, it's handled by the displayTask
-
-  // Ensure this function matches any prototype you might have in a header file.
 }
+
 
 
 using ViewRenderFunc = void (*)();
@@ -3121,6 +3055,10 @@ static void renderFluidEffectView() {
     }
 }
 
+static void renderPixelDustView() {
+    PixelDustEffect();
+}
+
 static void renderFullscreenSpiralPalette() {
     updateAndDrawFullScreenSpiral(SPIRAL_COLOR_PALETTE);
 }
@@ -3150,7 +3088,8 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     renderFaceWithPlasma,             // VIEW_CIRCLE_EYES
     renderFullscreenSpiralPalette,    // VIEW_FULLSCREEN_SPIRAL_PALETTE
     renderFullscreenSpiralWhite,      // VIEW_FULLSCREEN_SPIRAL_WHITE
-    renderScrollingTextView           // VIEW_SCROLLING_TEXT
+    renderScrollingTextView,          // VIEW_SCROLLING_TEXT
+    renderPixelDustView               // VIEW_PIXEL_DUST
 };
 
 static_assert(sizeof(VIEW_RENDERERS) / sizeof(ViewRenderFunc) == TOTAL_VIEWS, "View renderer table mismatch");
@@ -3188,6 +3127,10 @@ void displayCurrentView(int view) {
      if (view == VIEW_FLAME_EFFECT) {
       initFlameEffect(dma_display);
     }
+     if (view == VIEW_PIXEL_DUST) {
+      setupPixelDust();
+    }
+    previousViewLocal = view;
   }
 
   ViewRenderFunc renderer = (view >= 0 && view < TOTAL_VIEWS) ? VIEW_RENDERERS[view] : nullptr;
@@ -3364,7 +3307,7 @@ void loop() {
                 if (currentView != 9) { // Prevent re-triggering if already spiral
                     previousView = currentView; // Save the current view.
                     currentView = 9;            // Switch to spiral eyes view
-                    spiralStartMillis = millis(); // Record the trigger time.
+                    spiralStartMillis = loopNow; // Record the trigger time.
                     LOG_DEBUG_LN("Shake detected! Switching to Spiral View.");
                     notifyBleTask();
                     lastActivityTime = millis(); // Shake is activity
@@ -3492,7 +3435,9 @@ void loop() {
     }
 
         // --- Revert from Spiral View Timer ---
-        if (currentView == 9 && spiralStartMillis > 0 && hasElapsedSince(loopNow, spiralStartMillis, 5000)) {
+        // Use a local copy to avoid updating spiralStartMillis inside hasElapsedSince
+        unsigned long spiralStartMillisCopy = spiralStartMillis;
+        if (currentView == 9 && spiralStartMillisCopy > 0 && hasElapsedSince(loopNow, spiralStartMillisCopy, 5000)) {
              LOG_DEBUG_LN("Spiral timeout, reverting view.");
              currentView = previousView;
              spiralStartMillis = 0;
@@ -3522,7 +3467,7 @@ void loop() {
   // --- Frame Rate Calculation ---
   calculateFPS(); // Update FPS counter
 
-vTaskDelay(pdMS_TO_TICKS(5)); // yield to the display & BLE tasks
+//vTaskDelay(pdMS_TO_TICKS(5)); // yield to the display & BLE tasks
 
   /*
   // If the current view is one of the plasma views, increase the interval to reduce load

@@ -49,6 +49,7 @@ enum View
   VIEW_FULLSCREEN_SPIRAL_PALETTE,
   VIEW_FULLSCREEN_SPIRAL_WHITE,
   VIEW_SCROLLING_TEXT,
+  VIEW_PIXEL_DUST,
 
   // This special entry will automatically hold the total number of views.
   // It must always be the last item in the enum.
