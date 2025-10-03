@@ -27,8 +27,8 @@ bool oldDeviceConnected = false;
 #define COMMAND_CHARACTERISTIC_UUID "0195eec3-06d2-7fd4-a561-49493be3ee41"
 #define BRIGHTNESS_CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09ef"
 
-#define SCROLL_SPEED_CHARACTERISTIC_UUID            "7f9b8b12-1234-4c55-9b77-a19d55aa0011"
-#define LUX_CHARACTERISTIC_UUID                     "01931c44-3867-7427-96ab-8d7ac0ae09f0"
+#define SCROLL_TEXT_CHARACTERISTIC_UUID "7f9b8b12-1234-4c55-9b77-a19d55aa0011"
+#define LUX_CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09f0"
 
 #define OTA_CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09ee"
 #define INFO_CHARACTERISTIC_UUID "cba1d466-344c-4be3-ab3f-189f80dd7599"
@@ -49,23 +49,23 @@ void bleTask(void *parameters) {
 */
 
 // BLE Server pointers
-NimBLEServer* pServer = nullptr;
-NimBLECharacteristic* pCharacteristic = nullptr;
-NimBLECharacteristic* pFaceCharacteristic = nullptr;
-NimBLECharacteristic* pTemperatureCharacteristic = nullptr;
-NimBLECharacteristic* pConfigCharacteristic = nullptr;
-NimBLECharacteristic* pCommandCharacteristic;
-NimBLECharacteristic* pTemperatureLogsCharacteristic = nullptr; // New Command UUID
-NimBLECharacteristic* pBrightnessCharacteristic = nullptr;
-NimBLECharacteristic* pLuxCharacteristic = nullptr;
+NimBLEServer *pServer = nullptr;
+NimBLECharacteristic *pCharacteristic = nullptr;
+NimBLECharacteristic *pFaceCharacteristic = nullptr;
+NimBLECharacteristic *pTemperatureCharacteristic = nullptr;
+NimBLECharacteristic *pConfigCharacteristic = nullptr;
+NimBLECharacteristic *pCommandCharacteristic;
+NimBLECharacteristic *pTemperatureLogsCharacteristic = nullptr; // New Command UUID
+NimBLECharacteristic *pBrightnessCharacteristic = nullptr;
+NimBLECharacteristic *pLuxCharacteristic = nullptr;
 
-NimBLECharacteristic* pScrollSpeedCharacteristic = nullptr; // NEW
+NimBLECharacteristic *pScrollTextCharacteristic = nullptr; // NEW
 
-NimBLECharacteristic* pOtaCharacteristic = nullptr;
-static NimBLECharacteristic* pInfoCharacteristic;
+NimBLECharacteristic *pOtaCharacteristic = nullptr;
+static NimBLECharacteristic *pInfoCharacteristic;
 
-extern uint8_t scrollSpeedSetting;      // 1–100
-extern uint16_t scrollTextIntervalMs;   // ms per pixel
+extern uint8_t scrollSpeedSetting;             // 1–100
+extern uint16_t scrollTextIntervalMs;          // ms per pixel
 extern void updateScrollIntervalFromSetting(); // helper
 
 void triggerHistoryTransfer();
@@ -77,7 +77,7 @@ void updateLux(); // NEW: Add lux function declaration
 // Fallback defines in case PlatformIO doesn't inject them
 #ifndef FIRMWARE_VERSION
 // #define FIRMWARE_VERSION "unknown"
-#define FIRMWARE_VERSION "2.2.0" // Default version if not defined
+#define FIRMWARE_VERSION "3.0.0" // Default version if not defined
 #endif
 
 #ifndef GIT_COMMIT
@@ -105,7 +105,7 @@ void updateLux(); // NEW: Add lux function declaration
 #endif
 
 #ifndef APP_COMPAT_VERSION
-#define APP_COMPAT_VERSION "6.0"
+#define APP_COMPAT_VERSION "6.1"
 #endif
 
 std::string fwVersion = FIRMWARE_VERSION;
@@ -336,6 +336,16 @@ class ServerCallbacks : public NimBLEServerCallbacks
         return 123456;
     }
 
+    // uint32_t onPassKeyRequest()
+    // {
+    //     Serial.printf("Server Passkey Request\n");
+    //     /**
+    //      * This should return a random 6 digit number for security
+    //      *  or make your own static passkey as done here.
+    //      */
+    //     return 123456;
+    // }
+
     void onConfirmPassKey(NimBLEConnInfo &connInfo, uint32_t pass_key) override
     {
         Serial.printf("The passkey YES/NO number: %" PRIu32 "\n", pass_key);
@@ -356,29 +366,78 @@ class ServerCallbacks : public NimBLEServerCallbacks
     }
 
 } serverCallbacks;
-
-class ScrollSpeedCallbacks : public NimBLECharacteristicCallbacks {
-  void onWrite(NimBLECharacteristic* pChr, NimBLEConnInfo& connInfo) override {
-      const auto &val = pChr->getValue(); // getValue() returns a temporary; bind as const reference
-      if (val.size() >= 1) {
-          uint8_t incoming = static_cast<uint8_t>(val[0]);
-          if (incoming < 1) incoming = 1;
-          if (incoming > 100) incoming = 100;
-          scrollSpeedSetting = incoming;
-          updateScrollIntervalFromSetting();
+class ScrollSpeedCallbacks : public NimBLECharacteristicCallbacks
+{
+    void onWrite(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
+    {
+        const auto &val = pChr->getValue(); // getValue() returns a temporary; bind as const reference
+        if (val.size() >= 1)
+        {
+            uint8_t incoming = static_cast<uint8_t>(val[0]);
+            if (incoming < 1)
+                incoming = 1;
+            if (incoming > 100)
+                incoming = 100;
+            scrollSpeedSetting = incoming;
+            updateScrollIntervalFromSetting();
 #if DEBUG_MODE
-          Serial.printf("BLE: New scroll speed=%u (interval=%u ms)\n", scrollSpeedSetting, scrollTextIntervalMs);
+            Serial.printf("BLE: New scroll speed=%u (interval=%u ms)\n", scrollSpeedSetting, scrollTextIntervalMs);
 #endif
-          // Echo back & notify (optional)
-          pChr->setValue(&scrollSpeedSetting, 1);
-          pChr->notify();
-      }
-  }
-  void onRead(NimBLECharacteristic* pChr, NimBLEConnInfo& connInfo) override {
-      pChr->setValue(&scrollSpeedSetting, 1);
-  }
+            // Echo back & notify (optional)
+            pChr->setValue(&scrollSpeedSetting, 1);
+            pChr->notify();
+        }
+    }
+    void onRead(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
+    {
+        pChr->setValue(&scrollSpeedSetting, 1);
+    }
 };
 static ScrollSpeedCallbacks scrollSpeedCallbacks;
+
+class ScrollTextCallbacks : public NimBLECharacteristicCallbacks
+{
+    void onWrite(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
+    {
+        extern char txt[64]; // Declare external txt buffer
+        const auto &val = pChr->getValue();
+        if (val.size() > 0 && val.size() < sizeof(txt))
+        {
+            // Copy new message to txt buffer
+            memset(txt, 0, sizeof(txt)); // Clear existing text
+            memcpy(txt, val.data(), val.size());
+            txt[val.size()] = '\0'; // Ensure null termination
+
+            // Reinitialize scrolling text with new message
+            extern void initializeScrollingText();
+            initializeScrollingText();
+
+#if DEBUG_MODE
+            Serial.printf("BLE: New scroll text received: '%s' (%u bytes)\n", txt, val.size());
+#endif
+
+            // Echo back & notify (optional)
+            pChr->setValue(txt);
+            pChr->notify();
+        }
+        else if (val.size() >= sizeof(txt))
+        {
+            Serial.printf("BLE: Scroll text too long! Max %u bytes, got %u\n", sizeof(txt) - 1, val.size());
+        }
+    }
+
+    void onRead(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
+    {
+        extern char txt[64]; // ADD THIS LINE - Declare extern to access the global txt buffer
+                             // Return current text when app reads
+        pChr->setValue(txt);
+#if DEBUG_MODE
+        Serial.printf("BLE: Scroll text read: '%s'\n", txt);
+#endif
+    }
+};
+
+static ScrollTextCallbacks scrollTextCallbacks;
 
 // Lux monitoring variables
 unsigned long luxMillis = 0;
@@ -386,7 +445,7 @@ const unsigned long luxInterval = 500; // Update lux every 500ms
 uint16_t lastSentLuxValue = 0;
 const uint16_t luxChangeThreshold = 10; // Only send updates if lux changes by more than this amount
 
-// Temp Non-Blocking Variables 
+// Temp Non-Blocking Variables
 unsigned long temperatureMillis = 0;
 const unsigned long temperatureInterval = 5000; // 1 second interval for temperature update
 
@@ -546,21 +605,25 @@ void updateTemperature()
     }
 }
 
-void updateLux() {
+void updateLux()
+{
     unsigned long currentMillis = millis();
 
     // Check if enough time has passed to update lux
-    if (currentMillis - luxMillis >= luxInterval) {
+    if (currentMillis - luxMillis >= luxInterval)
+    {
         luxMillis = currentMillis;
 
         // Verify that the device is connected and the lux characteristic pointer is valid.
-        if (deviceConnected && pLuxCharacteristic != nullptr) {
+        if (deviceConnected && pLuxCharacteristic != nullptr)
+        {
             // Get current lux value from the APDS9960 sensor
             extern uint16_t getRawClearChannelValue(); // Function from main.h
             uint16_t currentLux = getRawClearChannelValue();
 
             // Only send update if lux has changed significantly to avoid spam
-            if (abs((int)currentLux - (int)lastSentLuxValue) >= luxChangeThreshold) {
+            if (abs((int)currentLux - (int)lastSentLuxValue) >= luxChangeThreshold)
+            {
                 // Send as 2-byte value (uint16_t)
                 uint8_t luxBytes[2];
                 luxBytes[0] = currentLux & 0xFF;        // Low byte
@@ -571,14 +634,18 @@ void updateLux() {
 
                 lastSentLuxValue = currentLux;
 
-                #if DEBUG_MODE
+#if DEBUG_MODE
                 Serial.printf("Lux level sent: %u\n", currentLux);
-                #endif
+#endif
             }
-        } else {
+        }
+        else
+        {
             // Extra safeguard: log an error if pLuxCharacteristic is null or not connected
-            if (!deviceConnected) Serial.println("Warning: updateLux called while not connected.");
-            if (pLuxCharacteristic == nullptr) Serial.println("Error: pLuxCharacteristic is null!");
+            if (!deviceConnected)
+                Serial.println("Warning: updateLux called while not connected.");
+            if (pLuxCharacteristic == nullptr)
+                Serial.println("Error: pLuxCharacteristic is null!");
         }
     }
 }

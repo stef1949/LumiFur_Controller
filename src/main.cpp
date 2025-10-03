@@ -215,6 +215,7 @@ inline void runIfElapsed(unsigned long now, unsigned long &last, unsigned long i
     }
 }
 
+char txt[64];
 constexpr uint16_t SCROLL_BACKGROUND_INTERVAL_MS = 90;
 constexpr int16_t SCROLL_TEXT_GAP = 12;
 static unsigned long lastScrollTick = 0;
@@ -224,7 +225,7 @@ static uint8_t scrollingColorOffset = 0;
 static bool scrollingTextInitialized = false;
 
 uint8_t scrollSpeedSetting = 4;        // NEW: mid value (1-100)
-uint16_t scrollTextIntervalMs = 10;    // NEW: actual interval in ms (updated by helper)
+uint16_t scrollTextIntervalMs = 15;    // NEW: actual interval in ms (updated by helper)
 
 void updateScrollIntervalFromSetting() { // NEW helper
     // Map 1..100 (fast->slow) to 15..250 ms
@@ -681,7 +682,7 @@ uint16_t colorWheel(uint8_t pos)
   return dma_display->color565(0, pos * 3, 255 - pos * 3);
 }
 
-static void initializeScrollingText()
+void initializeScrollingText()
 {
   if (!dma_display)
   {
@@ -724,6 +725,7 @@ static void drawScrollingBackground(uint8_t offset)
     const uint8_t paletteIndex = sin8(static_cast<uint8_t>(y * 8) + offset);
     const CRGB color = ColorFromPalette(CloudColors_p, paletteIndex);
     dma_display->drawFastHLine(0, y, width, dma_display->color565(color.r, color.g, color.b));
+    dma_display->clearScreen();
   }
 }
 
@@ -742,7 +744,7 @@ static void renderScrollingTextView()
     ++scrollingBackgroundOffset;
   }
 
-  drawScrollingBackground(scrollingBackgroundOffset);
+  //drawScrollingBackground(scrollingBackgroundOffset);
 
 // CHANGED: use scrollTextIntervalMs instead of fixed constant
   if (now - lastScrollTick >= scrollTextIntervalMs)
@@ -755,7 +757,7 @@ static void renderScrollingTextView()
     }
     scrollingColorOffset = static_cast<uint8_t>(scrollingColorOffset + 3);
   }
-
+  //vTaskDelay(pdMS_TO_TICKS(scrollTextIntervalMs));
   drawText(scrollingColorOffset);
 }
 
@@ -2128,8 +2130,11 @@ void setup()
   NimBLEDevice::init("LF-052618");
   // NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
   // NimBLEDevice::setPower(ESP_PWR_LVL_P21, NimBLETxPowerType::All); // Power level 21 (highest) for best range
-  NimBLEDevice::setPower(ESP_PWR_LVL_P9, NimBLETxPowerType::All); // Power level 21 (highest) for best range
-  NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
+  NimBLEDevice::setPower(ESP_PWR_LVL_P21, NimBLETxPowerType::All); // Power level 21 (highest) for best range
+  //NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
+  NimBLEDevice::setSecurityAuth(true, true, true);
+  NimBLEDevice::setSecurityPasskey(123456);
+  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_KEYBOARD_DISPLAY);
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(&serverCallbacks);
 
@@ -2137,7 +2142,9 @@ void setup()
 
   NimBLECharacteristic *pDeviceInfoCharacteristic = pService->createCharacteristic(
       INFO_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ);
+      NIMBLE_PROPERTY::READ |
+      NIMBLE_PROPERTY::NOTIFY
+    );
 
   // Construct JSON string
   std::string jsonInfo = std::string("{") +
@@ -2304,6 +2311,29 @@ NimBLE2904 *luxFormat = pLuxCharacteristic->create2904();
 luxFormat->setFormat(NimBLE2904::FORMAT_UINT16);
 luxFormat->setUnit(0x2731); // 0x2731 is the standard unit for Illuminance (lux)
 
+pScrollTextCharacteristic = pService->createCharacteristic(
+      SCROLL_TEXT_CHARACTERISTIC_UUID,
+      NIMBLE_PROPERTY::READ_ENC | // Require encryption for reading
+          NIMBLE_PROPERTY::WRITE_ENC | // Require encryption for writing
+          NIMBLE_PROPERTY::WRITE_NR |
+          NIMBLE_PROPERTY::NOTIFY
+  );
+  pScrollTextCharacteristic->setCallbacks(&scrollTextCallbacks);
+  
+  // Set initial value (current text)
+  pScrollTextCharacteristic->setValue(txt);
+  
+  // Add descriptor
+  NimBLEDescriptor *scrollTextDesc = pScrollTextCharacteristic->createDescriptor(
+      "2901",
+      NIMBLE_PROPERTY::READ,
+      20
+  );
+  scrollTextDesc->setValue("Scrolling Text");
+  
+  Serial.println("Scroll Text Characteristic created");
+
+
   // nimBLEService* pBaadService = pServer->createService("BAAD");
   pService->start();
 
@@ -2440,7 +2470,7 @@ luxFormat->setUnit(0x2731); // 0x2731 is the standard unit for Illuminance (lux)
   // Set initial plasma color palette
   currentPalette = RainbowColors_p;
 
-  snprintf(txt, sizeof(txt), "HAVE A WONDERFUL DAY!");
+  snprintf(txt, sizeof(txt), "Stimming right now :3");
   initializeScrollingText();
 
   ////////Setup Bouncing Squares////////

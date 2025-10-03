@@ -220,10 +220,13 @@ Adafruit_LIS3DH accel;
 
 // Sundry globals used for animation ---------------------------------------
 
+// Scrolling text sundries
 int16_t textX;   // Current text position (X)
 int16_t textY;   // Current text position (Y)
 int16_t textMin; // Text pos. (X) when scrolled off left edge
-char txt[64];    // Buffer to hold scrolling message text
+extern char txt[64];    // Buffer to hold scrolling message text
+extern void initializeScrollingText(); // Exposes function
+
 int16_t ball[3][4] = {
     {3, 0, 1, 1}, // Initial X,Y pos+velocity of 3 bouncy balls
     {17, 15, 1, -1},
