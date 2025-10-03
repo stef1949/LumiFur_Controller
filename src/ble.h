@@ -26,6 +26,8 @@ bool oldDeviceConnected = false;
 #define TEMPERATURE_LOGS_CHARACTERISTIC_UUID "0195eec2-ae6e-74a1-bcd5-215e2365477c" // New Command UUID
 #define COMMAND_CHARACTERISTIC_UUID "0195eec3-06d2-7fd4-a561-49493be3ee41"
 #define BRIGHTNESS_CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09ef"
+
+#define SCROLL_SPEED_CHARACTERISTIC_UUID            "7f9b8b12-1234-4c55-9b77-a19d55aa0011"
 #define LUX_CHARACTERISTIC_UUID                     "01931c44-3867-7427-96ab-8d7ac0ae09f0"
 
 #define OTA_CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09ee"
@@ -57,8 +59,14 @@ NimBLECharacteristic* pTemperatureLogsCharacteristic = nullptr; // New Command U
 NimBLECharacteristic* pBrightnessCharacteristic = nullptr;
 NimBLECharacteristic* pLuxCharacteristic = nullptr;
 
-NimBLECharacteristic* pOTACharacteristic = nullptr;
+NimBLECharacteristic* pScrollSpeedCharacteristic = nullptr; // NEW
+
+NimBLECharacteristic* pOtaCharacteristic = nullptr;
 static NimBLECharacteristic* pInfoCharacteristic;
+
+extern uint8_t scrollSpeedSetting;      // 1–100
+extern uint16_t scrollTextIntervalMs;   // ms per pixel
+extern void updateScrollIntervalFromSetting(); // helper
 
 void triggerHistoryTransfer();
 void clearHistoryBuffer();
@@ -349,11 +357,28 @@ class ServerCallbacks : public NimBLEServerCallbacks
 
 } serverCallbacks;
 
-// Lux monitoring variables
-unsigned long luxMillis = 0;
-const unsigned long luxInterval = 500; // Update lux every 500ms
-uint16_t lastSentLuxValue = 0;
-const uint16_t luxChangeThreshold = 10; // Only send updates if lux changes by more than this amount
+class ScrollSpeedCallbacks : public NimBLECharacteristicCallbacks {
+  void onWrite(NimBLECharacteristic* pChr, NimBLEConnInfo& connInfo) override {
+      const auto &val = pChr->getValue(); // getValue() returns a temporary; bind as const reference
+      if (val.size() >= 1) {
+          uint8_t incoming = static_cast<uint8_t>(val[0]);
+          if (incoming < 1) incoming = 1;
+          if (incoming > 100) incoming = 100;
+          scrollSpeedSetting = incoming;
+          updateScrollIntervalFromSetting();
+#if DEBUG_MODE
+          Serial.printf("BLE: New scroll speed=%u (interval=%u ms)\n", scrollSpeedSetting, scrollTextIntervalMs);
+#endif
+          // Echo back & notify (optional)
+          pChr->setValue(&scrollSpeedSetting, 1);
+          pChr->notify();
+      }
+  }
+  void onRead(NimBLECharacteristic* pChr, NimBLEConnInfo& connInfo) override {
+      pChr->setValue(&scrollSpeedSetting, 1);
+  }
+};
+static ScrollSpeedCallbacks scrollSpeedCallbacks;
 
 // Lux monitoring variables
 unsigned long luxMillis = 0;
@@ -361,7 +386,7 @@ const unsigned long luxInterval = 500; // Update lux every 500ms
 uint16_t lastSentLuxValue = 0;
 const uint16_t luxChangeThreshold = 10; // Only send updates if lux changes by more than this amount
 
-// Temp Non-Blocking Variables
+// Temp Non-Blocking Variables 
 unsigned long temperatureMillis = 0;
 const unsigned long temperatureInterval = 5000; // 1 second interval for temperature update
 
