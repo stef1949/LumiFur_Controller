@@ -16,9 +16,10 @@ extern bool brightnessChanged;
 
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
+bool devicePairing = false;
+
 
 // BLE UUIDs
-
 #define SERVICE_UUID "01931c44-3867-7740-9867-c822cb7df308"
 #define CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09fe"
 #define CONFIG_CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09ff"
@@ -312,7 +313,11 @@ class ServerCallbacks : public NimBLEServerCallbacks
          */
         pServer->updateConnParams(connInfo.getConnHandle(), 24, 48, 0, 180);
     }
-
+    void onPairingRequest(NimBLEServer *pServer, NimBLEConnInfo &connInfo)
+    {
+        devicePairing = true;
+        Serial.printf("Pairing request from: %s\n", connInfo.getAddress().toString().c_str());
+    }
     void onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason) override
     {
         deviceConnected = false;

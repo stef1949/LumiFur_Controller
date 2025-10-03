@@ -604,7 +604,7 @@ void handleBLEStatusLED()
   {
     if (deviceConnected)
     {
-      statusPixel.setPixelColor(0, 0, 100, 0); // Green when connected
+      statusPixel.setPixelColor(0, 0, 50, 0); // Green when connected
     }
     else
     {
@@ -617,6 +617,10 @@ void handleBLEStatusLED()
   if (!deviceConnected)
   {
     fadeInAndOutLED(0, 0, 100); // Blue fade when disconnected
+  }
+  if (devicePairing)
+  {
+    fadeInAndOutLED(128, 0, 128); // Blue when pairing
   }
   statusPixel.show();
 }
@@ -1084,7 +1088,7 @@ void updatePlasmaFace()
 {
   static unsigned long lastUpdate = 0;
   static unsigned long lastPaletteChange = 0;
-  const uint16_t frameDelay = 1;               // Delay for plasma animation update
+  const uint16_t frameDelay = 5;               // Delay for plasma animation update
   const unsigned long paletteInterval = 10000; // Change palette every 10 seconds
   unsigned long now = millis();
 
@@ -2645,7 +2649,7 @@ void updateDVDLogos()
     DVDLogo &logo = logos[i];
 
     // Clear previous
-    dma_display->fillRect(logo.x, logo.y, dvdWidth, dvdHeight, 0);
+    //dma_display->fillRect(logo.x, logo.y, dvdWidth, dvdHeight, 0);
 
     // Update position
     logo.x += logo.vx;
@@ -2694,6 +2698,7 @@ void updateDVDLogos()
   }
   // dma_display->flipDMABuffer(); // Flip the buffer to show the updated logos
   //  Optional: Add a small delay for smoother animation
+  vTaskDelay(pdMS_TO_TICKS(32)); // ~60 FPS
 }
 
 // Define a threshold for microphone amplitude to trigger mouth open/close
@@ -3215,7 +3220,7 @@ void displayCurrentView(int view) {
 
 #endif
 
-  if (!sleepModeActive)
+  if (!sleepModeActive || current_view == VIEW_TRANS_FLAG || current_view == VIEW_BSOD)
   {
     dma_display->flipDMABuffer();
   }
@@ -3474,7 +3479,7 @@ void loop() {
       maybeUpdateBrightness();
     }
     // Manual brightness is applied immediately on BLE write if autoBrightness is off.
-        updateLux(); // Update lux values
+      updateLux(); // Update lux values
 
     // --- Update Animation States ---
     updateBlinkAnimation();     // Update blink animation once per loop
@@ -3517,7 +3522,7 @@ void loop() {
   // --- Frame Rate Calculation ---
   calculateFPS(); // Update FPS counter
 
-//vTaskDelay(pdMS_TO_TICKS(5)); // yield to the display & BLE tasks
+vTaskDelay(pdMS_TO_TICKS(5)); // yield to the display & BLE tasks
 
   /*
   // If the current view is one of the plasma views, increase the interval to reduce load

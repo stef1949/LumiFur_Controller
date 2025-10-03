@@ -89,6 +89,13 @@ Preferences& getPrefs() {
     getPrefs().putUChar(KEY_LAST, v);
   }
 
+  void saveUserText(const String& text) {
+    getPrefs().putString("userText", text);
+  }
+
+  String getUserText() {
+    return getPrefs().getString("userText", "");
+  }
 
   // Clear all preferences - Implement feature to reset controller to default settings
   void clearPreferences() {
