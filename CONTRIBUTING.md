@@ -240,26 +240,7 @@ All contributors will be recognized in our project documentation. Thank you for 
 
 ---
 
-*Happy contributing! 🎭✨*# Contributing to LumiFur Controller 🎉
-
-Thank you for your interest in contributing to the LumiFur Controller project! We appreciate your time and effort in helping make this protogen LED matrix controller even better. Every contribution, whether it's a bug fix, feature enhancement, documentation improvement, or even just reporting an issue, helps improve the project for everyone in the community.
-
-## 🐛 Reporting Bugs
-
-If you encounter a bug or unexpected behavior, please help us fix it by creating a detailed bug report:
-
-1. **Search existing issues** first to see if the bug has already been reported
-2. **Create a new issue** using our [Bug Report template](https://github.com/stef1949/LumiFur_Controller/issues/new?assignees=&labels=bug&template=bug_report.md&title=%5BBUG%5D)
-3. **Provide detailed information** including:
-   - Clear description of the bug
-   - Steps to reproduce the issue
-   - Expected vs actual behavior
-   - Hardware setup (ESP32 board, LED matrix configuration)
-   - Software environment (PlatformIO version, library versions)
-   - Screenshots or videos if applicable
-
-## 💡 Requesting Features
-
+*Happy contributing! 🎭✨*
 Have an idea for a new feature or enhancement? We'd love to hear about it!
 
 1. **Search existing issues** to see if the feature has already been requested
