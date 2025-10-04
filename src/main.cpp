@@ -34,10 +34,15 @@
 #define LOG_DEBUG(...) Serial.printf(__VA_ARGS__)
 #define LOG_DEBUG_LN(message) Serial.println(message)
 #else
-#define LOG_DEBUG(...) do { } while (0)
-#define LOG_DEBUG_LN(message) do { } while (0)
+#define LOG_DEBUG(...) \
+  do                   \
+  {                    \
+  } while (0)
+#define LOG_DEBUG_LN(message) \
+  do                          \
+  {                           \
+  } while (0)
 #endif
-
 
 // #include "EffectsLayer.hpp" // FastLED CRGB Pixel Buffer for which the patterns are drawn
 // EffectsLayer effects(VPANEL_W, VPANEL_H);
@@ -74,7 +79,8 @@ uint16_t plasmaFrameDelay = 15; // ms between plasma updates (was 10)
 // Spiral animation optimization
 unsigned long rotationFrameInterval = 15; // ms between spiral rotation updates (was 11)
 
-enum BlushState {
+enum BlushState
+{
   BLUSH_INACTIVE,
   BLUSH_FADE_IN,
   BLUSH_FULL,
@@ -164,14 +170,17 @@ float globalBrightnessScale = 0.0f;
 uint16_t globalBrightnessScaleFixed = 256;
 bool facePlasmaDirty = true;
 
-inline void updateGlobalBrightnessScale(uint8_t brightness) {
+inline void updateGlobalBrightnessScale(uint8_t brightness)
+{
   globalBrightnessScale = brightness / 255.0f;
   globalBrightnessScaleFixed = static_cast<uint16_t>((static_cast<uint32_t>(brightness) * 256u + 127u) / 255u);
   facePlasmaDirty = true;
 }
 
-inline void setBlinkProgress(int newValue) {
-  if (blinkProgress != newValue) {
+inline void setBlinkProgress(int newValue)
+{
+  if (blinkProgress != newValue)
+  {
     facePlasmaDirty = true;
   }
   blinkProgress = newValue;
@@ -202,16 +211,19 @@ const int maxBlinkDelay = MAX_BLINK_DELAY;
 int loadingProgress = 0;
 int loadingMax = 100;
 
-inline bool hasElapsedSince(unsigned long now, unsigned long last, unsigned long interval) {
-    return static_cast<unsigned long>(now - last) >= interval;
+inline bool hasElapsedSince(unsigned long now, unsigned long last, unsigned long interval)
+{
+  return static_cast<unsigned long>(now - last) >= interval;
 }
 
 template <typename Callback>
-inline void runIfElapsed(unsigned long now, unsigned long &last, unsigned long interval, Callback &&callback) {
-    if (hasElapsedSince(now, last, interval)) {
-        last = now;
-        callback();
-    }
+inline void runIfElapsed(unsigned long now, unsigned long &last, unsigned long interval, Callback &&callback)
+{
+  if (hasElapsedSince(now, last, interval))
+  {
+    last = now;
+    callback();
+  }
 }
 
 char txt[64];
@@ -223,17 +235,18 @@ static uint8_t scrollingBackgroundOffset = 0;
 static uint8_t scrollingColorOffset = 0;
 static bool scrollingTextInitialized = false;
 
-uint8_t scrollSpeedSetting = 4;        // NEW: mid value (1-100)
-uint16_t scrollTextIntervalMs = 15;    // NEW: actual interval in ms (updated by helper)
+uint8_t scrollSpeedSetting = 4;     // NEW: mid value (1-100)
+uint16_t scrollTextIntervalMs = 15; // NEW: actual interval in ms (updated by helper)
 
-void updateScrollIntervalFromSetting() { // NEW helper
-    // Map 1..100 (fast->slow) to 15..250 ms
-    // Invert so low number = fast scroll
-    uint8_t s = scrollSpeedSetting < 1 ? 1 : (scrollSpeedSetting > 100 ? 100 : scrollSpeedSetting);
-    // Linear invert: speed 1 => 15ms, speed 100 => 250ms
-    scrollTextIntervalMs = map(s, 1, 100, 15, 250);
+void updateScrollIntervalFromSetting()
+{ // NEW helper
+  // Map 1..100 (fast->slow) to 15..250 ms
+  // Invert so low number = fast scroll
+  uint8_t s = scrollSpeedSetting < 1 ? 1 : (scrollSpeedSetting > 100 ? 100 : scrollSpeedSetting);
+  // Linear invert: speed 1 => 15ms, speed 100 => 250ms
+  scrollTextIntervalMs = map(s, 1, 100, 15, 250);
 #if DEBUG_MODE
-    LOG_DEBUG("Scroll speed setting=%u => interval=%u ms\n", s, scrollTextIntervalMs);
+  LOG_DEBUG("Scroll speed setting=%u => interval=%u ms\n", s, scrollTextIntervalMs);
 #endif
 }
 
@@ -283,31 +296,35 @@ unsigned long lastFullScreenSpiralUpdateTime = 0;
 // const unsigned long FULL_SCREEN_SPIRAL_FRAME_INTERVAL_MS = 50; // Adjusted for performance
 const unsigned long FULL_SCREEN_SPIRAL_FRAME_INTERVAL_MS = 0; // Further adjusted if needed
 
-const float FULL_SPIRAL_ROTATION_SPEED_RAD_PER_UPDATE = 0.2f; 
+const float FULL_SPIRAL_ROTATION_SPEED_RAD_PER_UPDATE = 0.2f;
 const uint8_t FULL_SPIRAL_COLOR_SCROLL_SPEED = 2.5;
 
 // Logarithmic Spiral Coefficients (NEW/MODIFIED)
-const float LOG_SPIRAL_A_COEFF = 4.0f;   // Initial radius factor (when theta is small or exp(0))
-                                         // Smaller 'a' means it starts smaller/tighter from center.
-const float LOG_SPIRAL_B_COEFF = 0.10f;  // Controls how tightly wound the spiral is.
-                                         // Smaller 'b' makes it wind more slowly (appearing tighter initially for a given theta range).
-                                         // Larger 'b' makes it expand much faster.
-                                         // Positive 'b' for outward spiral, negative for inward.
+const float LOG_SPIRAL_A_COEFF = 4.0f;  // Initial radius factor (when theta is small or exp(0))
+                                        // Smaller 'a' means it starts smaller/tighter from center.
+const float LOG_SPIRAL_B_COEFF = 0.10f; // Controls how tightly wound the spiral is.
+                                        // Smaller 'b' makes it wind more slowly (appearing tighter initially for a given theta range).
+                                        // Larger 'b' makes it expand much faster.
+                                        // Positive 'b' for outward spiral, negative for inward.
 
 const float SPIRAL_ARM_COLOR_FACTOR = 5.0f; // Could be based on 'r' now instead of 'theta_arm'
 const float SPIRAL_THICKNESS_RADIUS = 1.0f; // Start with 0 for performance, then increase
 
 static TaskHandle_t bleNotifyTaskHandle = NULL;
 
-inline void notifyBleTask() {
-  if (deviceConnected && bleNotifyTaskHandle) {
+inline void notifyBleTask()
+{
+  if (deviceConnected && bleNotifyTaskHandle)
+  {
     xTaskNotifyGive(bleNotifyTaskHandle);
   }
 }
 
-struct _InitScrollSpeed { _InitScrollSpeed(){ updateScrollIntervalFromSetting(); } } _initScrollSpeedOnce; // Ensure scroll interval is set at startup
+struct _InitScrollSpeed
+{
+  _InitScrollSpeed() { updateScrollIntervalFromSetting(); }
+} _initScrollSpeedOnce; // Ensure scroll interval is set at startup
 
- 
 void calculateFPS()
 {
   frameCounter++;
@@ -478,9 +495,11 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks
       lastActivityTime = millis(); // BLE command counts as activity
       Serial.printf("Write request - new view: %d\n", currentView);
       // pCharacteristic->notify();
-      //notifyPending = true;
+      // notifyPending = true;
       notifyBleTask();
-    } else if (newView >= totalViews) {
+    }
+    else if (newView >= totalViews)
+    {
       Serial.printf("BLE Write ignored - invalid view number: %d (Total Views: %d)\n", newView, totalViews); // DEBUG
     }
     // If newView == currentView, we still woke up (if sleeping), but don't change the view or notify
@@ -755,9 +774,9 @@ static void renderScrollingTextView()
     ++scrollingBackgroundOffset;
   }
 
-  //drawScrollingBackground(scrollingBackgroundOffset);
+  // drawScrollingBackground(scrollingBackgroundOffset);
 
-// CHANGED: use scrollTextIntervalMs instead of fixed constant
+  // CHANGED: use scrollTextIntervalMs instead of fixed constant
   if (now - lastScrollTick >= scrollTextIntervalMs)
   {
     lastScrollTick = now;
@@ -768,14 +787,15 @@ static void renderScrollingTextView()
     }
     scrollingColorOffset = static_cast<uint8_t>(scrollingColorOffset + 3);
   }
-  //vTaskDelay(pdMS_TO_TICKS(scrollTextIntervalMs));
+  // vTaskDelay(pdMS_TO_TICKS(scrollTextIntervalMs));
   drawText(scrollingColorOffset);
 }
 
 uint16_t plasmaSpeed = 2; // Lower = slower animation
 
 void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
-                   uint8_t time_offset = 0, float scale = 5.0f, float animSpeed = 0.2f) {
+                   uint8_t time_offset = 0, float scale = 5.0f, float animSpeed = 0.2f)
+{
   const int byteWidth = (width + 7) >> 3;
   if (byteWidth <= 0)
   {
@@ -834,14 +854,15 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
   }
 }
 
-void drawText(int colorWheelOffset) {
-    // Set text properties
-    dma_display->setFont(&FreeSans9pt7b);
-    dma_display->setTextSize(1);
-    
-    // Use the color wheel for text color
-    uint16_t textColor = colorWheel(colorWheelOffset);
-    dma_display->setTextColor(textColor);
+void drawText(int colorWheelOffset)
+{
+  // Set text properties
+  dma_display->setFont(&FreeSans9pt7b);
+  dma_display->setTextSize(1);
+
+  // Use the color wheel for text color
+  uint16_t textColor = colorWheel(colorWheelOffset);
+  dma_display->setTextColor(textColor);
 
   // Set cursor and print text
   dma_display->setCursor(textX, textY);
@@ -1029,12 +1050,13 @@ void updateEyeBounceAnimation()
       newOffset = 0;
       eyeBounceCount = 0;
 
-            if (currentView == 17) {
-                currentView = viewBeforeEyeBounce;
-                saveLastView(currentView);
-                LOG_DEBUG("Eye bounce finished. Reverting to view: %d\n", currentView);
-                notifyBleTask();
-            }
+      if (currentView == 17)
+      {
+        currentView = viewBeforeEyeBounce;
+        saveLastView(currentView);
+        LOG_DEBUG("Eye bounce finished. Reverting to view: %d\n", currentView);
+        notifyBleTask();
+      }
 
       if (currentEyeYOffset != newOffset)
       {
@@ -1529,12 +1551,13 @@ void updateBlush()
       disableBlush();
 
       // Revert to previous view if this was an overlay blush
-      if (wasBlushOverlay) {
-          currentView = originalViewBeforeBlush;
-          saveLastView(currentView);
-          Serial.printf("Blush overlay finished. Reverting to view: %d\n", currentView);
-          notifyBleTask();
-          wasBlushOverlay = false; // Reset the flag
+      if (wasBlushOverlay)
+      {
+        currentView = originalViewBeforeBlush;
+        saveLastView(currentView);
+        Serial.printf("Blush overlay finished. Reverting to view: %d\n", currentView);
+        notifyBleTask();
+        wasBlushOverlay = false; // Reset the flag
       }
     }
     break;
@@ -1866,7 +1889,7 @@ static void IRAM_ATTR onSoftMillisTimer(TimerHandle_t xTimer)
 // Total grains = N_COLORS * (WIDTH / N_COLORS) * BOX_HEIGHT = WIDTH * BOX_HEIGHT
 // Original calculation: (BOX_HEIGHT * N_COLORS * 8). If WIDTH=64, N_COLORS=8, BOX_HEIGHT=8,
 // this is (8 * 8 * 8) = 512. And WIDTH * BOX_HEIGHT = 64 * 8 = 512. So they are equivalent for these values.
-#define N_GRAINS (PANE_WIDTH * BOX_HEIGHT / 2) // Total number of sand grains
+#define N_GRAINS (PANE_WIDTH * BOX_HEIGHT) // Total number of sand grains
 // #define N_GRAINS 10
 // #include "pixelDustEffect.h" // Include the header for this effect
 // #include "main.h"            // Include your main project header if it exists (e.g., for global configs)
@@ -1896,74 +1919,30 @@ void setupPixelDust()
   }
   if (N_COLORS <= 0)
   {
-    Serial.println("PixelDust Error: N_COLORS is 0 in setupPixelDust! Cannot proceed.");
+    Serial.println("PixelDust Error: N_COLORS must be greater than zero.");
     return;
   }
 
   sand.clear();
+  sand.randomize();
 
-  if (N_COLORS > 0)
-    colors[0] = dma_display->color565(64, 64, 64);
-  if (N_COLORS > 1)
-    colors[1] = dma_display->color565(120, 79, 23);
-  if (N_COLORS > 2)
-    colors[2] = dma_display->color565(228, 3, 3);
-  if (N_COLORS > 3)
-    colors[3] = dma_display->color565(255, 140, 0);
-  if (N_COLORS > 4)
-    colors[4] = dma_display->color565(255, 237, 0);
-  if (N_COLORS > 5)
-    colors[5] = dma_display->color565(0, 128, 38);
-  if (N_COLORS > 6)
-    colors[6] = dma_display->color565(0, 77, 255);
-  if (N_COLORS > 7)
-    colors[7] = dma_display->color565(117, 7, 135);
+  static const uint16_t defaultPalette[] = {
+      dma_display->color565(64, 64, 64),
+      dma_display->color565(120, 79, 23),
+      dma_display->color565(228, 3, 3),
+      dma_display->color565(255, 140, 0),
+      dma_display->color565(255, 237, 0),
+      dma_display->color565(0, 128, 38),
+      dma_display->color565(0, 77, 255),
+      dma_display->color565(117, 7, 135)};
 
-  int grains_per_block_width = PANE_WIDTH / N_COLORS;
-  if (grains_per_block_width <= 0)
+  const size_t paletteCount = sizeof(defaultPalette) / sizeof(defaultPalette[0]);
+  for (int i = 0; i < N_COLORS; ++i)
   {
-    Serial.printf("PixelDust Warning: grains_per_block_width is %d (PANE_WIDTH=%d, N_COLORS=%d). Clamping to 1.\n", grains_per_block_width, PANE_WIDTH, N_COLORS);
-    grains_per_block_width = 1;
-  }
-  int block_start_y = PANE_HEIGHT - BOX_HEIGHT;
-  if (block_start_y < 0)
-  {
-    block_start_y = 0;
-  }
-  int grain_idx = 0;
-  for (int i = 0; i < N_COLORS && grain_idx < N_GRAINS; i++)
-  {
-    int block_start_x = i * grains_per_block_width;
-    if (block_start_x >= PANE_WIDTH)
-    {
-      break;
-    }
-    int block_end_x = block_start_x + grains_per_block_width;
-    if (block_end_x > PANE_WIDTH)
-    {
-      block_end_x = PANE_WIDTH;
-    }
-    if (block_end_x <= block_start_x)
-    {
-      block_end_x = block_start_x + 1;
-    }
-    for (int y_in_block = 0; y_in_block < BOX_HEIGHT && grain_idx < N_GRAINS; y_in_block++)
-    {
-      int current_y_pos = block_start_y + y_in_block;
-      if (current_y_pos >= PANE_HEIGHT)
-      {
-        current_y_pos = PANE_HEIGHT - 1;
-      }
-      for (int x = block_start_x; x < block_end_x && grain_idx < N_GRAINS; x++)
-      {
-        sand.setPosition(grain_idx++, x, current_y_pos);
-      }
-    }
-  }
-  while (grain_idx < N_GRAINS)
-  {
-    sand.setPosition(grain_idx, random(PANE_WIDTH), random(PANE_HEIGHT));
-    grain_idx++;
+    uint16_t color = (i < static_cast<int>(paletteCount))
+                         ? defaultPalette[i]
+                         : dma_display->color565(random(256), random(256), random(256));
+    colors[i] = color;
   }
 }
 
@@ -2121,7 +2100,7 @@ void setup()
   // NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
   // NimBLEDevice::setPower(ESP_PWR_LVL_P21, NimBLETxPowerType::All); // Power level 21 (highest) for best range
   NimBLEDevice::setPower(ESP_PWR_LVL_P21, NimBLETxPowerType::All); // Power level 21 (highest) for best range
-  //NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
+  // NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
   NimBLEDevice::setSecurityAuth(true, true, true);
   NimBLEDevice::setSecurityPasskey(123456);
   NimBLEDevice::setSecurityIOCap(BLE_HS_IO_KEYBOARD_DISPLAY);
@@ -2133,8 +2112,7 @@ void setup()
   NimBLECharacteristic *pDeviceInfoCharacteristic = pService->createCharacteristic(
       INFO_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
-      NIMBLE_PROPERTY::NOTIFY
-    );
+          NIMBLE_PROPERTY::NOTIFY);
 
   // Construct JSON string
   std::string jsonInfo = std::string("{") +
@@ -2250,7 +2228,6 @@ void setup()
   tempFormat->setFormat(NimBLE2904::FORMAT_UINT8);
   tempFormat->setUnit(0x272F); // For example, 0x272F might represent degrees Celsius per specific BLE specifications
 
-
   pBrightnessCharacteristic = pService->createCharacteristic(
       BRIGHTNESS_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
@@ -2275,54 +2252,49 @@ void setup()
   pBrightnessCharacteristic->setValue(&userBrightness, 1);
 
   setupAdaptiveBrightness();
-  
-// Create lux characteristic (read-only with notifications)
-pLuxCharacteristic = pService->createCharacteristic(
-    LUX_CHARACTERISTIC_UUID,
-    NIMBLE_PROPERTY::READ |
-        NIMBLE_PROPERTY::NOTIFY
-);
 
-// Initialize with current lux value
-uint16_t initialLux = getRawClearChannelValue();
-uint8_t luxBytes[2] = {
-    static_cast<uint8_t>(initialLux & 0xFF),
-    static_cast<uint8_t>((initialLux >> 8) & 0xFF)
-};
-pLuxCharacteristic->setValue(luxBytes, 2);
-// Add descriptor for lux characteristic
-NimBLEDescriptor *luxDesc = pLuxCharacteristic->createDescriptor(
-    "2901", // Standard UUID for Characteristic User Description
-    NIMBLE_PROPERTY::READ,
-    20 // Maximum length for the descriptor's value
-);
-luxDesc->setValue("Ambient Light Sensor");
-NimBLE2904 *luxFormat = pLuxCharacteristic->create2904();
-luxFormat->setFormat(NimBLE2904::FORMAT_UINT16);
-luxFormat->setUnit(0x2731); // 0x2731 is the standard unit for Illuminance (lux)
+  // Create lux characteristic (read-only with notifications)
+  pLuxCharacteristic = pService->createCharacteristic(
+      LUX_CHARACTERISTIC_UUID,
+      NIMBLE_PROPERTY::READ |
+          NIMBLE_PROPERTY::NOTIFY);
 
-pScrollTextCharacteristic = pService->createCharacteristic(
+  // Initialize with current lux value
+  uint16_t initialLux = getRawClearChannelValue();
+  uint8_t luxBytes[2] = {
+      static_cast<uint8_t>(initialLux & 0xFF),
+      static_cast<uint8_t>((initialLux >> 8) & 0xFF)};
+  pLuxCharacteristic->setValue(luxBytes, 2);
+  // Add descriptor for lux characteristic
+  NimBLEDescriptor *luxDesc = pLuxCharacteristic->createDescriptor(
+      "2901", // Standard UUID for Characteristic User Description
+      NIMBLE_PROPERTY::READ,
+      20 // Maximum length for the descriptor's value
+  );
+  luxDesc->setValue("Ambient Light Sensor");
+  NimBLE2904 *luxFormat = pLuxCharacteristic->create2904();
+  luxFormat->setFormat(NimBLE2904::FORMAT_UINT16);
+  luxFormat->setUnit(0x2731); // 0x2731 is the standard unit for Illuminance (lux)
+
+  pScrollTextCharacteristic = pService->createCharacteristic(
       SCROLL_TEXT_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ_ENC | // Require encryption for reading
+      NIMBLE_PROPERTY::READ_ENC |      // Require encryption for reading
           NIMBLE_PROPERTY::WRITE_ENC | // Require encryption for writing
           NIMBLE_PROPERTY::WRITE_NR |
-          NIMBLE_PROPERTY::NOTIFY
-  );
+          NIMBLE_PROPERTY::NOTIFY);
   pScrollTextCharacteristic->setCallbacks(&scrollTextCallbacks);
-  
+
   // Set initial value (current text)
   pScrollTextCharacteristic->setValue(txt);
-  
+
   // Add descriptor
   NimBLEDescriptor *scrollTextDesc = pScrollTextCharacteristic->createDescriptor(
       "2901",
       NIMBLE_PROPERTY::READ,
-      20
-  );
+      20);
   scrollTextDesc->setValue("Scrolling Text");
-  
-  Serial.println("Scroll Text Characteristic created");
 
+  Serial.println("Scroll Text Characteristic created");
 
   // nimBLEService* pBaadService = pServer->createService("BAAD");
   pService->start();
@@ -2635,7 +2607,7 @@ void updateDVDLogos()
     DVDLogo &logo = logos[i];
 
     // Clear previous
-    //dma_display->fillRect(logo.x, logo.y, dvdWidth, dvdHeight, 0);
+    // dma_display->fillRect(logo.x, logo.y, dvdWidth, dvdHeight, 0);
 
     // Update position
     logo.x += logo.vx;
@@ -2938,26 +2910,25 @@ void PixelDustEffect()
   }
 
   int16_t ax_scaled = 0;
-  int16_t ay_scaled = (int16_t)(0.1f * 128);
+  int16_t ay_scaled = static_cast<int16_t>(0.1f * 128.0f);
 
   if (accelerometerEnabled && g_accelerometer_initialized)
   {
     sensors_event_t event;
     if (accel.getEvent(&event))
     {
-      ax_scaled = (int16_t)(event.acceleration.x * 1000.0f);
-      ay_scaled = (int16_t)(event.acceleration.y * 1000.0f);
+      ax_scaled = static_cast<int16_t>(event.acceleration.x * 1000.0f);
+      ay_scaled = static_cast<int16_t>(event.acceleration.y * 1000.0f);
     }
   }
 
   sand.iterate(ax_scaled, ay_scaled, 0);
 
   dimension_t px, py;
-  int grains_per_block_width = PANE_WIDTH / N_COLORS;
-  int grains_per_color_stripe = grains_per_block_width * BOX_HEIGHT;
+  int grains_per_color_stripe = (N_COLORS > 0) ? static_cast<int>((N_GRAINS + N_COLORS - 1) / N_COLORS) : N_GRAINS;
   if (grains_per_color_stripe <= 0)
   {
-    grains_per_color_stripe = N_GRAINS;
+    grains_per_color_stripe = 1;
   }
 
   for (int i = 0; i < N_GRAINS; i++)
@@ -2975,132 +2946,157 @@ void PixelDustEffect()
   }
 }
 
-
-
 using ViewRenderFunc = void (*)();
 
-static void renderDebugSquaresView() {
-    for (int i = 0; i < numSquares; i++)
+static void renderDebugSquaresView()
+{
+  for (int i = 0; i < numSquares; i++)
+  {
+    dma_display->fillRect(Squares[i].xpos, Squares[i].ypos, Squares[i].square_size, Squares[i].square_size, Squares[i].colour);
+
+    if (Squares[i].square_size + Squares[i].xpos >= dma_display->width())
     {
-        dma_display->fillRect(Squares[i].xpos, Squares[i].ypos, Squares[i].square_size, Squares[i].square_size, Squares[i].colour);
-
-        if (Squares[i].square_size + Squares[i].xpos >= dma_display->width()) {
-            Squares[i].velocityx *= -1;
-        } else if (Squares[i].xpos <= 0) {
-            Squares[i].velocityx = abs(Squares[i].velocityx);
-        }
-
-        if (Squares[i].square_size + Squares[i].ypos >= dma_display->height()) {
-            Squares[i].velocityy *= -1;
-        } else if (Squares[i].ypos <= 0) {
-            Squares[i].velocityy = abs(Squares[i].velocityy);
-        }
-
-        Squares[i].xpos += Squares[i].velocityx;
-        Squares[i].ypos += Squares[i].velocityy;
+      Squares[i].velocityx *= -1;
     }
-}
-
-static void renderLoadingBarView() {
-    drawXbm565(23, 2, 18, 21, appleLogoApple_logo_black, dma_display->color565(255, 255, 255));
-    drawXbm565(88, 2, 18, 21, appleLogoApple_logo_black, dma_display->color565(255, 255, 255));
-
-    displayLoadingBar();
-    loadingProgress++;
-    if (loadingProgress > loadingMax) {
-        loadingProgress = 0;
+    else if (Squares[i].xpos <= 0)
+    {
+      Squares[i].velocityx = abs(Squares[i].velocityx);
     }
+
+    if (Squares[i].square_size + Squares[i].ypos >= dma_display->height())
+    {
+      Squares[i].velocityy *= -1;
+    }
+    else if (Squares[i].ypos <= 0)
+    {
+      Squares[i].velocityy = abs(Squares[i].velocityy);
+    }
+
+    Squares[i].xpos += Squares[i].velocityx;
+    Squares[i].ypos += Squares[i].velocityy;
+  }
 }
 
-static void renderFaceWithPlasma() {
-    baseFace();
-    updatePlasmaFace();
+static void renderLoadingBarView()
+{
+  drawXbm565(23, 2, 18, 21, appleLogoApple_logo_black, dma_display->color565(255, 255, 255));
+  drawXbm565(88, 2, 18, 21, appleLogoApple_logo_black, dma_display->color565(255, 255, 255));
+
+  displayLoadingBar();
+  loadingProgress++;
+  if (loadingProgress > loadingMax)
+  {
+    loadingProgress = 0;
+  }
 }
 
-static void renderSpiralEyesView() {
-    updatePlasmaFace();
-    baseFace();
-    updateRotatingSpiral();
+static void renderFaceWithPlasma()
+{
+  baseFace();
+  updatePlasmaFace();
 }
 
-static void renderPlasmaFaceView() {
-    drawPlasmaFace();
-    updatePlasmaFace();
+static void renderSpiralEyesView()
+{
+  updatePlasmaFace();
+  baseFace();
+  updateRotatingSpiral();
 }
 
-static void renderBsodView() {
-    dma_display->fillScreen(dma_display->color565(0, 0, 255));
-    dma_display->setTextColor(dma_display->color565(255, 255, 255));
-    dma_display->setTextSize(2);
+static void renderPlasmaFaceView()
+{
+  drawPlasmaFace();
+  updatePlasmaFace();
+}
+
+static void renderBsodView()
+{
+  dma_display->fillScreen(dma_display->color565(0, 0, 255));
+  dma_display->setTextColor(dma_display->color565(255, 255, 255));
+  dma_display->setTextSize(2);
+  dma_display->setCursor(5, 15);
+  dma_display->print(":(");
+  dma_display->setCursor(69, 15);
+  dma_display->print(":(");
+}
+
+static void renderFlameEffectView()
+{
+  updateAndDrawFlameEffect();
+}
+
+static void renderFluidEffectView()
+{
+  if (fluidEffectInstance)
+  {
+    fluidEffectInstance->updateAndDraw();
+  }
+  else
+  {
+    dma_display->fillRect(0, 0, dma_display->width(), dma_display->height(), 0);
+    dma_display->setFont(&TomThumb);
+    dma_display->setTextSize(1);
+    dma_display->setTextColor(dma_display->color565(255, 0, 0));
     dma_display->setCursor(5, 15);
-    dma_display->print(":(");
-    dma_display->setCursor(69, 15);
-    dma_display->print(":(");
+    dma_display->print("Fluid Err");
+  }
 }
 
-static void renderFlameEffectView() {
-    updateAndDrawFlameEffect();
+static void renderPixelDustView()
+{
+  static bool logged = false;
+  if (!logged)
+  {
+    LOG_DEBUG_LN("PixelDust view active");
+    logged = true;
+  }
+  PixelDustEffect();
 }
 
-static void renderFluidEffectView() {
-    if (fluidEffectInstance) {
-        fluidEffectInstance->updateAndDraw();
-    } else {
-        dma_display->fillRect(0, 0, dma_display->width(), dma_display->height(), 0);
-        dma_display->setFont(&TomThumb);
-        dma_display->setTextSize(1);
-        dma_display->setTextColor(dma_display->color565(255, 0, 0));
-        dma_display->setCursor(5, 15);
-        dma_display->print("Fluid Err");
-    }
+static void renderFullscreenSpiralPalette()
+{
+  updateAndDrawFullScreenSpiral(SPIRAL_COLOR_PALETTE);
 }
 
-static void renderPixelDustView() {
-    PixelDustEffect();
-}
-
-static void renderFullscreenSpiralPalette() {
-    updateAndDrawFullScreenSpiral(SPIRAL_COLOR_PALETTE);
-}
-
-static void renderFullscreenSpiralWhite() {
-    updateAndDrawFullScreenSpiral(SPIRAL_COLOR_WHITE);
+static void renderFullscreenSpiralWhite()
+{
+  updateAndDrawFullScreenSpiral(SPIRAL_COLOR_WHITE);
 }
 
 static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
-    renderDebugSquaresView,            // VIEW_DEBUG_SQUARES
-    renderLoadingBarView,             // VIEW_LOADING_BAR
-    patternPlasma,                    // VIEW_PATTERN_PLASMA
-    drawTransFlag,                    // VIEW_TRANS_FLAG
-    renderFaceWithPlasma,             // VIEW_NORMAL_FACE
-    renderFaceWithPlasma,             // VIEW_BLUSH_FACE
-    renderFaceWithPlasma,             // VIEW_SEMICIRCLE_EYES
-    renderFaceWithPlasma,             // VIEW_X_EYES
-    renderFaceWithPlasma,             // VIEW_SLANT_EYES
-    renderSpiralEyesView,             // VIEW_SPIRAL_EYES
-    renderPlasmaFaceView,             // VIEW_PLASMA_FACE
-    renderFaceWithPlasma,             // VIEW_UWU_EYES
-    updateStarfield,                  // VIEW_STARFIELD
-    renderBsodView,                   // VIEW_BSOD
-    updateDVDLogos,                   // VIEW_DVD_LOGO
-    renderFlameEffectView,            // VIEW_FLAME_EFFECT
-    renderFluidEffectView,            // VIEW_FLUID_EFFECT
-    renderFaceWithPlasma,             // VIEW_CIRCLE_EYES
-    renderFullscreenSpiralPalette,    // VIEW_FULLSCREEN_SPIRAL_PALETTE
-    renderFullscreenSpiralWhite,      // VIEW_FULLSCREEN_SPIRAL_WHITE
-    renderScrollingTextView,          // VIEW_SCROLLING_TEXT
-    renderPixelDustView               // VIEW_PIXEL_DUST
+    renderDebugSquaresView,        // VIEW_DEBUG_SQUARES
+    renderLoadingBarView,          // VIEW_LOADING_BAR
+    patternPlasma,                 // VIEW_PATTERN_PLASMA
+    drawTransFlag,                 // VIEW_TRANS_FLAG
+    renderFaceWithPlasma,          // VIEW_NORMAL_FACE
+    renderFaceWithPlasma,          // VIEW_BLUSH_FACE
+    renderFaceWithPlasma,          // VIEW_SEMICIRCLE_EYES
+    renderFaceWithPlasma,          // VIEW_X_EYES
+    renderFaceWithPlasma,          // VIEW_SLANT_EYES
+    renderSpiralEyesView,          // VIEW_SPIRAL_EYES
+    renderPlasmaFaceView,          // VIEW_PLASMA_FACE
+    renderFaceWithPlasma,          // VIEW_UWU_EYES
+    updateStarfield,               // VIEW_STARFIELD
+    renderBsodView,                // VIEW_BSOD
+    updateDVDLogos,                // VIEW_DVD_LOGO
+    renderFlameEffectView,         // VIEW_FLAME_EFFECT
+    renderFluidEffectView,         // VIEW_FLUID_EFFECT
+    renderFaceWithPlasma,          // VIEW_CIRCLE_EYES
+    renderFullscreenSpiralPalette, // VIEW_FULLSCREEN_SPIRAL_PALETTE
+    renderFullscreenSpiralWhite,   // VIEW_FULLSCREEN_SPIRAL_WHITE
+    renderScrollingTextView,       // VIEW_SCROLLING_TEXT
+    renderPixelDustView            // VIEW_PIXEL_DUST
 };
 
 static_assert(sizeof(VIEW_RENDERERS) / sizeof(ViewRenderFunc) == TOTAL_VIEWS, "View renderer table mismatch");
 
-
-
-void displayCurrentView(int view) {
-  static int previousViewLocal = -1;           // Track the last active view
+void displayCurrentView(int view)
+{
+  static int previousViewLocal = -1; // Track the last active view
 
   // If we're in sleep mode, don't display the normal view
-  if (sleepModeActive) {
+  if (sleepModeActive)
+  {
     displaySleepMode(); // This function handles its own flipDMABuffer or drawing rate
     return;
   }
@@ -3115,26 +3111,31 @@ void displayCurrentView(int view) {
       blushStateStartTime = millis();
       isBlushFadingIn = true;
       blushState = BLUSH_FADE_IN; // Start fade‑in state
-      #if DEBUG_MODE
+#if DEBUG_MODE
       Serial.println("Entered blush view, resetting fade logic");
-      #endif
+#endif
     }
-     if (view == 16) { // If switching to Fluid Animation view
-      if (fluidEffectInstance) {
+    if (view == 16)
+    { // If switching to Fluid Animation view
+      if (fluidEffectInstance)
+      {
         fluidEffectInstance->begin(); // Reset fluid effect state
       }
     }
-     if (view == VIEW_FLAME_EFFECT) {
+    if (view == VIEW_FLAME_EFFECT)
+    {
       initFlameEffect(dma_display);
     }
-     if (view == VIEW_PIXEL_DUST) {
+    if (view == VIEW_PIXEL_DUST)
+    {
       setupPixelDust();
     }
     previousViewLocal = view;
   }
 
   ViewRenderFunc renderer = (view >= 0 && view < TOTAL_VIEWS) ? VIEW_RENDERERS[view] : nullptr;
-  if (renderer) {
+  if (renderer)
+  {
     renderer();
   }
 
@@ -3170,14 +3171,18 @@ void displayCurrentView(int view) {
 }
 
 // Helper function to get the current threshold value
-float getCurrentThreshold() {
+float getCurrentThreshold()
+{
   return useShakeSensitivity ? SHAKE_THRESHOLD : SLEEP_THRESHOLD;
 }
 
 // Add with your other utility functions
-bool detectMotion() {
+bool detectMotion()
+{
   if (!g_accelerometer_initialized)
-    return false; // Guard against uninitialized accelerometer
+  {
+    return false; // Guard against uninitialised accelerometer
+  }
   accel.read();
 
   float x = accel.x_g; // Use pre-scaled G values if available, e.g., from LIS3DH library
@@ -3194,17 +3199,17 @@ bool detectMotion() {
   prevAccelY = y;
   prevAccelZ = z;
 
-  // Use the current threshold based on the context
+  if (currentView == VIEW_PIXEL_DUST)
+  {
+    useShakeSensitivity = false; // Disable shake-to-spiral while sand is active.
+    return false;
+  }
+
+  // Use the current threshold based on the context.
   float threshold = getCurrentThreshold();
 
-  // Check if movement exceeds threshold
-  if (deltaX > threshold ||
-      deltaY > threshold ||
-      deltaZ > threshold)
-  {
-    return true; // Motion detected
-  }
-  return false; // No motion detected above threshold
+  // Check if movement exceeds the threshold.
+  return (deltaX > threshold) || (deltaY > threshold) || (deltaZ > threshold);
 }
 
 void enterSleepMode()
@@ -3229,15 +3234,18 @@ void enterSleepMode()
     NimBLEDevice::getAdvertising()->setMinInterval(2400); // 1500 ms
     NimBLEDevice::getAdvertising()->setMaxInterval(4800); // 3000 ms
     NimBLEDevice::startAdvertising();
-     Serial.println("Reduced BLE Adv interval for sleep.");
-  } else {
-      // Maybe send a sleep notification?
-       if (pTemperatureCharacteristic != nullptr) { // Check if characteristic exists
-            char sleepMsg[] = "Sleep";
-            pTemperatureCharacteristic->setValue(sleepMsg);
-            notifyBleTask();
-            //pTemperatureCharacteristic->notify(); // Consider notifyPending
-       }
+    Serial.println("Reduced BLE Adv interval for sleep.");
+  }
+  else
+  {
+    // Maybe send a sleep notification?
+    if (pTemperatureCharacteristic != nullptr)
+    { // Check if characteristic exists
+      char sleepMsg[] = "Sleep";
+      pTemperatureCharacteristic->setValue(sleepMsg);
+      notifyBleTask();
+      // pTemperatureCharacteristic->notify(); // Consider notifyPending
+    }
   }
   // No need to change sleepFrameInterval here, main loop timing controls frame rate
 }
@@ -3285,8 +3293,9 @@ void checkSleepMode()
   }
 }
 
-void loop() {
-  //unsigned long frameStartTimeMillis = millis(); // Timestamp at frame start
+void loop()
+{
+  // unsigned long frameStartTimeMillis = millis(); // Timestamp at frame start
   const unsigned long loopNow = millis();
 
   // Check BLE connection status (low frequency check is fine)
@@ -3299,22 +3308,26 @@ void loop() {
   // checkSleepMode(); // Handles motion detection, wake, and sleep entry
 
   // Only process inputs/updates if NOT in sleep mode
-  if (!sleepModeActive) {
-       // --- Motion Detection (for shake effect to change view) ---
-        if (accelerometerEnabled && g_accelerometer_initialized) {
-            useShakeSensitivity = true; // Use high threshold for shake detection
-            if (detectMotion()) { // detectMotion uses the current useShakeSensitivity
-                if (currentView != 9) { // Prevent re-triggering if already spiral
-                    previousView = currentView; // Save the current view.
-                    currentView = 9;            // Switch to spiral eyes view
-                    spiralStartMillis = loopNow; // Record the trigger time.
-                    LOG_DEBUG_LN("Shake detected! Switching to Spiral View.");
-                    notifyBleTask();
-                    lastActivityTime = millis(); // Shake is activity
-                }
-            }
-            useShakeSensitivity = false; // Switch back to low threshold for general sleep/wake checks
+  if (!sleepModeActive)
+  {
+    // --- Motion Detection (for shake effect to change view) ---
+    if (accelerometerEnabled && g_accelerometer_initialized && currentView != 16)
+    {
+      useShakeSensitivity = true; // Use high threshold for shake detection
+      if (detectMotion())
+      { // detectMotion uses the current useShakeSensitivity
+        if (currentView != 9)
+        {                              // Prevent re-triggering if already spiral
+          previousView = currentView;  // Save the current view.
+          currentView = 9;             // Switch to spiral eyes view
+          spiralStartMillis = loopNow; // Record the trigger time.
+          LOG_DEBUG_LN("Shake detected! Switching to Spiral View.");
+          notifyBleTask();
+          lastActivityTime = millis(); // Shake is activity
         }
+      }
+      useShakeSensitivity = false; // Switch back to low threshold for general sleep/wake checks
+    }
 
 // --- Handle button inputs for view changes ---
 #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) || defined(BUTTONS_AVAILABLE) // Add define if you use external buttons
@@ -3339,82 +3352,90 @@ void loop() {
       lastActivityTime = millis();
     }
 
-            if (viewChangedByButton) {
-                LOG_DEBUG("View changed by button: %d\n", currentView);
-                notifyBleTask();
-                // Reset specific view states if necessary when changing views
-                 if (currentView != 5) { // If leaving blush view
-                     blushState = BLUSH_INACTIVE;
-                     blushBrightness = 0;
-                     // disableBlush(); // Clears pixels, but displayCurrentView will clear anyway
-                 }
-                 if (currentView != 9) { // Reset spiral timer
-                    spiralStartMillis = 0;
-                 }
-                viewChangedByButton = false; // Reset flag
-            }
-        #endif
-
-
-      // --- Proximity Sensor Logic: Blush Trigger AND Eye Bounce Trigger ---
-        // static unsigned long lastSensorReadTime = 0; // Already global
-        runIfElapsed(loopNow, lastSensorReadTime, sensorInterval, [&]() {
-#if defined(APDS_AVAILABLE) // Ensure sensor is available
-            const unsigned long sensorNow = millis();
-            uint8_t proximity = apds.readProximity();
-            // Serial.printf("Proximity: %d\n", proximity); // DEBUG Proximity Value
-
-            bool bounceJustTriggered = false; // Flag to avoid double blush trigger
-
-            // Eye Bounce Trigger - Switch to View 17 (Circle Eyes) (MODIFIED)
-            if (proximity >= 15 && !isEyeBouncing) {
-                LOG_DEBUG_LN("Proximity! Starting eye bounce sequence & switching to Circle Eyes (View 17).");
-
-                // Store current view and switch to Circle Eyes (view 17)
-                if (currentView != 9 && currentView != 17) { // Avoid conflicting with spiral or re-triggering
-                    viewBeforeEyeBounce = currentView; // <<< MODIFIED: Store current view here
-
-                    currentView = 17; // Switch to "Circle Eyes" view
-                    // saveLastView(currentView); // Optional: save temporary view 17
-                    notifyBleTask();
-                }
-
-                isEyeBouncing = true;
-                eyeBounceStartTime = sensorNow;
-                eyeBounceCount = 0;
-                lastActivityTime = sensorNow;
-                bounceJustTriggered = true; // Mark that bounce (and view switch) happened
-
-                // Also trigger blush effect to happen ON view 17 (Circle Eyes)
-                if (blushState == BLUSH_INACTIVE) { // Only trigger if not already blushing
-                    LOG_DEBUG_LN("Proximity! Also triggering blush effect on Circle Eyes.");
-                    blushState = BLUSH_FADE_IN;
-                    blushStateStartTime = sensorNow;
-                    wasBlushOverlay = false; // Blush on view 17 is part of that view's temporary effect
-                    originalViewBeforeBlush = viewBeforeEyeBounce; // Blush on view 17 uses context of viewBeforeEyeBounce
-                }
-            }
-
-            if (proximity >= 15 && blushState == BLUSH_INACTIVE && !bounceJustTriggered) {
-                // Trigger blush if:
-                // 1. Proximity detected
-                // 2. Not already blushing
-                // 3. Bounce wasn't *just* triggered (which might have handled its own blush)
-                // 4. Current view is NOT the dedicated blush view (5)
-                //    AND current view is NOT the temporary bounce/circle view (17)
-                if (currentView != 5 && currentView != 17) {
-                    LOG_DEBUG_LN("Proximity! Triggering blush overlay effect.");
-                    blushState = BLUSH_FADE_IN;
-                    blushStateStartTime = sensorNow;
-                    lastActivityTime = sensorNow;
-
-                    // This is a blush overlay on the current stable view
-                    originalViewBeforeBlush = currentView; // Store the view that is getting the overlay
-                    wasBlushOverlay = true;                // Mark that this blush is an overlay
-                }
-            }
+    if (viewChangedByButton)
+    {
+      LOG_DEBUG("View changed by button: %d\n", currentView);
+      notifyBleTask();
+      // Reset specific view states if necessary when changing views
+      if (currentView != 5)
+      { // If leaving blush view
+        blushState = BLUSH_INACTIVE;
+        blushBrightness = 0;
+        // disableBlush(); // Clears pixels, but displayCurrentView will clear anyway
+      }
+      if (currentView != 9)
+      { // Reset spiral timer
+        spiralStartMillis = 0;
+      }
+      viewChangedByButton = false; // Reset flag
+    }
 #endif
-        });
+
+    // --- Proximity Sensor Logic: Blush Trigger AND Eye Bounce Trigger ---
+    // static unsigned long lastSensorReadTime = 0; // Already global
+    runIfElapsed(loopNow, lastSensorReadTime, sensorInterval, [&]()
+                 {
+#if defined(APDS_AVAILABLE) // Ensure sensor is available
+                   const unsigned long sensorNow = millis();
+                   uint8_t proximity = apds.readProximity();
+                   // Serial.printf("Proximity: %d\n", proximity); // DEBUG Proximity Value
+
+                   bool bounceJustTriggered = false; // Flag to avoid double blush trigger
+
+                   // Eye Bounce Trigger - Switch to View 17 (Circle Eyes) (MODIFIED)
+                   if (proximity >= 15 && !isEyeBouncing && currentView != 16)
+                   {
+                     LOG_DEBUG_LN("Proximity! Starting eye bounce sequence & switching to Circle Eyes (View 17).");
+
+                     // Store current view and switch to Circle Eyes (view 17)
+                     if (currentView != 9 && currentView != 17)
+                     {                                    // Avoid conflicting with spiral or re-triggering
+                       viewBeforeEyeBounce = currentView; // <<< MODIFIED: Store current view here
+
+                       currentView = 17; // Switch to "Circle Eyes" view
+                       // saveLastView(currentView); // Optional: save temporary view 17
+                       notifyBleTask();
+                     }
+
+                     isEyeBouncing = true;
+                     eyeBounceStartTime = sensorNow;
+                     eyeBounceCount = 0;
+                     lastActivityTime = sensorNow;
+                     bounceJustTriggered = true; // Mark that bounce (and view switch) happened
+
+                     // Also trigger blush effect to happen ON view 17 (Circle Eyes)
+                     if (blushState == BLUSH_INACTIVE)
+                     { // Only trigger if not already blushing
+                       LOG_DEBUG_LN("Proximity! Also triggering blush effect on Circle Eyes.");
+                       blushState = BLUSH_FADE_IN;
+                       blushStateStartTime = sensorNow;
+                       wasBlushOverlay = false;                       // Blush on view 17 is part of that view's temporary effect
+                       originalViewBeforeBlush = viewBeforeEyeBounce; // Blush on view 17 uses context of viewBeforeEyeBounce
+                     }
+                   }
+
+                   if (proximity >= 15 && blushState == BLUSH_INACTIVE && !bounceJustTriggered)
+                   {
+                     // Trigger blush if:
+                     // 1. Proximity detected
+                     // 2. Not already blushing
+                     // 3. Bounce wasn't *just* triggered (which might have handled its own blush)
+                     // 4. Current view is NOT the dedicated blush view (5)
+                     //    AND current view is NOT the temporary bounce/circle view (17)
+                     if (currentView != 5 && currentView != 17)
+                     {
+                       LOG_DEBUG_LN("Proximity! Triggering blush overlay effect.");
+                       blushState = BLUSH_FADE_IN;
+                       blushStateStartTime = sensorNow;
+                       lastActivityTime = sensorNow;
+
+                       // This is a blush overlay on the current stable view
+                       originalViewBeforeBlush = currentView; // Store the view that is getting the overlay
+                       wasBlushOverlay = true;                // Mark that this blush is an overlay
+                     }
+                   }
+#endif
+                 });
 
     // --- Update Adaptive Brightness ---
     if (autoBrightnessEnabled)
@@ -3422,7 +3443,7 @@ void loop() {
       maybeUpdateBrightness();
     }
     // Manual brightness is applied immediately on BLE write if autoBrightness is off.
-      updateLux(); // Update lux values
+    updateLux(); // Update lux values
 
     // --- Update Animation States ---
     updateBlinkAnimation();     // Update blink animation once per loop
@@ -3434,22 +3455,22 @@ void loop() {
       updateBlush();
     }
 
-        // --- Revert from Spiral View Timer ---
-        // Use a local copy to avoid updating spiralStartMillis inside hasElapsedSince
-        unsigned long spiralStartMillisCopy = spiralStartMillis;
-        if (currentView == 9 && spiralStartMillisCopy > 0 && hasElapsedSince(loopNow, spiralStartMillisCopy, 5000)) {
-             LOG_DEBUG_LN("Spiral timeout, reverting view.");
-             currentView = previousView;
-             spiralStartMillis = 0;
-             notifyBleTask();
-        }
+    // --- Revert from Spiral View Timer ---
+    // Use a local copy to avoid updating spiralStartMillis inside hasElapsedSince
+    unsigned long spiralStartMillisCopy = spiralStartMillis;
+    if (currentView == 9 && spiralStartMillisCopy > 0 && hasElapsedSince(loopNow, spiralStartMillisCopy, 5000))
+    {
+      LOG_DEBUG_LN("Spiral timeout, reverting view.");
+      currentView = previousView;
+      spiralStartMillis = 0;
+      notifyBleTask();
+    }
 
-        // --- Update Temperature Sensor Periodically ---
-        static unsigned long lastTempUpdateLocal = 0; // Renamed to avoid conflict
-        const unsigned long tempUpdateIntervalLocal = 5000; // 5 seconds
-        runIfElapsed(loopNow, lastTempUpdateLocal, tempUpdateIntervalLocal, [&]() {
-            maybeUpdateTemperature();
-        });
+    // --- Update Temperature Sensor Periodically ---
+    static unsigned long lastTempUpdateLocal = 0;       // Renamed to avoid conflict
+    const unsigned long tempUpdateIntervalLocal = 5000; // 5 seconds
+    runIfElapsed(loopNow, lastTempUpdateLocal, tempUpdateIntervalLocal, [&]()
+                 { maybeUpdateTemperature(); });
 
   } // End of (!sleepModeActive) block
 
@@ -3467,7 +3488,7 @@ void loop() {
   // --- Frame Rate Calculation ---
   calculateFPS(); // Update FPS counter
 
-//vTaskDelay(pdMS_TO_TICKS(5)); // yield to the display & BLE tasks
+  // vTaskDelay(pdMS_TO_TICKS(5)); // yield to the display & BLE tasks
 
   /*
   // If the current view is one of the plasma views, increase the interval to reduce load
@@ -3476,7 +3497,3 @@ void loop() {
   }
   */
 }
-
-
-
-
