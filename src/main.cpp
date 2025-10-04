@@ -1880,7 +1880,7 @@ static void IRAM_ATTR onSoftMillisTimer(TimerHandle_t xTimer)
 #endif
 
 #define N_COLORS PDUST_N_COLORS // Number of distinct colors for sand
-#define BOX_HEIGHT 8            // Initial height of each color block of sand
+#define BOX_HEIGHT 4            // Initial height of each color block of sand
 
 // Calculate total number of sand grains.
 // Logic: Each color forms a block. There are N_COLORS blocks.
@@ -1934,14 +1934,24 @@ void setupPixelDust()
       dma_display->color565(255, 237, 0),
       dma_display->color565(0, 128, 38),
       dma_display->color565(0, 77, 255),
-      dma_display->color565(117, 7, 135)};
+      dma_display->color565(117, 7, 135)
+    };
 
   const size_t paletteCount = sizeof(defaultPalette) / sizeof(defaultPalette[0]);
+  // If N_COLORS exceeds the size of defaultPalette, random colors will be used for the extra entries.
   for (int i = 0; i < N_COLORS; ++i)
   {
-    uint16_t color = (i < static_cast<int>(paletteCount))
-                         ? defaultPalette[i]
-                         : dma_display->color565(random(256), random(256), random(256));
+    // Use default palette color if available, otherwise generate a random color
+    uint16_t color;
+    if (i < static_cast<int>(paletteCount)) {
+      color = defaultPalette[i];
+    } else {
+      // Use a color wheel to ensure distinct fallback colors
+      uint8_t hue = (i * 256 / N_COLORS) % 256;
+      CRGB rgb;
+      hsv2rgb_rainbow(CHSV(hue, 255, 255), rgb);
+      color = dma_display->color565(rgb.r, rgb.g, rgb.b);
+    }
     colors[i] = color;
   }
 }
@@ -2925,26 +2935,19 @@ void PixelDustEffect()
   sand.iterate(ax_scaled, ay_scaled, 0);
 
   dimension_t px, py;
-  int grains_per_color_stripe = (N_COLORS > 0) ? static_cast<int>((N_GRAINS + N_COLORS - 1) / N_COLORS) : N_GRAINS;
-  if (grains_per_color_stripe <= 0)
-  {
-    grains_per_color_stripe = 1;
-  }
-
-  for (int i = 0; i < N_GRAINS; i++)
-  {
-    sand.getPosition(i, &px, &py);
-    if (px >= 0 && px < dma_display->width() && py >= 0 && py < dma_display->height())
-    {
-      int color_index = (grains_per_color_stripe > 0) ? (i / grains_per_color_stripe) : 0;
-      if (color_index >= N_COLORS)
-      {
-        color_index = N_COLORS - 1;
+      int color_index = 0;
+     if (N_COLORS > 0)
+     {
+       color_index = static_cast<int>((static_cast<uint32_t>(px) * N_COLORS) / PANE_WIDTH);
+       if (color_index >= N_COLORS)
+       {
+         color_index = N_COLORS - 1;
+       }
       }
       dma_display->drawPixel(px, py, colors[color_index]);
     }
-  }
-}
+  
+
 
 using ViewRenderFunc = void (*)();
 
@@ -3442,8 +3445,11 @@ void loop()
     {
       maybeUpdateBrightness();
     }
-    // Manual brightness is applied immediately on BLE write if autoBrightness is off.
-    updateLux(); // Update lux values
+    if (deviceConnected)
+    {
+      // Manual brightness is applied immediately on BLE write if autoBrightness is off.
+      updateLux(); // Update lux values
+    }
 
     // --- Update Animation States ---
     updateBlinkAnimation();     // Update blink animation once per loop
