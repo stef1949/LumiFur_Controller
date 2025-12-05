@@ -1641,6 +1641,13 @@ void baseFace()
   facePlasmaDirty = false;
 }
 
+void staticColor() {
+static chosenColor
+
+dma_display->color565(color.r, color.g, color.b);
+
+}
+
 void patternPlasma()
 {
   static uint16_t paletteLUT[256];
