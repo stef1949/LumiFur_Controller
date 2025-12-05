@@ -552,7 +552,7 @@ const unsigned long fadeOutDuration = 2000; // Duration for fade-out (2 seconds)
 
 // Non-blocking sensor read interval
 unsigned long lastSensorReadTime = 0;
-const unsigned long sensorInterval = 150; // sensor read every 50 ms
+const unsigned long sensorInterval = 250; // sensor read throttled to reduce I2C pressure
 
 // Variables for plasma effect
 uint16_t time_counter = 0, cycles = 0, fps = 0;
@@ -3888,7 +3888,22 @@ void loop()
 #endif
 #if defined(APDS_AVAILABLE) // Ensure sensor is available
                    const unsigned long sensorNow = loopNow;
+
+                   if (!shouldReadProximity(sensorNow))
+                   {
+                     return; // Skip sensor work when nothing is pending
+                   }
+
+                   const uint32_t proxStartMicros = micros();
                    uint8_t proximity = apds.readProximity();
+                   const uint32_t proxDuration = micros() - proxStartMicros;
+
+#if DEBUG_MODE
+                   if (proxDuration > SLOW_SECTION_THRESHOLD_US)
+                   {
+                     LOG_DEBUG("Slow proximity read: %lu us\n", static_cast<unsigned long>(proxDuration));
+                   }
+#endif
                    // Serial.printf("Proximity: %d\n", proximity); // DEBUG Proximity Value
 
                    bool bounceJustTriggered = false; // Flag to avoid double blush trigger

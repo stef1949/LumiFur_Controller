@@ -269,6 +269,14 @@ const unsigned long ambientUpdateInterval = 500; // update every 500 millisecond
 uint8_t adaptiveBrightness = userBrightness;     // current brightness used by the system
 uint8_t targetBrightness = userBrightness;       // target brightness for adaptive adjustment
 
+// APDS9960 runtime state
+bool apdsInitialized = false;
+bool apdsFaulted = false;
+volatile bool apdsProximityInterruptFlag = false;
+unsigned long lastApdsProximityCheck = 0;
+constexpr unsigned long APDS_PROX_FALLBACK_MS = 750; // Slow fallback poll when no interrupt
+constexpr unsigned long APDS_PROX_CACHE_MS = 50;     // Minimum spacing between proximity fetches
+
 // float ambientLux = 0.0;
 static uint16_t lastKnownClearValue = 0; // Initialize to a sensible default
 float smoothedLux = 50.0f;
@@ -278,22 +286,44 @@ const float brightnessSmoothingFactor = 0.05f; // NEW: How quickly brightness ad
 int lastBrightness = 0;
 const int brightnessThreshold = 3; // Only update if change > X
 unsigned long lastLuxUpdate = 0;
-const unsigned long luxUpdateInterval = 100; // NEW: every 100 milliseconds (10Hz) - ADJUST THIS!
+const unsigned long luxUpdateInterval = 250; // Reduce read frequency to ease I2C contention
+
+#if defined(APDS_AVAILABLE)
+void IRAM_ATTR onApdsInterrupt()
+{
+  apdsProximityInterruptFlag = true;
+}
+#endif
 
 void setupAdaptiveBrightness()
 {
+#if defined(APDS_AVAILABLE)
   // Initialize APDS9960 proximity sensor if found
   if (!apds.begin())
   {
     Serial.println("failed to initialize proximity sensor! Please check your wiring.");
-    while (1)
-      ;
+    apdsFaulted = true;
+    apdsInitialized = false;
+    autoBrightnessEnabled = false; // Fail gracefully: keep rendering with manual brightness
+    return;
   }
+
+  apdsInitialized = true;
+  apdsFaulted = false;
   Serial.println("Proximity sensor initialized!");
   apds.enableProximity(true);                  // enable proximity mode
   apds.enableColor(true);                      // enable color mode
   apds.setProximityInterruptThreshold(0, 175); // set the interrupt threshold to fire when proximity reading goes above 175
   apds.enableProximityInterrupt();
+
+#ifdef APDS_INT_PIN
+  pinMode(APDS_INT_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(APDS_INT_PIN), onApdsInterrupt, FALLING);
+#endif
+#else
+  (void)apdsFaulted;
+  (void)apdsInitialized;
+#endif
 }
 
 // Setup functions for adaptive brightness & proximity sensing using APDS9960:
@@ -301,6 +331,11 @@ uint16_t getRawClearChannelValue()
 {
   static unsigned long lastLogTime = 0;
   const unsigned long logInterval = 500; // Log 2 times per second
+
+  if (!apdsInitialized)
+  {
+    return lastKnownClearValue;
+  }
 
   if (apds.colorDataReady())
   {
@@ -336,6 +371,15 @@ void updateAdaptiveBrightness()
       Serial.printf(">>>> MANUAL: BRIGHTNESS SET TO %d <<<<\n", userBrightness);
 #endif
     }
+    return;
+  }
+
+  if (!apdsInitialized || apdsFaulted)
+  {
+    // Sensor unavailable: fall back to manual brightness without blocking FPS
+    autoBrightnessEnabled = false;
+    dma_display->setBrightness8(userBrightness);
+    lastBrightness = userBrightness;
     return;
   }
 
@@ -415,6 +459,42 @@ void maybeUpdateBrightness()
     updateAdaptiveBrightness();
     lastLuxUpdate = millis();
   }
+}
+
+bool shouldReadProximity(unsigned long now)
+{
+#if defined(APDS_AVAILABLE)
+  if (!apdsInitialized || apdsFaulted)
+  {
+    return false;
+  }
+
+  const bool interruptPending = apdsProximityInterruptFlag;
+  const bool fallbackDue = hasElapsedSince(now, lastApdsProximityCheck, APDS_PROX_FALLBACK_MS);
+
+  if (!interruptPending && !fallbackDue)
+  {
+    return false; // No reason to read yet
+  }
+
+  if (now - lastApdsProximityCheck < APDS_PROX_CACHE_MS)
+  {
+    return false; // Avoid back-to-back reads
+  }
+
+  lastApdsProximityCheck = now;
+
+  if (interruptPending)
+  {
+    apdsProximityInterruptFlag = false;
+    apds.clearInterrupt();
+  }
+
+  return true;
+#else
+  (void)now;
+  return false;
+#endif
 }
 
 constexpr std::size_t color_num = 5;
