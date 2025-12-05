@@ -2829,8 +2829,8 @@ void setup()
   {
     Serial.println("Accelerometer found!");
     accel.setRange(LIS3DH_RANGE_4_G); // 4G range is sufficient for motion detection
-    // accel.setDataRate(LIS3DH_DATARATE_100_HZ); // Set data rate to 100Hz
-    // accel.setPerformanceMode(LIS3DH_MODE_LOW_POWER);
+    accel.setDataRate(LIS3DH_DATARATE_50_HZ);
+    accel.setPerformanceMode(LIS3DH_MODE_LOW_POWER);
     g_accelerometer_initialized = true; // Set flag on success // Set to low power mode
   }
 #endif
@@ -3349,6 +3349,7 @@ void updateMouthMovement()
   }
 }
 // Runs one frame of the Pixel Dust animation
+bool getLatestAcceleration(float &x, float &y, float &z, const unsigned long sampleInterval);
 void PixelDustEffect()
 {
   static uint32_t lastFrameMicros = 0;
@@ -3377,14 +3378,14 @@ void PixelDustEffect()
   int16_t ax_scaled = 0;
   int16_t ay_scaled = static_cast<int16_t>(0.1f * 128.0f);
 
-  if (accelerometerEnabled && g_accelerometer_initialized)
+  float accelX = 0.0f;
+  float accelY = 0.0f;
+  float accelZ = 0.0f;
+
+  if (getLatestAcceleration(accelX, accelY, accelZ, MOTION_SAMPLE_INTERVAL_FAST))
   {
-    sensors_event_t event;
-    if (accel.getEvent(&event))
-    {
-      ax_scaled = static_cast<int16_t>(event.acceleration.x * 1000.0f);
-      ay_scaled = static_cast<int16_t>(event.acceleration.y * 1000.0f);
-    }
+    ax_scaled = static_cast<int16_t>(accelX * 1000.0f);
+    ay_scaled = static_cast<int16_t>(accelY * 1000.0f);
   }
 
   sand.iterate(ax_scaled, ay_scaled, 0);
@@ -3657,30 +3658,29 @@ constexpr unsigned long MOTION_SAMPLE_INTERVAL_SLOW = 120; // ms between reads f
 
 static unsigned long lastAccelSampleTime = 0;
 
-bool detectMotion()
+static bool refreshAccelSampleIfStale(const unsigned long sampleInterval)
 {
-  if (!g_accelerometer_initialized)
+  if (!accelerometerEnabled || !g_accelerometer_initialized)
   {
-    return false; // Guard against uninitialised accelerometer
+    return false;
   }
 
   const unsigned long now = millis();
-  const unsigned long sampleInterval = useShakeSensitivity ? MOTION_SAMPLE_INTERVAL_FAST : MOTION_SAMPLE_INTERVAL_SLOW;
   if (!accelSampleValid || (now - lastAccelSampleTime) >= sampleInterval)
   {
     PROFILE_SECTION("AccelRead");
     accel.read();
 
-    float x = accel.x_g; // Use pre-scaled G values if available, e.g., from LIS3DH library
-    float y = accel.y_g;
-    float z = accel.z_g;
+    const float x = accel.x_g;
+    const float y = accel.y_g;
+    const float z = accel.z_g;
 
     // Calculate the movement delta from last reading
     lastAccelDeltaX = fabs(x - prevAccelX);
     lastAccelDeltaY = fabs(y - prevAccelY);
     lastAccelDeltaZ = fabs(z - prevAccelZ);
 
-    // Store current values for next comparison
+    // Store current values for next comparison and reuse across effects
     prevAccelX = x;
     prevAccelY = y;
     prevAccelZ = z;
@@ -3691,6 +3691,32 @@ bool detectMotion()
     lastMotionAboveShake = (lastAccelDeltaX > SHAKE_THRESHOLD) || (lastAccelDeltaY > SHAKE_THRESHOLD) || (lastAccelDeltaZ > SHAKE_THRESHOLD);
     lastMotionAboveSleep = (lastAccelDeltaX > SLEEP_THRESHOLD) || (lastAccelDeltaY > SLEEP_THRESHOLD) || (lastAccelDeltaZ > SLEEP_THRESHOLD);
   }
+
+  return accelSampleValid;
+}
+
+bool getLatestAcceleration(float &x, float &y, float &z, const unsigned long sampleInterval)
+{
+  if (!refreshAccelSampleIfStale(sampleInterval))
+  {
+    return false;
+  }
+
+  x = prevAccelX;
+  y = prevAccelY;
+  z = prevAccelZ;
+  return true;
+}
+
+bool detectMotion()
+{
+  if (!accelerometerEnabled || !g_accelerometer_initialized)
+  {
+    return false; // Guard against uninitialised accelerometer
+  }
+
+  const unsigned long sampleInterval = useShakeSensitivity ? MOTION_SAMPLE_INTERVAL_FAST : MOTION_SAMPLE_INTERVAL_SLOW;
+  refreshAccelSampleIfStale(sampleInterval);
 
   if (currentView == VIEW_PIXEL_DUST)
   {
