@@ -66,6 +66,8 @@ FluidEffect *fluidEffectInstance = nullptr; // Global pointer for our fluid effe
 //  Retrieve the brightness value from preferences
 bool g_accelerometer_initialized = false;
 
+constexpr unsigned long MOTION_SAMPLE_INTERVAL_FAST = 15;  // ms between accel reads when looking for shakes
+
 // --- Performance Tuning ---
 // Target ~50-60 FPS. Adjust as needed based on view complexity.
 const unsigned long targetFrameIntervalMillis = 15;            // ~100 FPS pacing
@@ -2784,7 +2786,7 @@ void setup()
 
   mxconfig.gpio.e = PIN_E;
   mxconfig.driver = HUB75_I2S_CFG::FM6126A; // for panels using FM6126A chips
-  mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;
+ // mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;
   mxconfig.clkphase = false;
   mxconfig.double_buff = true; // <------------- Turn on double buffer
 
@@ -3653,7 +3655,7 @@ float getCurrentThreshold()
 }
 
 // Add with your other utility functions
-constexpr unsigned long MOTION_SAMPLE_INTERVAL_FAST = 15;  // ms between accel reads when looking for shakes
+// constexpr unsigned long MOTION_SAMPLE_INTERVAL_FAST = 15;  // ms between accel reads when looking for shakes
 constexpr unsigned long MOTION_SAMPLE_INTERVAL_SLOW = 120; // ms between reads for sleep detection
 
 static unsigned long lastAccelSampleTime = 0;
