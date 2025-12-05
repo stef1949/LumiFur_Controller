@@ -461,6 +461,11 @@ void maybeUpdateBrightness()
   }
 }
 
+inline bool hasElapsedSince(unsigned long now, unsigned long last, unsigned long interval)
+{
+  return static_cast<unsigned long>(now - last) >= interval;
+}
+
 bool shouldReadProximity(unsigned long now)
 {
 #if defined(APDS_AVAILABLE)
