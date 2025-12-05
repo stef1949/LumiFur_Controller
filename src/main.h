@@ -50,6 +50,7 @@ enum View
   VIEW_FULLSCREEN_SPIRAL_WHITE,
   VIEW_SCROLLING_TEXT,
   VIEW_PIXEL_DUST,
+  VIEW_STATIC_COLOR,
 
   // This special entry will automatically hold the total number of views.
   // It must always be the last item in the enum.
@@ -61,8 +62,11 @@ bool autoBrightnessEnabled = true;
 bool accelerometerEnabled = true;
 bool sleepModeEnabled = true;
 bool auroraModeEnabled = true;
+bool staticColorModeEnabled = false;
 bool constantColorConfig = false;
 CRGB constantColor = CRGB::Green; // Default color for constant color mode
+void ensureStaticColorLoaded();
+CRGB getStaticColorCached();
 // Config variables ------------------------------------------------
 bool configApplyAutoBrightness = true; // Variable to track auto brightness application
 bool configApplySleepMode = false;
@@ -477,34 +481,31 @@ void applyConfigOptions()
     configApplySleepMode = false; // Ensure the device remains awake when sleep mode is disabled.
   }
 
-  if (auroraModeEnabled)
+  if (staticColorModeEnabled)
   {
-    Serial.println("Aurora mode enabled: switching to aurora palette.");
-    // Assume auroraPalette and defaultPalette are defined globally.
-    // currentPalette = auroraPalette;
-    configApplyAuroraMode = true;
-  }
-  else
-  {
-    Serial.println("Aurora mode disabled: using default palette.");
-    // currentPalette = defaultPalette;
+    Serial.println("Static color mode enabled: using user-selected color.");
+    constantColor = getStaticColorCached();
+    constantColorConfig = true;
+    configApplyConstantColor = true;
     configApplyAuroraMode = false;
   }
-
-  if (constantColorConfig)
-  {
-    Serial.println("Constant color mode enabled.");
-    uint8_t r = 255, g = 255, b = 255; // Example default values for red, green, and blue
-    uint16_t rgb565 = dma_display->color565(constantColor.r, constantColor.g, constantColor.b);
-    dma_display->fillScreen(rgb565);
-    dma_display->flipDMABuffer();
-    bool configApplyConstantColor = true;
-  }
   else
   {
-    Serial.println("Constant color mode disabled.");
-    // Reset the display to the previous state or palette.
-    bool configApplyConstantColor = false;
+    constantColorConfig = false;
+    configApplyConstantColor = false;
+    if (auroraModeEnabled)
+    {
+      Serial.println("Aurora mode enabled: switching to aurora palette.");
+      // Assume auroraPalette and defaultPalette are defined globally.
+      // currentPalette = auroraPalette;
+      configApplyAuroraMode = true;
+    }
+    else
+    {
+      Serial.println("Aurora mode disabled: using default palette.");
+      // currentPalette = defaultPalette;
+      configApplyAuroraMode = false;
+    }
   }
 }
 
