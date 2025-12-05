@@ -2786,7 +2786,7 @@ void setup()
 
   mxconfig.gpio.e = PIN_E;
   mxconfig.driver = HUB75_I2S_CFG::FM6126A; // for panels using FM6126A chips
- // mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;
+ // mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;  // Causes instability if set too high
   mxconfig.clkphase = false;
   mxconfig.double_buff = true; // <------------- Turn on double buffer
 
