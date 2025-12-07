@@ -19,6 +19,7 @@
 
 #include <Adafruit_PixelDust.h> // For sand simulation
 #include "main.h"
+#include "core/ColorParser.h"
 #include "customEffects/flameEffect.h"
 #include "customEffects/fluidEffect.h"
 // #include "customEffects/pixelDustEffect.h" // New effect
@@ -229,164 +230,25 @@ struct StaticColorState
 
 static StaticColorState gStaticColorState;
 
-static std::string trimCopy(const std::string &input)
+static CRGB toCRGB(const RgbColor &color)
 {
-  size_t start = 0;
-  size_t end = input.size();
-  while (start < end && std::isspace(static_cast<unsigned char>(input[start])))
-  {
-    ++start;
-  }
-  while (end > start && std::isspace(static_cast<unsigned char>(input[end - 1])))
-  {
-    --end;
-  }
-  return input.substr(start, end - start);
+  return CRGB(color.r, color.g, color.b);
 }
 
-static std::string colorToHexString(const CRGB &color)
+static RgbColor toRgbColor(const CRGB &color)
 {
-  char buffer[7];
-  snprintf(buffer, sizeof(buffer), "%02X%02X%02X", color.r, color.g, color.b);
-  return std::string(buffer);
+  return {color.r, color.g, color.b};
 }
 
-static bool hexCharToValue(char c, uint8_t &value)
+static bool parseColorPayloadToCRGB(const uint8_t *data, size_t length, CRGB &colorOut, std::string &normalizedHex)
 {
-  if (c >= '0' && c <= '9')
-  {
-    value = static_cast<uint8_t>(c - '0');
-    return true;
-  }
-  c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-  if (c >= 'A' && c <= 'F')
-  {
-    value = static_cast<uint8_t>(10 + (c - 'A'));
-    return true;
-  }
-  return false;
-}
-
-static bool parseHexColorDigits(const std::string &digits, CRGB &colorOut)
-{
-  if (digits.size() < 6)
+  RgbColor parsed;
+  if (!parseColorPayload(data, length, parsed, normalizedHex))
   {
     return false;
   }
-  uint8_t rHigh, rLow, gHigh, gLow, bHigh, bLow;
-  if (!hexCharToValue(digits[0], rHigh) || !hexCharToValue(digits[1], rLow) ||
-      !hexCharToValue(digits[2], gHigh) || !hexCharToValue(digits[3], gLow) ||
-      !hexCharToValue(digits[4], bHigh) || !hexCharToValue(digits[5], bLow))
-  {
-    return false;
-  }
-  colorOut.r = static_cast<uint8_t>((rHigh << 4) | rLow);
-  colorOut.g = static_cast<uint8_t>((gHigh << 4) | gLow);
-  colorOut.b = static_cast<uint8_t>((bHigh << 4) | bLow);
+  colorOut = toCRGB(parsed);
   return true;
-}
-
-static bool parseDecimalColorComponents(const std::string &input, CRGB &colorOut)
-{
-  std::vector<int> values;
-  const char *ptr = input.c_str();
-  char *endPtr = nullptr;
-  while (*ptr != '\0')
-  {
-    if (*ptr == ',' || *ptr == ';')
-    {
-      ++ptr;
-      continue;
-    }
-    if (std::isspace(static_cast<unsigned char>(*ptr)))
-    {
-      ++ptr;
-      continue;
-    }
-
-    long parsed = strtol(ptr, &endPtr, 10);
-    if (ptr == endPtr)
-    {
-      return false;
-    }
-    values.push_back(static_cast<int>(parsed));
-    if (values.size() > 3)
-    {
-      break;
-    }
-    ptr = endPtr;
-  }
-
-  if (values.size() != 3)
-  {
-    return false;
-  }
-
-  auto clampComponent = [](int value) -> uint8_t
-  {
-    if (value < 0)
-      value = 0;
-    if (value > 255)
-      value = 255;
-    return static_cast<uint8_t>(value);
-  };
-
-  colorOut.r = clampComponent(values[0]);
-  colorOut.g = clampComponent(values[1]);
-  colorOut.b = clampComponent(values[2]);
-  return true;
-}
-
-static bool parseColorFromAscii(const std::string &input, CRGB &colorOut)
-{
-  std::string trimmed = trimCopy(input);
-  if (trimmed.empty())
-  {
-    return false;
-  }
-
-  std::string hexDigits;
-  hexDigits.reserve(trimmed.size());
-  for (char c : trimmed)
-  {
-    if (std::isxdigit(static_cast<unsigned char>(c)))
-    {
-      hexDigits.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
-    }
-  }
-
-  if (hexDigits.size() >= 6)
-  {
-    return parseHexColorDigits(hexDigits.substr(0, 6), colorOut);
-  }
-
-  return parseDecimalColorComponents(trimmed, colorOut);
-}
-
-static bool parseColorPayload(const uint8_t *data, size_t length, CRGB &colorOut, std::string &normalizedHex)
-{
-  if (!data || length == 0)
-  {
-    return false;
-  }
-
-  const std::string ascii(reinterpret_cast<const char *>(data), length);
-  if (parseColorFromAscii(ascii, colorOut))
-  {
-    normalizedHex = colorToHexString(colorOut);
-    return true;
-  }
-
-  if (length == 3)
-  {
-    colorOut.r = data[0];
-    colorOut.g = data[1];
-    colorOut.b = data[2];
-    normalizedHex = colorToHexString(colorOut);
-    return true;
-  }
-
-  return false;
 }
 
 static void setStaticColor(const CRGB &color)
@@ -396,31 +258,31 @@ static void setStaticColor(const CRGB &color)
   constantColor = color;
 }
 
-static void setStaticColorToDefault()
-{
-  setStaticColor(constantColor);
-}
-
-static bool applyStaticColorBytes(const uint8_t *data, size_t length, bool persistPreference, std::string *normalizedOut)
-{
-  std::string normalized;
-  CRGB parsedColor;
-  if (!parseColorPayload(data, length, parsedColor, normalized))
+  static void setStaticColorToDefault()
   {
-    return false;
+    setStaticColor(constantColor);
   }
 
-  setStaticColor(parsedColor);
-  if (persistPreference)
+  static bool applyStaticColorBytes(const uint8_t *data, size_t length, bool persistPreference, std::string *normalizedOut)
   {
-    saveSelectedColor(String(normalized.c_str()));
+    std::string normalized;
+    CRGB parsedColor;
+    if (!parseColorPayloadToCRGB(data, length, parsedColor, normalized))
+    {
+      return false;
+    }
+
+    setStaticColor(parsedColor);
+    if (persistPreference)
+    {
+      saveSelectedColor(String(normalized.c_str()));
+    }
+    if (normalizedOut)
+    {
+      *normalizedOut = normalized;
+    }
+    return true;
   }
-  if (normalizedOut)
-  {
-    *normalizedOut = normalized;
-  }
-  return true;
-}
 
 static bool loadStaticColorFromPreferences()
 {
@@ -454,18 +316,18 @@ void ensureStaticColorLoaded()
   }
 }
 
-CRGB getStaticColorCached()
-{
-  ensureStaticColorLoaded();
-  return gStaticColorState.color;
-}
+  CRGB getStaticColorCached()
+  {
+    ensureStaticColorLoaded();
+    return gStaticColorState.color;
+  }
 
-static String getStaticColorHexString()
-{
-  ensureStaticColorLoaded();
-  const std::string hex = colorToHexString(gStaticColorState.color);
-  return String(hex.c_str());
-}
+  static String getStaticColorHexString()
+  {
+    ensureStaticColorLoaded();
+    const std::string hex = colorToHexString(toRgbColor(gStaticColorState.color));
+    return String(hex.c_str());
+  }
 
 inline void setBlinkProgress(int newValue)
 {
