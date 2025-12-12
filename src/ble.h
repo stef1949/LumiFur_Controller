@@ -5,6 +5,7 @@
 #include <NimBLEDevice.h>
 #include "driver/temp_sensor.h"
 #include <esp_ota_ops.h> // For OTA_SIZE_UNKNOWN
+#include "core/ScrollState.h"
 
 // expose the userBrightness defined in main.h
 extern uint8_t userBrightness;
@@ -64,10 +65,6 @@ NimBLECharacteristic *pScrollTextCharacteristic = nullptr; // NEW
 
 NimBLECharacteristic *pOtaCharacteristic = nullptr;
 static NimBLECharacteristic *pInfoCharacteristic;
-
-extern uint8_t scrollSpeedSetting;             // 1–100
-extern uint16_t scrollTextIntervalMs;          // ms per pixel
-extern void updateScrollIntervalFromSetting(); // helper
 
 void triggerHistoryTransfer();
 void clearHistoryBuffer();
@@ -383,19 +380,21 @@ class ScrollSpeedCallbacks : public NimBLECharacteristicCallbacks
                 incoming = 1;
             if (incoming > 100)
                 incoming = 100;
-            scrollSpeedSetting = incoming;
-            updateScrollIntervalFromSetting();
+            auto &scrollState = scroll::state();
+            scrollState.speedSetting = incoming;
+            scroll::updateIntervalFromSpeed();
 #if DEBUG_MODE
-            Serial.printf("BLE: New scroll speed=%u (interval=%u ms)\n", scrollSpeedSetting, scrollTextIntervalMs);
+            Serial.printf("BLE: New scroll speed=%u (interval=%u ms)\n", scrollState.speedSetting, scrollState.textIntervalMs);
 #endif
             // Echo back & notify (optional)
-            pChr->setValue(&scrollSpeedSetting, 1);
+            pChr->setValue(&scrollState.speedSetting, 1);
             pChr->notify();
         }
     }
     void onRead(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
     {
-        pChr->setValue(&scrollSpeedSetting, 1);
+        auto &scrollState = scroll::state();
+        pChr->setValue(&scrollState.speedSetting, 1);
     }
 };
 static ScrollSpeedCallbacks scrollSpeedCallbacks;

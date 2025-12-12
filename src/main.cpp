@@ -21,6 +21,8 @@
 #include "main.h"
 #include "customEffects/flameEffect.h"
 #include "customEffects/fluidEffect.h"
+#include "core/AnimationState.h"
+#include "core/ScrollState.h"
 // #include "customEffects/pixelDustEffect.h" // New effect
 
 // BLE Libraries
@@ -79,65 +81,11 @@ uint16_t plasmaFrameDelay = 15; // ms between plasma updates (was 10)
 // Spiral animation optimization
 unsigned long rotationFrameInterval = 15; // ms between spiral rotation updates (was 11)
 
-enum BlushState
-{
-  BLUSH_INACTIVE,
-  BLUSH_FADE_IN,
-  BLUSH_FULL,
-  BLUSH_FADE_OUT
-};
+using animation::AnimationState;
+using animation::BlinkTimings;
+using animation::BlushState;
 
-struct BlinkTimings
-{
-  unsigned long startTime = 0;
-  unsigned long durationMs = 700; // Default duration
-  unsigned long closeDuration = 50;
-  unsigned long holdDuration = 20;
-  unsigned long openDuration = 50;
-};
-
-struct AnimationState
-{
-  // Blink
-  unsigned long lastEyeBlinkTime = 0;  // Last time the eyes blinked
-  unsigned long nextBlinkDelay = 1000; // Random delay between blinks
-  int blinkProgress = 0;               // Progress of the blink (0-100%)
-  bool isBlinking = false;             // Whether a blink is in progress
-  bool manualBlinkTrigger = false;     // To trigger a blink manually
-  BlinkTimings blinkTimings;
-
-  // Eye bounce
-  bool isEyeBouncing = false;
-  unsigned long eyeBounceStartTime = 0;
-  int currentEyeYOffset = 0;
-  int eyeBounceCount = 0;
-  uint8_t viewBeforeEyeBounce = 0;
-
-  // Idle hover
-  int idleEyeYOffset = 0;
-  int idleEyeXOffset = 0;
-
-  // Spiral
-  unsigned long spiralStartMillis = 0;
-  int previousView = 0;
-
-  // Maw
-  int currentMaw = 1;
-  unsigned long mawChangeTime = 0;
-  bool mawTemporaryChange = false;
-  bool mouthOpen = false;
-  unsigned long lastMouthTriggerTime = 0;
-
-  // Blush
-  BlushState blushState = BLUSH_INACTIVE;
-  unsigned long blushStateStartTime = 0;
-  bool isBlushFadingIn = false;
-  uint8_t originalViewBeforeBlush = 0;
-  bool wasBlushOverlay = false;
-  uint8_t blushBrightness = 0;
-};
-
-static AnimationState gAnimationState;
+AnimationState &gAnimationState = animation::state();
 
 BlinkTimings &blinkState = gAnimationState.blinkTimings;
 unsigned long &lastEyeBlinkTime = gAnimationState.lastEyeBlinkTime;
@@ -229,26 +177,6 @@ inline void runIfElapsed(unsigned long now, unsigned long &last, unsigned long i
 char txt[64];
 constexpr uint16_t SCROLL_BACKGROUND_INTERVAL_MS = 90;
 constexpr int16_t SCROLL_TEXT_GAP = 12;
-static unsigned long lastScrollTick = 0;
-static unsigned long lastBackgroundTick = 0;
-static uint8_t scrollingBackgroundOffset = 0;
-static uint8_t scrollingColorOffset = 0;
-static bool scrollingTextInitialized = false;
-
-uint8_t scrollSpeedSetting = 4;     // NEW: mid value (1-100)
-uint16_t scrollTextIntervalMs = 15; // NEW: actual interval in ms (updated by helper)
-
-void updateScrollIntervalFromSetting()
-{ // NEW helper
-  // Map 1..100 (fast->slow) to 15..250 ms
-  // Invert so low number = fast scroll
-  uint8_t s = scrollSpeedSetting < 1 ? 1 : (scrollSpeedSetting > 100 ? 100 : scrollSpeedSetting);
-  // Linear invert: speed 1 => 15ms, speed 100 => 250ms
-  scrollTextIntervalMs = map(s, 1, 100, 15, 250);
-#if DEBUG_MODE
-  LOG_DEBUG("Scroll speed setting=%u => interval=%u ms\n", s, scrollTextIntervalMs);
-#endif
-}
 
 // Global constants for each sensitivity level
 const float SLEEP_THRESHOLD = 1.0; // for sleep mode detection
@@ -733,11 +661,13 @@ void initializeScrollingText()
   textY = ((dma_display->height() - h) / 2) - y1;
   textMin = -static_cast<int16_t>(w + SCROLL_TEXT_GAP);
 
-  scrollingBackgroundOffset = 0;
-  scrollingColorOffset = 0;
-  lastScrollTick = millis();
-  lastBackgroundTick = lastScrollTick;
-  scrollingTextInitialized = true;
+  auto &scrollState = scroll::state();
+  scrollState.backgroundOffset = 0;
+  scrollState.colorOffset = 0;
+  const unsigned long now = millis();
+  scrollState.lastScrollTickMs = now;
+  scrollState.lastBackgroundTickMs = now;
+  scrollState.textInitialized = true;
 }
 
 static void drawScrollingBackground(uint8_t offset)
@@ -761,34 +691,34 @@ static void drawScrollingBackground(uint8_t offset)
 
 static void renderScrollingTextView()
 {
-  if (!scrollingTextInitialized)
+  auto &scrollState = scroll::state();
+  if (!scrollState.textInitialized)
   {
     initializeScrollingText();
   }
 
   const unsigned long now = millis();
 
-  if (now - lastBackgroundTick >= SCROLL_BACKGROUND_INTERVAL_MS)
+  if (now - scrollState.lastBackgroundTickMs >= SCROLL_BACKGROUND_INTERVAL_MS)
   {
-    lastBackgroundTick = now;
-    ++scrollingBackgroundOffset;
+    scrollState.lastBackgroundTickMs = now;
+    ++scrollState.backgroundOffset;
   }
 
-  // drawScrollingBackground(scrollingBackgroundOffset);
+  // drawScrollingBackground(scrollState.backgroundOffset);
 
-  // CHANGED: use scrollTextIntervalMs instead of fixed constant
-  if (now - lastScrollTick >= scrollTextIntervalMs)
+  if (now - scrollState.lastScrollTickMs >= scrollState.textIntervalMs)
   {
-    lastScrollTick = now;
+    scrollState.lastScrollTickMs = now;
     --textX;
     if (textX <= textMin)
     {
       textX = dma_display->width() + SCROLL_TEXT_GAP;
     }
-    scrollingColorOffset = static_cast<uint8_t>(scrollingColorOffset + 3);
+    scrollState.colorOffset = static_cast<uint8_t>(scrollState.colorOffset + 3);
   }
-  // vTaskDelay(pdMS_TO_TICKS(scrollTextIntervalMs));
-  drawText(scrollingColorOffset);
+
+  drawText(scrollState.colorOffset);
 }
 
 uint16_t plasmaSpeed = 2; // Lower = slower animation
@@ -1512,7 +1442,7 @@ void updateBlush()
 
   switch (blushState)
   {
-  case BLUSH_FADE_IN:
+  case BlushState::FadeIn:
     if (elapsed < fadeInDuration)
     {
       // Use ease-in for a smooth start
@@ -1522,22 +1452,22 @@ void updateBlush()
     else
     {
       blushBrightness = 255;
-      blushState = BLUSH_FULL;
+      blushState = BlushState::Full;
       blushStateStartTime = now; // Restart timer for full brightness phase
     }
     break;
 
-  case BLUSH_FULL:
+  case BlushState::Full:
     if (elapsed >= fullDuration)
     {
       // After full brightness time, start fading out
-      blushState = BLUSH_FADE_OUT;
+      blushState = BlushState::FadeOut;
       blushStateStartTime = now; // Restart timer for fade-out
     }
     // Brightness remains at 255 during this phase.
     break;
 
-  case BLUSH_FADE_OUT:
+  case BlushState::FadeOut:
     if (elapsed < fadeOutDuration)
     {
       // Use ease-out for a smooth end
@@ -1547,7 +1477,7 @@ void updateBlush()
     else
     {
       blushBrightness = 0;
-      blushState = BLUSH_INACTIVE;
+      blushState = BlushState::Inactive;
       disableBlush();
 
       // Revert to previous view if this was an overlay blush
@@ -1633,7 +1563,7 @@ void baseFace()
 
   if (currentView > 3)
   { // Only draw blush effect for face views, not utility views
-    if (blushState != BLUSH_INACTIVE)
+    if (blushState != BlushState::Inactive)
     { // Only draw if blush is active
       drawBlush();
     }
@@ -3113,7 +3043,7 @@ void displayCurrentView(int view)
       // Reset fade logic when entering the blush view
       blushStateStartTime = millis();
       isBlushFadingIn = true;
-      blushState = BLUSH_FADE_IN; // Start fade‑in state
+      blushState = BlushState::FadeIn; // Start fade‑in state
 #if DEBUG_MODE
       Serial.println("Entered blush view, resetting fade logic");
 #endif
@@ -3362,7 +3292,7 @@ void loop()
       // Reset specific view states if necessary when changing views
       if (currentView != 5)
       { // If leaving blush view
-        blushState = BLUSH_INACTIVE;
+        blushState = BlushState::Inactive;
         blushBrightness = 0;
         // disableBlush(); // Clears pixels, but displayCurrentView will clear anyway
       }
@@ -3407,17 +3337,17 @@ void loop()
                      bounceJustTriggered = true; // Mark that bounce (and view switch) happened
 
                      // Also trigger blush effect to happen ON view 17 (Circle Eyes)
-                     if (blushState == BLUSH_INACTIVE)
+                     if (blushState == BlushState::Inactive)
                      { // Only trigger if not already blushing
                        LOG_DEBUG_LN("Proximity! Also triggering blush effect on Circle Eyes.");
-                       blushState = BLUSH_FADE_IN;
+                       blushState = BlushState::FadeIn;
                        blushStateStartTime = sensorNow;
                        wasBlushOverlay = false;                       // Blush on view 17 is part of that view's temporary effect
                        originalViewBeforeBlush = viewBeforeEyeBounce; // Blush on view 17 uses context of viewBeforeEyeBounce
                      }
                    }
 
-                   if (proximity >= 15 && blushState == BLUSH_INACTIVE && !bounceJustTriggered)
+                   if (proximity >= 15 && blushState == BlushState::Inactive && !bounceJustTriggered)
                    {
                      // Trigger blush if:
                      // 1. Proximity detected
@@ -3428,7 +3358,7 @@ void loop()
                      if (currentView != 5 && currentView != 17)
                      {
                        LOG_DEBUG_LN("Proximity! Triggering blush overlay effect.");
-                       blushState = BLUSH_FADE_IN;
+                       blushState = BlushState::FadeIn;
                        blushStateStartTime = sensorNow;
                        lastActivityTime = sensorNow;
 
@@ -3456,7 +3386,7 @@ void loop()
     updateEyeBounceAnimation(); // NEW: Update eye bounce animation progress
     updateIdleHoverAnimation(); // NEW: Update idle eye hover animation progress
 
-    if (blushState != BLUSH_INACTIVE)
+    if (blushState != BlushState::Inactive)
     {
       updateBlush();
     }
