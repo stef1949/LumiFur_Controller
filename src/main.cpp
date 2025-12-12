@@ -405,6 +405,29 @@ inline void notifyBleTask()
   }
 }
 
+static void updateScrollIntervalFromSetting()
+{
+  auto &scrollState = scroll::state();
+  constexpr unsigned long DEFAULT_SCROLL_INTERVAL_MS = 30;
+  constexpr unsigned long MIN_SCROLL_INTERVAL_MS = 10;
+  constexpr unsigned long MAX_SCROLL_INTERVAL_MS = 500;
+
+  unsigned long interval = scrollState.textIntervalMs;
+  if (interval == 0)
+  {
+    interval = DEFAULT_SCROLL_INTERVAL_MS;
+  }
+  if (interval < MIN_SCROLL_INTERVAL_MS)
+  {
+    interval = MIN_SCROLL_INTERVAL_MS;
+  }
+  else if (interval > MAX_SCROLL_INTERVAL_MS)
+  {
+    interval = MAX_SCROLL_INTERVAL_MS;
+  }
+  scrollState.textIntervalMs = interval;
+}
+
 struct _InitScrollSpeed
 {
   _InitScrollSpeed() { updateScrollIntervalFromSetting(); }
@@ -3653,7 +3676,7 @@ void loop()
         // Reset specific view states if necessary when changing views
         if (currentView != 5)
         { // If leaving blush view
-          blushState = BLUSH_INACTIVE;
+          blushState = BlushState::Inactive;
           blushBrightness = 0;
           // disableBlush(); // Clears pixels, but displayCurrentView will clear anyway
         }
