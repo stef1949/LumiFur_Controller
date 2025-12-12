@@ -662,11 +662,12 @@ void initializeScrollingText()
   textMin = -static_cast<int16_t>(w + SCROLL_TEXT_GAP);
 
   auto &scrollState = scroll::state();
-  scrollState.backgroundOffset = 0;
-  scrollState.colorOffset = 0;
+  scroll::resetTiming();
   const unsigned long now = millis();
   scrollState.lastScrollTickMs = now;
   scrollState.lastBackgroundTickMs = now;
+  scrollState.backgroundOffset = 0;
+  scrollState.colorOffset = 0;
   scrollState.textInitialized = true;
 }
 
@@ -680,12 +681,12 @@ static void drawScrollingBackground(uint8_t offset)
   const int width = dma_display->width();
   const int height = dma_display->height();
 
+  dma_display->clearScreen();
   for (int y = 0; y < height; ++y)
   {
     const uint8_t paletteIndex = sin8(static_cast<uint8_t>(y * 8) + offset);
     const CRGB color = ColorFromPalette(CloudColors_p, paletteIndex);
     dma_display->drawFastHLine(0, y, width, dma_display->color565(color.r, color.g, color.b));
-    dma_display->clearScreen();
   }
 }
 
