@@ -70,8 +70,9 @@ constexpr unsigned long MOTION_SAMPLE_INTERVAL_FAST = 15;  // ms between accel r
 
 // --- Performance Tuning ---
 // Target ~50-60 FPS. Adjust as needed based on view complexity.
-const unsigned long targetFrameIntervalMillis = 15;            // ~100 FPS pacing
+const unsigned long targetFrameIntervalMillis = 12;            // ~100 FPS pacing
 constexpr uint32_t SLOW_FRAME_THRESHOLD_US = targetFrameIntervalMillis * 1000UL;
+
 #if DEBUG_MODE
 constexpr uint32_t SLOW_SECTION_THRESHOLD_US = 2000; // Flag non-render work that takes >2ms
 #define CONCAT_INNER(a, b) a##b
@@ -1497,7 +1498,7 @@ void updatePlasmaFace()
 {
   static unsigned long lastUpdate = 0;
   static unsigned long lastPaletteChange = 0;
-  const uint16_t frameDelay = 5;               // Delay for plasma animation update
+  const uint16_t frameDelay = 2;               // Delay for plasma animation update
   const unsigned long paletteInterval = 10000; // Change palette every 10 seconds
   unsigned long now = millis();
 
@@ -3617,7 +3618,7 @@ void displayCurrentView(int view)
   }
 #endif
 
-#ifdef DEBUG_VIEWS
+#if DEBUG_FPS_COUNTER
 
   // --- Begin FPS counter overlay ---
   static unsigned long lastFpsTime = 0;

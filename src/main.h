@@ -85,13 +85,16 @@ int bufferCount = 0;
 bool downloadFlag = false;
 
 ////////////////////// DEBUG MODE //////////////////////
-#define DEBUG_MODE 1          // Set to 1 to enable debug outputs
+#define DEBUG_MODE 0          // Set to 1 to enable debug outputs
 #define DEBUG_MICROPHONE 0    // Set to 1 to enable microphone debug outputs
 #define DEBUG_ACCELEROMETER 0 // Set to 1 to enable accelerometer debug outputs
 #define DEBUG_BRIGHTNESS 0    // Set to 1 to enable brightness debug outputs
+#define DEBUG_VIEWS 0         // Set to 1 to enable views debug outputs
+#define DEBUG_VIEW_TIMING 0         // Set to 1 to enable views debug outputs
+#define DEBUG_FPS_COUNTER 1         // Set to 1 to enable FPS counter debug outputs
 #if DEBUG_MODE
 #define DEBUG_BLE
-#define DEBUG_VIEWS
+// #define DEBUG_VIEWS
 #endif
 ////////////////////////////////////////////////////////
 
