@@ -83,6 +83,7 @@ Additional PlatformIO environments are defined in `platformio.ini`, including a 
 ## Web Firmware Updater
 - A browser-based OTA helper lives at `docs/firmware-updater/index.html`. Serve the folder over HTTPS or `http://localhost` (for example, `python -m http.server 8000` from the repo root) because Web Bluetooth is blocked on `file://` origins. Open the page in a supported browser (Chrome or Edge), click **Connect** to choose your LumiFur controller, select a compiled `.bin` firmware file, and press **Upload Firmware** to stream it over the OTA characteristic (`01931c44-3867-7427-96ab-8d7ac0ae09ee`).
 - Keep the page open during transfer; the device will reboot automatically after the update finishes.
+- To host the updater publicly, enable GitHub Pages and use the provided deployment workflow to publish `docs/firmware-updater/` automatically, then front the site with Cloudflare for HTTPS and a custom domain. See `docs/firmware-updater/HOSTING.md` for setup steps.
 
 ## GitHub Copilot Integration
 Developer onboarding guides for GitHub Copilot live in `docs/COPILOT_SETUP.md` and `docs/COPILOT_USAGE.md`, with tailored instructions for embedded patterns, animation workflows, and testing expectations.
