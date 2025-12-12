@@ -171,6 +171,7 @@ git rebase --continue
 ### 10. Submit a Pull Request
 
 1. **Push your branch** to your fork:
+
    ```bash
    git push origin your-branch-name
    ```
@@ -209,6 +210,7 @@ This project uses multiple testing frameworks:
 - **Coverage** analysis for code quality
 
 When adding new features:
+
 - Write unit tests for core functionality
 - Test on actual hardware when possible
 - Include edge case testing
@@ -233,11 +235,3 @@ Need help or have questions?
 ## 📜 Code of Conduct
 
 This project follows our [Code of Conduct](CODE_OF_CONDUCT.md). By participating, you agree to uphold this code. Please report unacceptable behavior to the project maintainers.
-
-## 🙏 Recognition
-
-All contributors will be recognized in our project documentation. Thank you for helping make LumiFur Controller better for the entire protogen community!
-
----
-
-*Happy contributing! 🎭✨*
