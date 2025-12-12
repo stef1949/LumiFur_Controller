@@ -3265,7 +3265,7 @@ void loop()
 
 // --- Handle button inputs for view changes ---
 #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) || defined(BUTTONS_AVAILABLE) // Add define if you use external buttons
-    static bool viewChangedByButton = false;
+    bool viewChangedByButton = false;
 
     if (debounceButton(BUTTON_UP))
     {
