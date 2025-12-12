@@ -3668,7 +3668,7 @@ void loop()
         // Reset specific view states if necessary when changing views
         if (currentView != 5)
         { // If leaving blush view
-          blushState = BLUSH_INACTIVE;
+          blushState = BlushState::Inactive;
           blushBrightness = 0;
           // disableBlush(); // Clears pixels, but displayCurrentView will clear anyway
         }
@@ -3856,4 +3856,5 @@ void loop()
     baseInterval = 10; // Use 15 ms for plasma view
   }
   */
+}
 }
