@@ -2,32 +2,28 @@
 <img width="300" alt="LumiFur Controller" src="docs/mps3.png">
 </p>
 <h1 align="center">
-  LumiFur Controller 
+  LumiFur Controller<br>
   
 [![CodeQL Advanced Build with PlatformIO](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml)
-[![Build Firmware Artifacts](https://github.com/stef1949/LumiFur_Controller/actions/workflows/build-firmware.yml/badge.svg?branch=main)](https://github.com/stef1949/LumiFur_Controller/actions/workflows/build-firmware.yml)
   ![version](https://img.shields.io/badge/version-0.2.0-blue)
   <a href="https://github.com/badges/shields/pulse" alt="Activity">
         <img src="https://img.shields.io/github/commit-activity/m/badges/shields" /></a>
   [![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=main)](https://coveralls.io/github/stef1949/LumiFur_Controller?branch=main)
-  
-  
-
-
 </h1>
-A program for controlling an LED matrix display for a Protogen mask, featuring various facial expressions and Bluetooth LE control with an ESP32.
+A real-time firmware for animating a HUB75 LED matrix Protogen mask with sensor-driven interactions, Bluetooth LE control, and OTA updates on the ESP32-based MatrixPortal platform.
 
 ## Table of Contents
 
 - ✨ [Features](#features)
-- 🛠️ [Hardware Requirements](#hardware-requirements)
-- 💻 [Software Requirements](#software-requirements)
-- ⚙️ [Installation](#installation)
-- 📖 [Usage](#usage)
-- 😃 [Facial Expressions](#facial-expressions)
+- ⚙️ [Hardware](#hardware)
+- 🛠️ [Build & Flash](#build--flash)
+- 🎛️ [Configuration](#configuration)
+- 📡 [BLE Control](#ble-control)
+- 🧪 [Testing](#testing)
 - 🤖 [GitHub Copilot Integration](#github-copilot-integration)
 - 🤝 [Contributing](#contributing)
 - 📜 [License](#license)
+- 🌐 [Web Firmware Updater](#web-firmware-updater)
 
 ## ✨ Features
 - Multiple facial expressions (idle, happy, angry, playful, silly, lewd, and more)
@@ -73,69 +69,6 @@ A program for controlling an LED matrix display for a Protogen mask, featuring v
 4. Configure hardware settings if necessary:
 
 - Check the pin definitions (CLK_PIN, DATA_PIN, CS_PIN) and adjust them to match your setup.
-
-## 🔧 Firmware Builds & Releases
-
-The LumiFur Controller uses an automated build system to generate firmware artifacts for different ESP32 hardware configurations.
-
-### 📦 Pre-built Firmware
-
-Pre-built firmware artifacts are automatically generated for each release and can be downloaded from the [Releases](https://github.com/stef1949/LumiFur_Controller/releases) page. Each release includes:
-
-- **firmware.bin** - Main application firmware for OTA (Over-The-Air) updates
-- **partitions.bin** - Partition table required for OTA functionality  
-- **bootloader.bin** - ESP32 bootloader binary
-- **firmware.elf** - Debug symbols (when available)
-- **build-info.txt** - Build metadata and version information
-
-### 🎯 Supported Hardware
-
-Firmware is built for multiple ESP32 environments:
-
-- **`adafruit_matrixportal_esp32s3`** - Primary target (Adafruit MatrixPortal ESP32-S3)
-- **`esp32dev`** - Generic ESP32 development boards  
-- **`dev`** - Development build with extra instrumentation
-
-### 🚀 Installing Pre-built Firmware
-
-#### Option 1: OTA Update (Recommended)
-If you already have LumiFur Controller running:
-1. Use the companion app or BLE interface to initiate OTA update
-2. Upload the `firmware.bin` file from your desired environment
-
-#### Option 2: Complete Flash
-For first-time installation or complete reflashing:
-1. Use ESP32 flash tools (esptool.py, ESP32 Flash Download Tools, or PlatformIO)
-2. Flash all three files in the correct order and memory locations:
-   - `bootloader.bin` at 0x1000
-   - `partitions.bin` at 0x8000  
-   - `firmware.bin` at 0x10000
-
-#### Option 3: PlatformIO Development
-For development and customization:
-```sh
-# Clone the repository
-git clone https://github.com/stef1949/LumiFur_Controller.git
-cd LumiFur_Controller
-
-# Build for your target environment
-pio run -e adafruit_matrixportal_esp32s3
-
-# Flash over USB
-pio run -e adafruit_matrixportal_esp32s3 --target upload
-
-# Monitor serial output
-pio device monitor -b 115200
-```
-
-### 🔄 Automatic Builds
-
-The firmware build system automatically:
-- ✅ Builds on every push to main branch
-- ✅ Creates artifacts for pull requests  
-- ✅ Generates release bundles for tagged versions
-- ✅ Attaches firmware files to GitHub releases
-- ✅ Includes build metadata and version information
 
 ## 📖 Usage
 
@@ -191,8 +124,8 @@ This project includes comprehensive GitHub Copilot instructions to help you deve
 
 The Copilot instructions are designed to help both new contributors and experienced developers work more effectively with this embedded codebase.
 
-## 🤝 Contributing
-Contributions are welcome! Please fork the repository and submit a pull request with your improvements.
+## Contributing
+Contributions are welcome! Please fork the repository, open an issue or discussion when appropriate, and submit a pull request following the guidelines in `CONTRIBUTING.md`.
 
-## 📜 License 
-This project is licensed under the BSD 3-Clause License - see the LICENSE file for details.
+## License
+This project is licensed under the BSD 3-Clause License. See the `LICENSE` file for full text.
