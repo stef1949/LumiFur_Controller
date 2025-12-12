@@ -2,197 +2,93 @@
 <img width="300" alt="LumiFur Controller" src="docs/mps3.png">
 </p>
 <h1 align="center">
-  LumiFur Controller 
+  LumiFur Controller<br>
   
-[![CodeQL Advanced Build with PlatformIO](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml)
-[![Build Firmware Artifacts](https://github.com/stef1949/LumiFur_Controller/actions/workflows/build-firmware.yml/badge.svg?branch=main)](https://github.com/stef1949/LumiFur_Controller/actions/workflows/build-firmware.yml)
-  ![version](https://img.shields.io/badge/version-0.2.0-blue)
-  <a href="https://github.com/badges/shields/pulse" alt="Activity">
-        <img src="https://img.shields.io/github/commit-activity/m/badges/shields" /></a>
+  [![CodeQL Advanced Build with PlatformIO](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml)
+  ![version](https://img.shields.io/badge/version-1.0.0-blue)
+  <a href="https://github.com/stef1949/LumiFur_Controller" alt="Activity">
+        <img src="https://img.shields.io/github/commit-activity/m/stef1949/LumiFur_Controller" /></a>
   [![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=main)](https://coveralls.io/github/stef1949/LumiFur_Controller?branch=main)
-  
-  
-
-
 </h1>
-A program for controlling an LED matrix display for a Protogen mask, featuring various facial expressions and Bluetooth LE control with an ESP32.
+A real-time firmware for animating a HUB75 LED matrix Protogen mask with sensor-driven interactions, Bluetooth LE control, and OTA updates on the ESP32-based MatrixPortal platform.
 
 ## Table of Contents
 
 - ✨ [Features](#features)
-- 🛠️ [Hardware Requirements](#hardware-requirements)
-- 💻 [Software Requirements](#software-requirements)
-- ⚙️ [Installation](#installation)
-- 📖 [Usage](#usage)
-- 😃 [Facial Expressions](#facial-expressions)
+- ⚙️ [Hardware](#hardware)
+- 🛠️ [Build & Flash](#build--flash)
+- 🎛️ [Configuration](#configuration)
+- 📡 [BLE Control](#ble-control)
+- 🧪 [Testing](#testing)
 - 🤖 [GitHub Copilot Integration](#github-copilot-integration)
 - 🤝 [Contributing](#contributing)
 - 📜 [License](#license)
+- 🌐 [Web Firmware Updater](#web-firmware-updater)
 
-## ✨ Features
-- Multiple facial expressions (idle, happy, angry, playful, silly, lewd, and more)
-- Smooth blinking animations
-- Bluetooth Low Energy (BLE) connectivity to switch expressions remotely
-- Boot-up animation with scrolling text
-  
-## 🛠️ Hardware Requirements
-- ESP32 development board
-- 2 x Hub75 64x32 LED matrix displays
-- Connecting wires and power supply
-  
-## 💻 Software Requirements
-- VSCode with PlatformIO Extension 
-- MatrixPanel-DMA library
-- FastLED Library
-- NimBLE-Arduino library
-- Adafruit GFX Library
-- Adafruit NeoPixel Library
+## Features
+- 20+ animated faces and effects including plasma, flame, fluid, circle eyes, spiral overlays, starfields, and scrolling text purpose-built for dual 64×32 HUB75 panels.
+- Sensor-driven reactions: the APDS9960 manages adaptive brightness and proximity-triggered blush/eye bounce, the LIS3DH accelerometer powers shake gestures and PixelDust physics, and an I2S MEMS microphone drives audio-reactive mouth animation.
+- Bluetooth Low Energy control via NimBLE with remote expression switching, brightness management, sensor feature toggles, temperature telemetry, and a command channel for log retrieval.
+- Wireless firmware delivery through a dedicated OTA characteristic plus runtime build metadata advertisement for companion apps.
+- Power-aware runtime with wake-on-motion, sleep dimming, ambient light scaling, and persistent user preferences stored in ESP32 NVS.
+- Optimized HUB75 pipeline using DMA double buffering, optional virtual panel simulation, and extensible C++ effect modules under `src/customEffects/`.
 
-## ⚙ Installation
+## Hardware
+- **Controller:** Adafruit MatrixPortal ESP32-S3 (default target) with built-in APDS9960, LIS3DH, status NeoPixel, and onboard microphone used by the firmware.
+- **Display:** Two chained 64×32 HUB75 RGB matrix panels (1/16 scan) plus appropriate ribbon cables and 5 V power delivery.
+- **Inputs & sensors:** Onboard buttons map to view navigation; alternate hardware can be remapped in `src/deviceConfig.h`.
+- **Optional:** Additional peripherals (e.g., alternative sensors or external microphones) can be integrated by adjusting the pin definitions and initialization blocks in `deviceConfig.h` / `main.cpp`.
 
-1. Clone the repository:
-    ```sh
-    git clone https://github.com/stef1949/LumiFur_Controller.git
-    ```
+## Build & Flash
+All dependencies are resolved by PlatformIO. You can work from the CLI or through the VS Code extension.
 
-2. Install the required libraries in Arduino IDE:
-
-### MD_MAX72XX Library:
-
-- Go to Sketch > Include Library > Manage Libraries...
-- Search for MD_MAX72XX and install it.
-
-### NimBLE-Arduino Library:
-
-- Follow the installation instructions here.
-
-3. Open the project:
-
-- Open main.cpp in the Arduino IDE.
-
-4. Configure hardware settings if necessary:
-
-- Check the pin definitions (CLK_PIN, DATA_PIN, CS_PIN) and adjust them to match your setup.
-
-## 🔧 Firmware Builds & Releases
-
-The LumiFur Controller uses an automated build system to generate firmware artifacts for different ESP32 hardware configurations.
-
-### 📦 Pre-built Firmware
-
-Pre-built firmware artifacts are automatically generated for each release and can be downloaded from the [Releases](https://github.com/stef1949/LumiFur_Controller/releases) page. Each release includes:
-
-- **firmware.bin** - Main application firmware for OTA (Over-The-Air) updates
-- **partitions.bin** - Partition table required for OTA functionality  
-- **bootloader.bin** - ESP32 bootloader binary
-- **firmware.elf** - Debug symbols (when available)
-- **build-info.txt** - Build metadata and version information
-
-### 🎯 Supported Hardware
-
-Firmware is built for multiple ESP32 environments:
-
-- **`adafruit_matrixportal_esp32s3`** - Primary target (Adafruit MatrixPortal ESP32-S3)
-- **`esp32dev`** - Generic ESP32 development boards  
-- **`dev`** - Development build with extra instrumentation
-
-### 🚀 Installing Pre-built Firmware
-
-#### Option 1: OTA Update (Recommended)
-If you already have LumiFur Controller running:
-1. Use the companion app or BLE interface to initiate OTA update
-2. Upload the `firmware.bin` file from your desired environment
-
-#### Option 2: Complete Flash
-For first-time installation or complete reflashing:
-1. Use ESP32 flash tools (esptool.py, ESP32 Flash Download Tools, or PlatformIO)
-2. Flash all three files in the correct order and memory locations:
-   - `bootloader.bin` at 0x1000
-   - `partitions.bin` at 0x8000  
-   - `firmware.bin` at 0x10000
-
-#### Option 3: PlatformIO Development
-For development and customization:
 ```sh
-# Clone the repository
 git clone https://github.com/stef1949/LumiFur_Controller.git
 cd LumiFur_Controller
 
-# Build for your target environment
+# Build the default MatrixPortal ESP32-S3 environment
 pio run -e adafruit_matrixportal_esp32s3
 
 # Flash over USB
 pio run -e adafruit_matrixportal_esp32s3 --target upload
 
-# Monitor serial output
+# Optional: open the serial monitor at 115200 baud
 pio device monitor -b 115200
 ```
 
-### 🔄 Automatic Builds
+Additional PlatformIO environments are defined in `platformio.ini`, including a `dev` flavor with extra instrumentation and native test environments (`codeql`, `native`, `native2`).
 
-The firmware build system automatically:
-- ✅ Builds on every push to main branch
-- ✅ Creates artifacts for pull requests  
-- ✅ Generates release bundles for tagged versions
-- ✅ Attaches firmware files to GitHub releases
-- ✅ Includes build metadata and version information
+## Configuration
+- **Persistent preferences:** `src/userPreferences.h` manages stored defaults for brightness, auto-blink, accelerometer usage, sleep mode, and other controller behaviors.
+- **Hardware mapping:** Modify `src/deviceConfig.h` to adjust HUB75 pinouts, panel chains, button inputs, or to enable the virtual panel simulator (`VIRTUAL_PANE`).
+- **Effects & assets:** Custom scenes live in `src/customEffects/` and bitmap assets in `src/bitmaps.h`; add new animations or alter existing ones there.
+- **Build metadata:** `platformio.ini` sets `FIRMWARE_VERSION`, device model tags, and compiler flags shared across environments.
 
-## 📖 Usage
+## BLE Control
+- The controller advertises as `LumiFur_Controller` and exposes a GATT service (`01931c44-3867-7740-9867-c822cb7df308`).
+- **Face characteristic:** write a view ID (0…`TOTAL_VIEWS`‑1) to switch expressions; read returns the current value.
+- **Config characteristic:** four boolean flags toggle auto-brightness, accelerometer features, sleep mode, and aurora overlays.
+- **Brightness characteristic:** write 0–255 to set manual brightness or subscribe for updates when auto-brightness adjusts.
+- **Temperature & logs:** subscribe for live temperature readings and request buffered history through the command characteristic (0x01 to stream, 0x02 to clear).
+- **OTA characteristic:** supports start/data packets for BLE firmware updates with status acknowledgements; pairing is recommended for production use.
+- A JSON metadata characteristic exposes firmware version, git commit, build timestamp, and device ID for companion applications.
+- The onboard NeoPixel pulses blue while advertising and turns green when a BLE client connects.
 
-1. Connect your ESP32 to the computer via USB.
-2. Select the correct board and port in the Arduino IDE.
-3. Click Upload to flash the code.
+## Testing
+- Run the GoogleTest suite with coverage via `pio test -e codeql`.
+- Execute Unity-based module tests with `pio test -e native2`.
+- Coverage reports and additional tooling scripts are located under `test/` and `test/test_coverage/`.
+- Lightweight smoke tests for the Web Bluetooth firmware updater can run without PlatformIO: `python -m unittest discover docs/firmware-updater/tests`.
 
-### Assemble the hardware:
+## Web Firmware Updater
+- A browser-based OTA helper lives at `docs/firmware-updater/index.html`. Serve the folder over HTTPS or `http://localhost` (for example, `python -m http.server 8000` from the repo root) because Web Bluetooth is blocked on `file://` origins. Open the page in a supported browser (Chrome or Edge), click **Connect** to choose your LumiFur controller, select a compiled `.bin` firmware file, and press **Upload Firmware** to stream it over the OTA characteristic (`01931c44-3867-7427-96ab-8d7ac0ae09ee`).
+- Keep the page open during transfer; the device will reboot automatically after the update finishes.
 
-- Connect the LED matrix modules to the ESP32 according to your wiring configuration.
+## GitHub Copilot Integration
+Developer onboarding guides for GitHub Copilot live in `docs/COPILOT_SETUP.md` and `docs/COPILOT_USAGE.md`, with tailored instructions for embedded patterns, animation workflows, and testing expectations.
 
-### Operate the Protogen mask:
+## Contributing
+Contributions are welcome! Please fork the repository, open an issue or discussion when appropriate, and submit a pull request following the guidelines in `CONTRIBUTING.md`.
 
-1. Power on the device.
-2. The mask will display the default idle face with animations.
-3. Use the LumiFur app to connect to 'LumiFur_Controller'.
-4. Send values between 1 and 8 to change facial expressions.
-
-### 😃 Facial Expressions
-
-- 1 - Idle Face
-- 2 - Happy Face
-- 3 - Angry Face
-- 4 - Playful Face
-- 5 - Silly Face
-- 6 - Kinky Face
-- 7 - Death Face
-- 8 - Edgy Face
-
-## 🤖 GitHub Copilot Integration
-
-This project includes comprehensive GitHub Copilot instructions to help you develop more efficiently. The instructions provide context about:
-
-- **Embedded C++ patterns** specific to ESP32 development
-- **Hardware constraints** and memory management guidelines  
-- **PlatformIO build system** usage and environment configurations
-- **LED matrix and BLE** communication patterns
-- **Animation and graphics** optimization techniques
-- **Testing frameworks** (Unity and GoogleTest) integration
-
-### Getting Started with Copilot
-
-1. **Install Extensions**: The recommended VS Code extensions include GitHub Copilot
-2. **Review Instructions**: Check `.github/copilot-instructions.md` for detailed guidance
-3. **Use Chat Instructions**: Use `.github/copilot-chat-instructions.md` for Copilot Chat sessions
-
-### Copilot-Assisted Development Tips
-
-- **Hardware Context**: Copilot understands ESP32 memory constraints and embedded best practices
-- **Code Patterns**: Follows established patterns for view management, animations, and BLE communication
-- **Testing Support**: Generates appropriate Unity and GoogleTest test cases
-- **Documentation**: Helps maintain consistent code documentation and comments
-
-The Copilot instructions are designed to help both new contributors and experienced developers work more effectively with this embedded codebase.
-
-## 🤝 Contributing
-Contributions are welcome! Please fork the repository and submit a pull request with your improvements.
-
-## 📜 License 
-This project is licensed under the BSD 3-Clause License - see the LICENSE file for details.
+## License
+This project is licensed under the BSD 3-Clause License. See the `LICENSE` file for full text.

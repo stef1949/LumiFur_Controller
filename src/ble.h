@@ -30,6 +30,7 @@ bool devicePairing = false;
 #define BRIGHTNESS_CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09ef"
 
 #define SCROLL_TEXT_CHARACTERISTIC_UUID "7f9b8b12-1234-4c55-9b77-a19d55aa0011"
+#define STATIC_COLOR_CHARACTERISTIC_UUID "7f9b8b12-1234-4c55-9b77-a19d55aa0022"
 #define LUX_CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09f0"
 
 #define OTA_CHARACTERISTIC_UUID "01931c44-3867-7427-96ab-8d7ac0ae09ee"
@@ -62,6 +63,7 @@ NimBLECharacteristic *pBrightnessCharacteristic = nullptr;
 NimBLECharacteristic *pLuxCharacteristic = nullptr;
 
 NimBLECharacteristic *pScrollTextCharacteristic = nullptr; // NEW
+NimBLECharacteristic *pStaticColorCharacteristic = nullptr;
 
 NimBLECharacteristic *pOtaCharacteristic = nullptr;
 static NimBLECharacteristic *pInfoCharacteristic;

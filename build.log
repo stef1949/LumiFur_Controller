@@ -1,0 +1,41 @@
+Processing adafruit_matrixportal_esp32s3 (platform: espressif32; board: adafruit_matrixportal_esp32s3; framework: arduino)
+--------------------------------------------------------------------------------
+Verbose mode can be enabled via `-v, --verbose` option
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/adafruit_matrixportal_esp32s3.html
+PLATFORM: Espressif 32 (6.12.0) > Adafruit MatrixPortal ESP32-S3
+HARDWARE: ESP32S3 240MHz, 320KB RAM, 8MB Flash
+DEBUG: Current (cmsis-dap) External (cmsis-dap, esp-bridge, esp-builtin, esp-prog, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa)
+PACKAGES: 
+ - framework-arduinoespressif32 @ 3.20017.241212+sha.dcc1105b 
+ - tool-esptoolpy @ 2.40900.250804 (4.9.0) 
+ - toolchain-riscv32-esp @ 8.4.0+2021r2-patch5 
+ - toolchain-xtensa-esp32s3 @ 8.4.0+2021r2-patch5
+Warning! An extra UF2 bootloader image is already added!
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ chain, Compatibility ~ soft
+Found 43 compatible libraries
+Scanning dependencies...
+Dependency Graph
+|-- Adafruit GFX Library @ 1.12.3
+|-- Adafruit NeoPixel @ 1.15.2
+|-- Adafruit LIS3DH @ 1.3.0
+|-- Adafruit APDS9960 Library @ 1.3.1
+|-- NimBLE-Arduino @ 2.3.6
+|-- ESP32 HUB75 LED MATRIX PANEL DMA Display @ 3.0.13
+|-- FastLED @ 3.10.3
+|-- Adafruit PixelDust @ 1.1.3
+|-- Wire @ 2.0.0
+|-- SPI @ 2.0.0
+|-- Preferences @ 2.0.0
+Building in release mode
+Retrieving maximum program size .pio\build\adafruit_matrixportal_esp32s3\firmware.elf
+Checking size .pio\build\adafruit_matrixportal_esp32s3\firmware.elf
+Advanced Memory Usage is available via "PlatformIO Home > Project Inspect"
+RAM:   [=         ]  14.7% (used 48188 bytes from 327680 bytes)
+Flash: [===       ]  32.4% (used 679609 bytes from 2097152 bytes)
+========================= [SUCCESS] Took 7.32 seconds =========================
+
+Environment                    Status    Duration
+-----------------------------  --------  ------------
+adafruit_matrixportal_esp32s3  SUCCESS   00:00:07.322
+========================= 1 succeeded in 00:00:07.322 =========================

@@ -16,7 +16,7 @@
         "instructions": "Apply embedded C++ patterns with ESP32 constraints"
       },
       {
-        "pattern": "src/**/*.h", 
+        "pattern": "{src,include}/**/*.h", 
         "instructions": "Use header-only patterns appropriate for embedded systems"
       },
       {
@@ -26,6 +26,14 @@
       {
         "pattern": "platformio.ini",
         "instructions": "Maintain PlatformIO configuration standards"
+      },
+      {
+        "pattern": "**/CMakeLists.txt",
+        "instructions": "Follow CMAKE best practices for embedded ESP32 development"
+      },
+      {
+        "pattern": ".github/workflows/*.{yml,yaml}",
+        "instructions": "Maintain GitHub Actions workflows for PlatformIO and CodeQL analysis"
       }
     ],
     "features": {
