@@ -118,7 +118,7 @@ static unsigned long lastLuxUpdateTime = 0;
 static unsigned long lastSleepCheckTime = 0;
 
 // View switching
-uint8_t currentView = VIEW_FLAME_EFFECT; // Current & initial view being displayed
+volatile uint8_t currentView = VIEW_FLAME_EFFECT; // Current view (volatile so the display task sees updates)
 const int totalViews = TOTAL_VIEWS;      // Total number of views is now calculated automatically
 // int userBrightness = 20; // Default brightness level (0-255)
 
