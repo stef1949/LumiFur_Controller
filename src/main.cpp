@@ -237,7 +237,11 @@ static CRGB toCRGB(const RgbColor &color)
 
 static RgbColor toRgbColor(const CRGB &color)
 {
-  return {color.r, color.g, color.b};
+  RgbColor result;
+  result.r = color.r;
+  result.g = color.g;
+  result.b = color.b;
+  return result;
 }
 
 static bool parseColorPayloadToCRGB(const uint8_t *data, size_t length, CRGB &colorOut, std::string &normalizedHex)
@@ -492,19 +496,21 @@ void calculateFPS()
 
 void maybeUpdateTemperature()
 {
-  unsigned long lastTempUpdate = 0;
-  const unsigned long tempUpdateInterval = 5000;       // 5 seconds
-  const unsigned long sleepTempUpdateInterval = 10000; // 10 seconds
-  if (deviceConnected && (millis() - lastTempUpdate >= tempUpdateInterval) && !sleepModeActive)
+  if (!deviceConnected)
   {
-    updateTemperature();
-    lastTempUpdate = millis();
+    return;
   }
 
-  if (deviceConnected && (millis() - lastTempUpdate >= sleepTempUpdateInterval) && sleepModeActive)
+  static unsigned long lastTempUpdate = 0;
+  const unsigned long tempUpdateInterval = 5000;       // 5 seconds
+  const unsigned long sleepTempUpdateInterval = 10000; // 10 seconds
+  const unsigned long now = millis();
+  const unsigned long targetInterval = sleepModeActive ? sleepTempUpdateInterval : tempUpdateInterval;
+
+  if (now - lastTempUpdate >= targetInterval)
   {
     updateTemperature();
-    lastTempUpdate = millis();
+    lastTempUpdate = now;
   }
 }
 
@@ -1377,42 +1383,6 @@ void updatePlasmaFace()
     facePlasmaDirty = true;
   }
 }
-
-// Array of all the bitmaps (Total bytes used to store images in PROGMEM = Cant remember)
-//  Create code to list available bitmaps for future bluetooth control
-
-int current_view = 4;
-static int number_of_views = 12;
-
-static char view_name[12][30] = {
-    "nose",
-    "maw",
-    "Glitch1",
-    "Glitch2",
-    "Eye",
-    "Angry",
-    "Spooked",
-    "vwv",
-    "blush",
-    "semicircleeyes",
-    "x_eyes",
-    "slanteyes"};
-
-static char *view_bits[12] = {
-    nose,
-    maw,
-    Glitch1,
-    Glitch2,
-    Eye,
-    Angry,
-    Spooked,
-    vwv,
-    blush,
-    semicircleeyes,
-    x_eyes,
-    slanteyes
-    // spiral
-};
 
 // SETUP - RUNS ONCE AT PROGRAM START --------------------------------------
 
@@ -3504,7 +3474,7 @@ void displayCurrentView(int view)
 
 #endif
 
-  if (!sleepModeActive || current_view == VIEW_TRANS_FLAG || current_view == VIEW_BSOD)
+  if (!sleepModeActive || currentView == VIEW_TRANS_FLAG || currentView == VIEW_BSOD)
   {
     dma_display->flipDMABuffer();
   }
