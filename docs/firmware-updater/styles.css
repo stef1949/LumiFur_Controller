@@ -1,0 +1,217 @@
+:root {
+  color-scheme: light dark;
+  --bg: #0f172a;
+  --card: #111827;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --accent: #60a5fa;
+  --danger: #f87171;
+  --success: #4ade80;
+  --border: rgba(255, 255, 255, 0.08);
+  font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: radial-gradient(circle at 20% 20%, rgba(96, 165, 250, 0.08), transparent 25%),
+    radial-gradient(circle at 80% 0%, rgba(74, 222, 128, 0.08), transparent 25%),
+    var(--bg);
+  color: var(--text);
+  padding: 2.5rem 1.5rem 3rem;
+  line-height: 1.6;
+}
+
+header {
+  text-align: center;
+  max-width: 900px;
+  margin: 0 auto 2rem;
+}
+
+h1 {
+  margin: 0 0 0.5rem;
+  font-size: clamp(2rem, 4vw, 2.75rem);
+}
+
+h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.35rem;
+}
+
+main {
+  max-width: 980px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.card {
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 15px 50px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(8px);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1.5rem;
+  align-items: start;
+}
+
+ul {
+  margin: 0.25rem 0 0;
+  padding-left: 1.25rem;
+  color: var(--muted);
+}
+
+button {
+  appearance: none;
+  border: none;
+  background: linear-gradient(135deg, #2563eb, #22c55e);
+  color: #0b1220;
+  padding: 0.75rem 1.2rem;
+  border-radius: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.2s ease;
+  box-shadow: 0 10px 30px rgba(96, 165, 250, 0.35);
+}
+
+button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 12px 36px rgba(96, 165, 250, 0.45);
+}
+
+button:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 0.5rem 1rem;
+  margin: 1rem 0 0;
+}
+
+.meta dt {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 0.1rem;
+}
+
+.meta dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.file-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.02);
+  cursor: pointer;
+  color: var(--text);
+}
+
+.file-picker input {
+  display: none;
+}
+
+#file-label {
+  font-weight: 700;
+}
+
+.helper {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.upload-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.progress {
+  position: relative;
+  margin: 1rem 0;
+  height: 16px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+#progress-bar {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 0%;
+  background: linear-gradient(135deg, #22c55e, #2563eb);
+  transition: width 0.2s ease;
+}
+
+#progress-label {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.log {
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.75rem 0.9rem;
+  min-height: 120px;
+  font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  color: var(--muted);
+  overflow-y: auto;
+  max-height: 280px;
+}
+
+.log p {
+  margin: 0.15rem 0;
+}
+
+.log .info { color: var(--muted); }
+.log .success { color: var(--success); }
+.log .error { color: var(--danger); }
+
+footer {
+  max-width: 900px;
+  margin: 1.5rem auto 0;
+  text-align: center;
+  color: var(--muted);
+}
+
+.lede {
+  color: var(--muted);
+  margin: 0.25rem auto 0;
+  max-width: 620px;
+}
+
+@media (max-width: 600px) {
+  body { padding: 1.5rem 1rem; }
+  .card { padding: 1rem 1.1rem; }
+}

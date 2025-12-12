@@ -1,6 +1,8 @@
 #include "fluidEffect.h"
 #include <Arduino.h>
 
+extern bool getLatestAcceleration(float &x, float &y, float &z, const unsigned long sampleInterval);
+
 #define PANE_WIDTH 64
 #define PANE_HEIGHT 32
 
@@ -42,17 +44,16 @@ void FluidEffect::applyGravityAndAccel() {
 
     // Check if accelerometer is enabled and available
     if (accelerometer_enabled && *accelerometer_enabled && accelerometer) {
-        sensors_event_t event;
-        if (accelerometer->getEvent(&event)) {
+        float accelX = 0.0f;
+        float accelY = 0.0f;
+        float accelZ = 0.0f;
+        constexpr unsigned long EFFECT_ACCEL_SAMPLE_INTERVAL_MS = 15;
+
+        if (getLatestAcceleration(accelX, accelY, accelZ, EFFECT_ACCEL_SAMPLE_INTERVAL_MS)) {
             // Adjust "gravity" based on accelerometer readings
-            // event.acceleration.x, y, z are in m/s^2
-            // Assuming panel is held upright, or laid flat.
-            // If laid flat (screen facing up):
-            // Tilt left/right along X-axis: event.acceleration.x
-            // Tilt forward/backward along Y-axis: event.acceleration.y
             // These factors might need tuning based on how panel is oriented
-            current_gravity_x += event.acceleration.x * ACCEL_SENSITIVITY_MULTIPLIER;
-            current_gravity_y -= event.acceleration.y * ACCEL_SENSITIVITY_MULTIPLIER; // Common for Y to be inverted
+            current_gravity_x += accelX * ACCEL_SENSITIVITY_MULTIPLIER;
+            current_gravity_y -= accelY * ACCEL_SENSITIVITY_MULTIPLIER; // Common for Y to be inverted
         }
     }
 

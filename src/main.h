@@ -50,6 +50,7 @@ enum View
   VIEW_FULLSCREEN_SPIRAL_WHITE,
   VIEW_SCROLLING_TEXT,
   VIEW_PIXEL_DUST,
+  VIEW_STATIC_COLOR,
 
   // This special entry will automatically hold the total number of views.
   // It must always be the last item in the enum.
@@ -61,8 +62,11 @@ bool autoBrightnessEnabled = true;
 bool accelerometerEnabled = true;
 bool sleepModeEnabled = true;
 bool auroraModeEnabled = true;
+bool staticColorModeEnabled = false;
 bool constantColorConfig = false;
 CRGB constantColor = CRGB::Green; // Default color for constant color mode
+void ensureStaticColorLoaded();
+CRGB getStaticColorCached();
 // Config variables ------------------------------------------------
 bool configApplyAutoBrightness = true; // Variable to track auto brightness application
 bool configApplySleepMode = false;
@@ -81,13 +85,16 @@ int bufferCount = 0;
 bool downloadFlag = false;
 
 ////////////////////// DEBUG MODE //////////////////////
-#define DEBUG_MODE 1          // Set to 1 to enable debug outputs
+#define DEBUG_MODE 0          // Set to 1 to enable debug outputs
 #define DEBUG_MICROPHONE 0    // Set to 1 to enable microphone debug outputs
 #define DEBUG_ACCELEROMETER 0 // Set to 1 to enable accelerometer debug outputs
 #define DEBUG_BRIGHTNESS 0    // Set to 1 to enable brightness debug outputs
+#define DEBUG_VIEWS 0         // Set to 1 to enable views debug outputs
+#define DEBUG_VIEW_TIMING 0         // Set to 1 to enable views debug outputs
+#define DEBUG_FPS_COUNTER 1         // Set to 1 to enable FPS counter debug outputs
 #if DEBUG_MODE
 #define DEBUG_BLE
-#define DEBUG_VIEWS
+// #define DEBUG_VIEWS
 #endif
 ////////////////////////////////////////////////////////
 
@@ -265,6 +272,14 @@ const unsigned long ambientUpdateInterval = 500; // update every 500 millisecond
 uint8_t adaptiveBrightness = userBrightness;     // current brightness used by the system
 uint8_t targetBrightness = userBrightness;       // target brightness for adaptive adjustment
 
+// APDS9960 runtime state
+bool apdsInitialized = false;
+bool apdsFaulted = false;
+volatile bool apdsProximityInterruptFlag = false;
+unsigned long lastApdsProximityCheck = 0;
+constexpr unsigned long APDS_PROX_FALLBACK_MS = 750; // Slow fallback poll when no interrupt
+constexpr unsigned long APDS_PROX_CACHE_MS = 50;     // Minimum spacing between proximity fetches
+
 // float ambientLux = 0.0;
 static uint16_t lastKnownClearValue = 0; // Initialize to a sensible default
 float smoothedLux = 50.0f;
@@ -274,22 +289,44 @@ const float brightnessSmoothingFactor = 0.05f; // NEW: How quickly brightness ad
 int lastBrightness = 0;
 const int brightnessThreshold = 3; // Only update if change > X
 unsigned long lastLuxUpdate = 0;
-const unsigned long luxUpdateInterval = 100; // NEW: every 100 milliseconds (10Hz) - ADJUST THIS!
+const unsigned long luxUpdateInterval = 250; // Reduce read frequency to ease I2C contention
+
+#if defined(APDS_AVAILABLE)
+void IRAM_ATTR onApdsInterrupt()
+{
+  apdsProximityInterruptFlag = true;
+}
+#endif
 
 void setupAdaptiveBrightness()
 {
+#if defined(APDS_AVAILABLE)
   // Initialize APDS9960 proximity sensor if found
   if (!apds.begin())
   {
     Serial.println("failed to initialize proximity sensor! Please check your wiring.");
-    while (1)
-      ;
+    apdsFaulted = true;
+    apdsInitialized = false;
+    autoBrightnessEnabled = false; // Fail gracefully: keep rendering with manual brightness
+    return;
   }
+
+  apdsInitialized = true;
+  apdsFaulted = false;
   Serial.println("Proximity sensor initialized!");
   apds.enableProximity(true);                  // enable proximity mode
   apds.enableColor(true);                      // enable color mode
   apds.setProximityInterruptThreshold(0, 175); // set the interrupt threshold to fire when proximity reading goes above 175
   apds.enableProximityInterrupt();
+
+#ifdef APDS_INT_PIN
+  pinMode(APDS_INT_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(APDS_INT_PIN), onApdsInterrupt, FALLING);
+#endif
+#else
+  (void)apdsFaulted;
+  (void)apdsInitialized;
+#endif
 }
 
 // Setup functions for adaptive brightness & proximity sensing using APDS9960:
@@ -297,6 +334,11 @@ uint16_t getRawClearChannelValue()
 {
   static unsigned long lastLogTime = 0;
   const unsigned long logInterval = 500; // Log 2 times per second
+
+  if (!apdsInitialized)
+  {
+    return lastKnownClearValue;
+  }
 
   if (apds.colorDataReady())
   {
@@ -332,6 +374,15 @@ void updateAdaptiveBrightness()
       Serial.printf(">>>> MANUAL: BRIGHTNESS SET TO %d <<<<\n", userBrightness);
 #endif
     }
+    return;
+  }
+
+  if (!apdsInitialized || apdsFaulted)
+  {
+    // Sensor unavailable: fall back to manual brightness without blocking FPS
+    autoBrightnessEnabled = false;
+    dma_display->setBrightness8(userBrightness);
+    lastBrightness = userBrightness;
     return;
   }
 
@@ -413,6 +464,47 @@ void maybeUpdateBrightness()
   }
 }
 
+inline bool hasElapsedSince(unsigned long now, unsigned long last, unsigned long interval)
+{
+  return static_cast<unsigned long>(now - last) >= interval;
+}
+
+bool shouldReadProximity(unsigned long now)
+{
+#if defined(APDS_AVAILABLE)
+  if (!apdsInitialized || apdsFaulted)
+  {
+    return false;
+  }
+
+  const bool interruptPending = apdsProximityInterruptFlag;
+  const bool fallbackDue = hasElapsedSince(now, lastApdsProximityCheck, APDS_PROX_FALLBACK_MS);
+
+  if (!interruptPending && !fallbackDue)
+  {
+    return false; // No reason to read yet
+  }
+
+  if (now - lastApdsProximityCheck < APDS_PROX_CACHE_MS)
+  {
+    return false; // Avoid back-to-back reads
+  }
+
+  lastApdsProximityCheck = now;
+
+  if (interruptPending)
+  {
+    apdsProximityInterruptFlag = false;
+    apds.clearInterrupt();
+  }
+
+  return true;
+#else
+  (void)now;
+  return false;
+#endif
+}
+
 constexpr std::size_t color_num = 5;
 using colour_arr_t = std::array<uint16_t, color_num>;
 
@@ -477,34 +569,31 @@ void applyConfigOptions()
     configApplySleepMode = false; // Ensure the device remains awake when sleep mode is disabled.
   }
 
-  if (auroraModeEnabled)
+  if (staticColorModeEnabled)
   {
-    Serial.println("Aurora mode enabled: switching to aurora palette.");
-    // Assume auroraPalette and defaultPalette are defined globally.
-    // currentPalette = auroraPalette;
-    configApplyAuroraMode = true;
-  }
-  else
-  {
-    Serial.println("Aurora mode disabled: using default palette.");
-    // currentPalette = defaultPalette;
+    Serial.println("Static color mode enabled: using user-selected color.");
+    constantColor = getStaticColorCached();
+    constantColorConfig = true;
+    configApplyConstantColor = true;
     configApplyAuroraMode = false;
   }
-
-  if (constantColorConfig)
-  {
-    Serial.println("Constant color mode enabled.");
-    uint8_t r = 255, g = 255, b = 255; // Example default values for red, green, and blue
-    uint16_t rgb565 = dma_display->color565(constantColor.r, constantColor.g, constantColor.b);
-    dma_display->fillScreen(rgb565);
-    dma_display->flipDMABuffer();
-    bool configApplyConstantColor = true;
-  }
   else
   {
-    Serial.println("Constant color mode disabled.");
-    // Reset the display to the previous state or palette.
-    bool configApplyConstantColor = false;
+    constantColorConfig = false;
+    configApplyConstantColor = false;
+    if (auroraModeEnabled)
+    {
+      Serial.println("Aurora mode enabled: switching to aurora palette.");
+      // Assume auroraPalette and defaultPalette are defined globally.
+      // currentPalette = auroraPalette;
+      configApplyAuroraMode = true;
+    }
+    else
+    {
+      Serial.println("Aurora mode disabled: using default palette.");
+      // currentPalette = defaultPalette;
+      configApplyAuroraMode = false;
+    }
   }
 }
 

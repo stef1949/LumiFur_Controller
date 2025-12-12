@@ -1,0 +1,41 @@
+name: Deploy Web Firmware Updater to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/firmware-updater/**'
+      - '.github/workflows/deploy-web-updater.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: 'pages'
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload firmware updater artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/firmware-updater
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
