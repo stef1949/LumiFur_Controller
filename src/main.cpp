@@ -371,6 +371,7 @@ uint8_t sleepBrightness = 15;              // Brightness level during sleep (0-2
 uint8_t normalBrightness = userBrightness; // Normal brightness level
 volatile bool notifyPending = false;
 unsigned long sleepFrameInterval = 50; // Frame interval in ms (will be changed during sleep)
+unsigned long bluetoothStatusChangeMillis = 0;
 
 // FPS Calculation (moved out of drawing function)
 volatile int currentFPS = 0; // Use volatile if accessed by ISR, though not needed here
@@ -776,6 +777,7 @@ void handleBLEStatusLED()
 {
   if (deviceConnected != oldDeviceConnected)
   {
+    bluetoothStatusChangeMillis = millis();
     if (deviceConnected)
     {
       statusPixel.setPixelColor(0, 0, 50, 0); // Green when connected
@@ -843,6 +845,106 @@ void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t c
       }
     }
   }
+}
+
+constexpr uint8_t BLUETOOTH_BACKGROUND_WIDTH = 7;
+constexpr uint8_t BLUETOOTH_BACKGROUND_HEIGHT = 11;
+constexpr uint8_t BLUETOOTH_RUNE_WIDTH = 5;
+constexpr uint8_t BLUETOOTH_RUNE_HEIGHT = 7;
+constexpr uint8_t BLUETOOTH_ICON_MARGIN = 1;
+constexpr unsigned long BLUETOOTH_FADE_PERIOD_MS = 1600UL;
+constexpr unsigned long BLUETOOTH_CONNECTED_FADE_DELAY_MS = 5000UL;
+constexpr unsigned long BLUETOOTH_CONNECTED_FADE_DURATION_MS = 1500UL;
+
+static uint8_t scaleColorComponent(uint8_t value, float intensity)
+{
+  float scaled = value * intensity;
+  if (scaled < 0.0f)
+  {
+    scaled = 0.0f;
+  }
+  if (scaled > 255.0f)
+  {
+    scaled = 255.0f;
+  }
+  return static_cast<uint8_t>(scaled + 0.5f);
+}
+
+void drawBluetoothStatusIcon()
+{
+  if (!dma_display)
+  {
+    return;
+  }
+
+  const unsigned long nowMs = millis();
+  const int iconX = dma_display->width() - BLUETOOTH_BACKGROUND_WIDTH - BLUETOOTH_ICON_MARGIN - 64;
+  const int iconY = dma_display->height() - BLUETOOTH_BACKGROUND_HEIGHT - BLUETOOTH_ICON_MARGIN;
+
+  float intensity = 1.0f;
+  if (!deviceConnected)
+  {
+    const float normalized = static_cast<float>(nowMs % BLUETOOTH_FADE_PERIOD_MS) / static_cast<float>(BLUETOOTH_FADE_PERIOD_MS);
+    const float wave = 0.5f * (sinf(normalized * TWO_PI) + 1.0f); // Range 0..1
+    intensity = 0.15f + (0.65f * wave);                           // Keep a faint glow at minimum
+  }
+  else
+  {
+    if (bluetoothStatusChangeMillis == 0)
+    {
+      bluetoothStatusChangeMillis = nowMs;
+    }
+    const unsigned long connectedDuration = nowMs - bluetoothStatusChangeMillis;
+    if (connectedDuration > BLUETOOTH_CONNECTED_FADE_DELAY_MS)
+    {
+      const unsigned long fadeElapsed = connectedDuration - BLUETOOTH_CONNECTED_FADE_DELAY_MS;
+      if (fadeElapsed >= BLUETOOTH_CONNECTED_FADE_DURATION_MS)
+      {
+        intensity = 0.0f;
+      }
+      else
+      {
+        const float fadeProgress = static_cast<float>(fadeElapsed) / static_cast<float>(BLUETOOTH_CONNECTED_FADE_DURATION_MS);
+        intensity = 1.0f - fadeProgress;
+      }
+    }
+  }
+
+  const uint16_t backgroundColor = dma_display->color565(
+      scaleColorComponent(5, intensity),
+      scaleColorComponent(90, intensity),
+      scaleColorComponent(180, intensity));
+
+  const uint16_t runeColor = dma_display->color565(
+      scaleColorComponent(255, intensity),
+      scaleColorComponent(255, intensity),
+      scaleColorComponent(255, intensity));
+
+  // Clear the drawing area (pad by 1 px to avoid leftover pixels from other views)
+  int clearX = iconX - 1;
+  int clearY = iconY - 1;
+  int clearW = BLUETOOTH_BACKGROUND_WIDTH + 2;
+  int clearH = BLUETOOTH_BACKGROUND_HEIGHT + 2;
+  if (clearX < 0)
+  {
+    clearW += clearX;
+    clearX = 0;
+  }
+  if (clearY < 0)
+  {
+    clearH += clearY;
+    clearY = 0;
+  }
+  if (clearW > 0 && clearH > 0)
+  {
+    dma_display->fillRect(clearX, clearY, clearW, clearH, 0);
+  }
+
+  drawXbm565(iconX, iconY, BLUETOOTH_BACKGROUND_WIDTH, BLUETOOTH_BACKGROUND_HEIGHT, bluetoothBackground, backgroundColor);
+  const int runeX = iconX + static_cast<int>((BLUETOOTH_BACKGROUND_WIDTH - BLUETOOTH_RUNE_WIDTH) / 2);
+  const int runeY = iconY + static_cast<int>((BLUETOOTH_BACKGROUND_HEIGHT - BLUETOOTH_RUNE_HEIGHT) / 2);
+
+  drawXbm565(runeX, runeY, BLUETOOTH_RUNE_WIDTH, BLUETOOTH_RUNE_HEIGHT, bluetoothRune, runeColor);
 }
 
 uint16_t colorWheel(uint8_t pos)
@@ -1957,6 +2059,7 @@ void displaySleepMode()
   drawXbm565(64, 20, 10, 8, maw2ClosedL, dma_display->color565(120, 120, 120));
 */
   dma_display->drawFastHLine(PANE_WIDTH / 2 - 15, PANE_HEIGHT - 8, 30, dma_display->color565(120, 120, 120));
+  drawBluetoothStatusIcon();
   dma_display->flipDMABuffer();
 }
 
@@ -3417,6 +3520,8 @@ void displayCurrentView(int view)
   // --- End FPS counter overlay ---
 
 #endif
+
+  drawBluetoothStatusIcon();
 
   if (!sleepModeActive || currentView == VIEW_TRANS_FLAG || currentView == VIEW_BSOD)
   {

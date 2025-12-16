@@ -91,8 +91,8 @@ bool downloadFlag = false;
 #define DEBUG_BRIGHTNESS 0    // Set to 1 to enable brightness debug outputs
 #define DEBUG_VIEWS 0         // Set to 1 to enable views debug outputs
 #define DEBUG_VIEW_TIMING 0         // Set to 1 to enable views debug outputs
-#define DEBUG_FPS_COUNTER 1         // Set to 1 to enable FPS counter debug outputs
-#define DEBUG_PROXIMITY 1     // Set to 1 to enable proximity sensor debug logs
+#define DEBUG_FPS_COUNTER 0         // Set to 1 to enable FPS counter debug outputs
+#define DEBUG_PROXIMITY 0     // Set to 1 to enable proximity sensor debug logs
 #if DEBUG_MODE
 #define DEBUG_BLE
 // #define DEBUG_VIEWS
