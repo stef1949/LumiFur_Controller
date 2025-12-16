@@ -9,6 +9,12 @@ on:
   release:
     types: [published]
 
+permissions:
+  contents: write
+
+env:
+  RELEASE_REF_NAME: ${{ github.ref_name || github.event.release.tag_name || github.sha }}
+
 jobs:
   build-firmware:
     name: Build Firmware for ${{ matrix.environment }}
@@ -169,6 +175,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: all-firmware/
+          pattern: firmware-*
           
       - name: Create release bundle
         run: |
@@ -176,8 +183,10 @@ jobs:
           mkdir -p release-bundle
           
           # Process each environment's artifacts
+          found_env=false
           for env_dir in all-firmware/firmware-*; do
             if [ -d "$env_dir" ]; then
+              found_env=true
               env_name=$(basename "$env_dir" | sed 's/firmware-//')
               echo "Processing $env_name artifacts..."
               
@@ -188,12 +197,16 @@ jobs:
               cp -r "$env_dir"/* "release-bundle/$env_name/"
             fi
           done
+          if [ "$found_env" = false ]; then
+            echo "No firmware artifacts were downloaded."
+            exit 1
+          fi
           
           # Create a master build info file
           echo "LumiFur Controller Firmware Release" > release-bundle/README.txt
           echo "====================================" >> release-bundle/README.txt
           echo "" >> release-bundle/README.txt
-          echo "Release: ${GITHUB_REF_NAME}" >> release-bundle/README.txt
+          echo "Release: ${RELEASE_REF_NAME}" >> release-bundle/README.txt
           echo "Built: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> release-bundle/README.txt
           echo "Commit: $(git rev-parse --short HEAD)" >> release-bundle/README.txt
           echo "" >> release-bundle/README.txt
@@ -219,18 +232,18 @@ jobs:
       - name: Create release archive
         run: |
           cd release-bundle
-          tar -czf ../lumifur-firmware-${GITHUB_REF_NAME}.tar.gz *
+          tar -czf ../lumifur-firmware-${RELEASE_REF_NAME}.tar.gz *
           cd ..
-          zip -r lumifur-firmware-${GITHUB_REF_NAME}.zip release-bundle/
+          zip -r lumifur-firmware-${RELEASE_REF_NAME}.zip release-bundle/
           
           # Show archive info
           echo "Created archives:"
-          ls -la lumifur-firmware-${GITHUB_REF_NAME}.*
+          ls -la lumifur-firmware-${RELEASE_REF_NAME}.*
           
       - name: Upload release bundle
         uses: actions/upload-artifact@v4
         with:
-          name: lumifur-firmware-release-${{ github.ref_name }}
+          name: lumifur-firmware-release-${{ env.RELEASE_REF_NAME }}
           path: |
             lumifur-firmware-*.tar.gz
             lumifur-firmware-*.zip
@@ -247,7 +260,7 @@ jobs:
       - name: Download release bundle
         uses: actions/download-artifact@v4
         with:
-          name: lumifur-firmware-release-${{ github.ref_name }}
+          name: lumifur-firmware-release-${{ env.RELEASE_REF_NAME }}
           
       - name: Attach to release
         uses: softprops/action-gh-release@v1
