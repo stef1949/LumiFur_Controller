@@ -92,11 +92,20 @@ bool downloadFlag = false;
 #define DEBUG_VIEWS 0         // Set to 1 to enable views debug outputs
 #define DEBUG_VIEW_TIMING 0         // Set to 1 to enable views debug outputs
 #define DEBUG_FPS_COUNTER 1         // Set to 1 to enable FPS counter debug outputs
+#define DEBUG_PROXIMITY 1     // Set to 1 to enable proximity sensor debug logs
 #if DEBUG_MODE
 #define DEBUG_BLE
 // #define DEBUG_VIEWS
 #endif
 ////////////////////////////////////////////////////////
+
+#if DEBUG_PROXIMITY
+#define LOG_PROX(...) Serial.printf(__VA_ARGS__)
+#define LOG_PROX_LN(msg) Serial.println(msg)
+#else
+#define LOG_PROX(...) do { } while (0)
+#define LOG_PROX_LN(msg) do { } while (0)
+#endif
 
 // Button config --------------------------------------------------------------
 bool debounceButton(int pin)
@@ -301,10 +310,15 @@ void IRAM_ATTR onApdsInterrupt()
 void setupAdaptiveBrightness()
 {
 #if defined(APDS_AVAILABLE)
-  // Initialize APDS9960 proximity sensor if found
+  // Ensure I2C is up on the STEMMA QT pins (MatrixPortal S3: SDA=20, SCL=19)
+  Wire.begin(APDS_SDA_PIN, APDS_SCL_PIN);
+  Wire.setClock(400000); // Fast-mode for APDS9960
+  LOG_PROX_LN("APDS init: starting Wire and begin()");
+
   if (!apds.begin())
   {
     Serial.println("failed to initialize proximity sensor! Please check your wiring.");
+    LOG_PROX_LN("APDS init: begin() failed");
     apdsFaulted = true;
     apdsInitialized = false;
     autoBrightnessEnabled = false; // Fail gracefully: keep rendering with manual brightness
@@ -314,11 +328,16 @@ void setupAdaptiveBrightness()
   apdsInitialized = true;
   apdsFaulted = false;
   Serial.println("Proximity sensor initialized!");
+  LOG_PROX_LN("APDS init: begin() succeeded");
+  // Boost sensitivity for proximity and color for auto-brightness
+  apds.setProxGain(APDS9960_PGAIN_8X);
+  //apds.setLEDDrive(APDS9960_LEDDRIVE_100MA);
+  apds.setADCIntegrationTime(49); // ~50ms
+  //apds.setADCGain(APDS9960_AGAIN_8X);
   apds.enableProximity(true);                  // enable proximity mode
   apds.enableColor(true);                      // enable color mode
   apds.setProximityInterruptThreshold(0, 175); // set the interrupt threshold to fire when proximity reading goes above 175
   apds.enableProximityInterrupt();
-
 #ifdef APDS_INT_PIN
   pinMode(APDS_INT_PIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(APDS_INT_PIN), onApdsInterrupt, FALLING);
@@ -469,20 +488,39 @@ inline bool hasElapsedSince(unsigned long now, unsigned long last, unsigned long
   return static_cast<unsigned long>(now - last) >= interval;
 }
 
+inline void markApdsFault()
+{
+  apdsFaulted = true;
+  apdsInitialized = false;
+}
+
 bool shouldReadProximity(unsigned long now)
 {
 #if defined(APDS_AVAILABLE)
-  if (!apdsInitialized || apdsFaulted)
+  // If the sensor never came up at boot, try once on demand.
+  if (!apdsInitialized && !apdsFaulted)
   {
-    return false;
+    apdsInitialized = apds.begin();
+    apdsFaulted = !apdsInitialized;
+    if (apdsInitialized)
+    {
+      apds.enableProximity(true);
+      apds.enableColor(true);
+      apds.setProximityInterruptThreshold(0, 175);
+      apds.enableProximityInterrupt();
+      LOG_PROX_LN("APDS lazy init: begin() succeeded");
+    }
+    else
+    {
+      LOG_PROX_LN("APDS lazy init: begin() failed");
+      markApdsFault();
+    }
   }
 
-  const bool interruptPending = apdsProximityInterruptFlag;
-  const bool fallbackDue = hasElapsedSince(now, lastApdsProximityCheck, APDS_PROX_FALLBACK_MS);
-
-  if (!interruptPending && !fallbackDue)
+  if (!apdsInitialized || apdsFaulted)
   {
-    return false; // No reason to read yet
+    LOG_PROX_LN("APDS not initialized or faulted; skipping proximity read");
+    return false;
   }
 
   if (now - lastApdsProximityCheck < APDS_PROX_CACHE_MS)
@@ -491,12 +529,6 @@ bool shouldReadProximity(unsigned long now)
   }
 
   lastApdsProximityCheck = now;
-
-  if (interruptPending)
-  {
-    apdsProximityInterruptFlag = false;
-    apds.clearInterrupt();
-  }
 
   return true;
 #else
