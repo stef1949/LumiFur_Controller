@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'docs/firmware-updater/**'
+      - 'firmware-updater/**'
       - '.github/workflows/deploy-web-updater.yml'
   workflow_dispatch:
 
