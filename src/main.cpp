@@ -141,11 +141,11 @@ bool &isBlinking = gAnimationState.isBlinking;
 bool &manualBlinkTrigger = gAnimationState.manualBlinkTrigger;
 bool &isEyeBouncing = gAnimationState.isEyeBouncing;
 unsigned long &eyeBounceStartTime = gAnimationState.eyeBounceStartTime;
-int &currentEyeYOffset = gAnimationState.currentEyeYOffset;
+volatile int &currentEyeYOffset = gAnimationState.currentEyeYOffset;
 int &eyeBounceCount = gAnimationState.eyeBounceCount;
 uint8_t &viewBeforeEyeBounce = gAnimationState.viewBeforeEyeBounce;
-int &idleEyeYOffset = gAnimationState.idleEyeYOffset;
-int &idleEyeXOffset = gAnimationState.idleEyeXOffset;
+volatile int &idleEyeYOffset = gAnimationState.idleEyeYOffset;
+volatile int &idleEyeXOffset = gAnimationState.idleEyeXOffset;
 unsigned long &spiralStartMillis = gAnimationState.spiralStartMillis;
 int &previousView = gAnimationState.previousView;
 int &currentMaw = gAnimationState.currentMaw;
@@ -1271,6 +1271,9 @@ void updateEyeBounceAnimation()
 
 void drawPlasmaFace()
 {
+  // Keep idle hover offsets in sync even if the main loop stalls
+  updateIdleHoverAnimation();
+
   // Combine bounce and idle hover offsets
   // Combine bounce and idle hover offsets
   int final_y_offset = currentEyeYOffset + idleEyeYOffset;
@@ -1754,6 +1757,9 @@ void drawTransFlag()
 
 void baseFace()
 {
+  // Update idle hover here so the render task always sees fresh offsets
+  updateIdleHoverAnimation();
+
   // Combine all offsets for final positioning.
   // These will be used for any facial feature that should move with the hover/bounce effect.
   int final_y_offset = currentEyeYOffset + idleEyeYOffset;
@@ -1795,6 +1801,9 @@ void staticColor()
 
 void patternPlasma()
 {
+  // Advance plasma animation timing + palette cycling reused by all plasma-based views
+  updatePlasmaFace();
+
   static uint16_t paletteLUT[256];
   static CRGBPalette16 cachedPalette;
   static uint16_t cachedBrightnessScale = 0;
@@ -3532,8 +3541,9 @@ void enterSleepMode()
   // No need to change sleepFrameInterval here, main loop timing controls frame rate
 }
 
-void checkSleepMode(unsigned long now)
+void checkSleepMode()
 {
+  const unsigned long now = millis();
   // Ensure we use the correct sensitivity for wake-up/sleep checks
   useShakeSensitivity = false; // Use SLEEP_THRESHOLD when checking general activity/wake conditions
   bool motionDetectedByAccel = false;
@@ -3571,7 +3581,8 @@ void checkSleepMode(unsigned long now)
     {
       // No motion detected while awake, check timeout for sleep entry
       // Ensure sleepModeEnabled config flag is checked
-      if (sleepModeEnabled && (now - lastActivityTime > SLEEP_TIMEOUT_MS))
+      const unsigned long inactivityMs = (now >= lastActivityTime) ? (now - lastActivityTime) : 0;
+      if (sleepModeEnabled && (inactivityMs > SLEEP_TIMEOUT_MS))
       {
         Serial.println("Inactivity timeout reached, entering sleep..."); // DEBUG
         enterSleepMode();
@@ -3582,6 +3593,9 @@ void checkSleepMode(unsigned long now)
 
 void loop()
 {
+
+  Serial.println(apds.readProximity());
+  
   // unsigned long frameStartTimeMillis = millis(); // Timestamp at frame start
   const unsigned long loopNow = millis();
 
@@ -3689,15 +3703,19 @@ void loop()
                    PROFILE_SECTION("ProximitySensor");
 #endif
 #if defined(APDS_AVAILABLE) // Ensure sensor is available
-                   const unsigned long sensorNow = loopNow;
+                  const unsigned long sensorNow = loopNow;
 
                    if (!shouldReadProximity(sensorNow))
                    {
+#if DEBUG_PROXIMITY
+                     LOG_PROX("Prox skip @%lu ms\n", sensorNow);
+#endif
                      return; // Skip sensor work when nothing is pending
                    }
 
                    const uint32_t proxStartMicros = micros();
                    uint8_t proximity = apds.readProximity();
+                   apds.clearInterrupt(); // Ensure latched interrupt doesn't block future samples
                    const uint32_t proxDuration = micros() - proxStartMicros;
 
 #if DEBUG_MODE
@@ -3706,14 +3724,21 @@ void loop()
                      LOG_DEBUG("Slow proximity read: %lu us\n", static_cast<unsigned long>(proxDuration));
                    }
 #endif
-                   // Serial.printf("Proximity: %d\n", proximity); // DEBUG Proximity Value
+#if DEBUG_PROXIMITY
+                   LOG_PROX("Prox=%u dt=%lu us\n", proximity, proxDuration);
+#endif
 
                    bool bounceJustTriggered = false; // Flag to avoid double blush trigger
 
                    // Eye Bounce Trigger - Switch to View 17 (Circle Eyes) (MODIFIED)
-                   if (proximity >= 15 && !isEyeBouncing && currentView != 16)
+                   const uint8_t PROX_THRESHOLD = 5; // Lowered threshold for more reliable trigger
+
+                   if (proximity >= PROX_THRESHOLD && !isEyeBouncing && currentView != 16)
                    {
                      LOG_DEBUG_LN("Proximity! Starting eye bounce sequence & switching to Circle Eyes (View 17).");
+#if DEBUG_PROXIMITY
+                     LOG_PROX("Bounce trigger prox=%u view=%d\n", proximity, currentView);
+#endif
 
                      // Store current view and switch to Circle Eyes (view 17)
                      if (currentView != 9 && currentView != 17)
@@ -3735,6 +3760,9 @@ void loop()
                      if (blushState == BlushState::Inactive)
                      { // Only trigger if not already blushing
                        LOG_DEBUG_LN("Proximity! Also triggering blush effect on Circle Eyes.");
+#if DEBUG_PROXIMITY
+                       LOG_PROX("Blush-on-bounce prox=%u\n", proximity);
+#endif
                        blushState = BlushState::FadeIn;
                        blushStateStartTime = sensorNow;
                        wasBlushOverlay = false;                       // Blush on view 17 is part of that view's temporary effect
@@ -3742,7 +3770,7 @@ void loop()
                      }
                    }
 
-                   if (proximity >= 15 && blushState == BlushState::Inactive && !bounceJustTriggered)
+                   if (proximity >= PROX_THRESHOLD && blushState == BlushState::Inactive && !bounceJustTriggered)
                    {
                      // Trigger blush if:
                      // 1. Proximity detected
@@ -3753,6 +3781,9 @@ void loop()
                      if (currentView != 5 && currentView != 17)
                      {
                        LOG_DEBUG_LN("Proximity! Triggering blush overlay effect.");
+#if DEBUG_PROXIMITY
+                       LOG_PROX("Blush overlay prox=%u view=%d\n", proximity, currentView);
+#endif
                        blushState = BlushState::FadeIn;
                        blushStateStartTime = sensorNow;
                        lastActivityTime = sensorNow;
@@ -3834,7 +3865,7 @@ void loop()
   runIfElapsed(loopNow, lastSleepCheckTime, SLEEP_CHECK_INTERVAL_MS, [&]()
                {
                  PROFILE_SECTION("SleepModeCheck");
-                 checkSleepMode(loopNow);
+                 checkSleepMode();
                });
 
   // Check for changes in brightness

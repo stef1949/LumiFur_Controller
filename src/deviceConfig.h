@@ -59,6 +59,9 @@
   #define BUTTON_UP 6
   #define BUTTON_DOWN 7
   #include <Wire.h>                 // For I2C sensors
+  // STEMMA QT / APDS9960 I2C pins on MatrixPortal S3
+  #define APDS_SDA_PIN 41
+  #define APDS_SCL_PIN 40
   //#include <SPI.h>                  // For SPI sensors
   #include "Adafruit_APDS9960.h"    // Library for built-in gesture sensor
   //the pin that the interrupt is attached to
