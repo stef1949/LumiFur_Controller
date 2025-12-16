@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LumiFur Firmware Updater</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>LumiFur Firmware Updater</h1>
+    <p class="lede">Update your LumiFur Controller over Bluetooth Low Energy (BLE) using a Web Bluetooth–enabled browser.</p>
+  </header>
+
+  <main>
+    <section class="card">
+      <h2>1. Prepare</h2>
+      <ul>
+        <li>Use Chrome, Edge, or another browser that supports Web Bluetooth.</li>
+        <li>Power on your LumiFur controller and make sure Bluetooth is enabled.</li>
+        <li>Have the compiled firmware <code>.bin</code> file ready.</li>
+      </ul>
+    </section>
+
+    <section class="card grid">
+      <div>
+        <h2>2. Connect</h2>
+        <p>Connect to the LumiFur controller's BLE service.</p>
+        <button id="connect-btn">Connect</button>
+        <dl class="meta">
+          <div>
+            <dt>Status</dt>
+            <dd id="connection-status">Disconnected</dd>
+          </div>
+          <div>
+            <dt>Device</dt>
+            <dd id="device-name">—</dd>
+          </div>
+        </dl>
+      </div>
+
+      <div>
+        <h2>3. Select Firmware</h2>
+        <p>Choose the firmware binary to send to the device.</p>
+        <label class="file-picker">
+          <input type="file" id="firmware-file" accept=".bin" />
+          <span id="file-label">Choose .bin file</span>
+        </label>
+        <p class="helper" id="file-helper">No file selected</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="upload-header">
+        <div>
+          <h2>4. Upload</h2>
+          <p>Start the over-the-air (OTA) update. Keep the page open until completion.</p>
+        </div>
+        <button id="upload-btn" disabled>Upload Firmware</button>
+      </div>
+
+      <div class="progress" aria-live="polite">
+        <div id="progress-bar"></div>
+        <span id="progress-label">Waiting to start…</span>
+      </div>
+
+      <div class="log" id="log" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Need help? Ensure the device advertises the <code>01931c44-3867-7740-9867-c822cb7df308</code> service and move closer to your computer if the connection is unstable.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

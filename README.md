@@ -23,6 +23,7 @@ A real-time firmware for animating a HUB75 LED matrix Protogen mask with sensor-
 - 🤖 [GitHub Copilot Integration](#github-copilot-integration)
 - 🤝 [Contributing](#contributing)
 - 📜 [License](#license)
+- 🌐 [Web Firmware Updater](#web-firmware-updater)
 
 ## Features
 - 20+ animated faces and effects including plasma, flame, fluid, circle eyes, spiral overlays, starfields, and scrolling text purpose-built for dual 64×32 HUB75 panels.
@@ -77,6 +78,11 @@ Additional PlatformIO environments are defined in `platformio.ini`, including a 
 - Run the GoogleTest suite with coverage via `pio test -e codeql`.
 - Execute Unity-based module tests with `pio test -e native2`.
 - Coverage reports and additional tooling scripts are located under `test/` and `test/test_coverage/`.
+- Lightweight smoke tests for the Web Bluetooth firmware updater can run without PlatformIO: `python -m unittest discover docs/firmware-updater/tests`.
+
+## Web Firmware Updater
+- A browser-based OTA helper lives at `docs/firmware-updater/index.html`. Serve the folder over HTTPS or `http://localhost` (for example, `python -m http.server 8000` from the repo root) because Web Bluetooth is blocked on `file://` origins. Open the page in a supported browser (Chrome or Edge), click **Connect** to choose your LumiFur controller, select a compiled `.bin` firmware file, and press **Upload Firmware** to stream it over the OTA characteristic (`01931c44-3867-7427-96ab-8d7ac0ae09ee`).
+- Keep the page open during transfer; the device will reboot automatically after the update finishes.
 
 ## GitHub Copilot Integration
 Developer onboarding guides for GitHub Copilot live in `docs/COPILOT_SETUP.md` and `docs/COPILOT_USAGE.md`, with tailored instructions for embedded patterns, animation workflows, and testing expectations.

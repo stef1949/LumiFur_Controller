@@ -25,9 +25,9 @@
 #define BAUD_RATE 115200 // serial debug port baud rate
 // #define CONFIG_BT_NIMBLE_PINNED_TO_CORE 1 // Pinning NimBLE to core 1
 
-
 // Enum for all available views. This allows for automatic counting.
-enum View {
+enum View
+{
   VIEW_DEBUG_SQUARES,
   VIEW_LOADING_BAR,
   VIEW_PATTERN_PLASMA,
@@ -49,10 +49,12 @@ enum View {
   VIEW_FULLSCREEN_SPIRAL_PALETTE,
   VIEW_FULLSCREEN_SPIRAL_WHITE,
   VIEW_SCROLLING_TEXT,
-  
+  VIEW_PIXEL_DUST,
+  VIEW_STATIC_COLOR,
+
   // This special entry will automatically hold the total number of views.
   // It must always be the last item in the enum.
-  TOTAL_VIEWS 
+  TOTAL_VIEWS
 };
 
 // Global variables to store the accessory settings.
@@ -60,15 +62,17 @@ bool autoBrightnessEnabled = true;
 bool accelerometerEnabled = true;
 bool sleepModeEnabled = true;
 bool auroraModeEnabled = true;
+bool staticColorModeEnabled = false;
 bool constantColorConfig = false;
 CRGB constantColor = CRGB::Green; // Default color for constant color mode
+void ensureStaticColorLoaded();
+CRGB getStaticColorCached();
 // Config variables ------------------------------------------------
 bool configApplyAutoBrightness = true; // Variable to track auto brightness application
 bool configApplySleepMode = false;
 bool configApplyAuroraMode = false;
 bool configApplyAccelerometer = true;
 bool configApplyConstantColor = false; // Variable to track constant color application
-
 
 /*------------------------------------------------------------------------------
   OTA instances & variables
@@ -80,17 +84,28 @@ uint8_t txValue = 0;
 int bufferCount = 0;
 bool downloadFlag = false;
 
-
 ////////////////////// DEBUG MODE //////////////////////
-#define DEBUG_MODE 1 // Set to 1 to enable debug outputs
-#define DEBUG_MICROPHONE 0 // Set to 1 to enable microphone debug outputs
+#define DEBUG_MODE 0          // Set to 1 to enable debug outputs
+#define DEBUG_MICROPHONE 0    // Set to 1 to enable microphone debug outputs
 #define DEBUG_ACCELEROMETER 0 // Set to 1 to enable accelerometer debug outputs
-#define DEBUG_BRIGHTNESS 0 // Set to 1 to enable brightness debug outputs
+#define DEBUG_BRIGHTNESS 0    // Set to 1 to enable brightness debug outputs
+#define DEBUG_VIEWS 0         // Set to 1 to enable views debug outputs
+#define DEBUG_VIEW_TIMING 0         // Set to 1 to enable views debug outputs
+#define DEBUG_FPS_COUNTER 0         // Set to 1 to enable FPS counter debug outputs
+#define DEBUG_PROXIMITY 0     // Set to 1 to enable proximity sensor debug logs
 #if DEBUG_MODE
 #define DEBUG_BLE
-#define DEBUG_VIEWS
+// #define DEBUG_VIEWS
 #endif
 ////////////////////////////////////////////////////////
+
+#if DEBUG_PROXIMITY
+#define LOG_PROX(...) Serial.printf(__VA_ARGS__)
+#define LOG_PROX_LN(msg) Serial.println(msg)
+#else
+#define LOG_PROX(...) do { } while (0)
+#define LOG_PROX_LN(msg) do { } while (0)
+#endif
 
 // Button config --------------------------------------------------------------
 bool debounceButton(int pin)
@@ -123,8 +138,10 @@ float easeInQuad(float t)
 // Easing functions with bounds checking
 float easeInQuad(float t)
 {
-  if (t < 0.0f) return 0.0f;
-  if (t > 1.0f) return 1.0f;
+  if (t < 0.0f)
+    return 0.0f;
+  if (t > 1.0f)
+    return 1.0f;
   return t * t;
 }
 
@@ -137,8 +154,10 @@ float easeOutQuad(float t)
 
 float easeOutQuad(float t)
 {
-  if (t < 0.0f) return 0.0f;
-  if (t > 1.0f) return 1.0f;
+  if (t < 0.0f)
+    return 0.0f;
+  if (t > 1.0f)
+    return 1.0f;
   return 1.0f - (1.0f - t) * (1.0f - t);
 }
 // non-blocking LED status functions (Neopixel)
@@ -218,10 +237,13 @@ Adafruit_LIS3DH accel;
 
 // Sundry globals used for animation ---------------------------------------
 
+// Scrolling text sundries
 int16_t textX;   // Current text position (X)
 int16_t textY;   // Current text position (Y)
 int16_t textMin; // Text pos. (X) when scrolled off left edge
-char txt[64];    // Buffer to hold scrolling message text
+extern char txt[64];    // Buffer to hold scrolling message text
+extern void initializeScrollingText(); // Exposes function
+
 int16_t ball[3][4] = {
     {3, 0, 1, 1}, // Initial X,Y pos+velocity of 3 bouncy balls
     {17, 15, 1, -1},
@@ -259,31 +281,71 @@ const unsigned long ambientUpdateInterval = 500; // update every 500 millisecond
 uint8_t adaptiveBrightness = userBrightness;     // current brightness used by the system
 uint8_t targetBrightness = userBrightness;       // target brightness for adaptive adjustment
 
+// APDS9960 runtime state
+bool apdsInitialized = false;
+bool apdsFaulted = false;
+volatile bool apdsProximityInterruptFlag = false;
+unsigned long lastApdsProximityCheck = 0;
+constexpr unsigned long APDS_PROX_FALLBACK_MS = 750; // Slow fallback poll when no interrupt
+constexpr unsigned long APDS_PROX_CACHE_MS = 50;     // Minimum spacing between proximity fetches
+
 // float ambientLux = 0.0;
 static uint16_t lastKnownClearValue = 0; // Initialize to a sensible default
 float smoothedLux = 50.0f;
-const float luxSmoothingFactor = 0.15f; // Adjust between 0.05 - 0.3
-float currentBrightness = 128.0f; // NEW: Current brightness as a float for smoothing
+const float luxSmoothingFactor = 0.15f;        // Adjust between 0.05 - 0.3
+float currentBrightness = 128.0f;              // NEW: Current brightness as a float for smoothing
 const float brightnessSmoothingFactor = 0.05f; // NEW: How quickly brightness adapts (0.01-0.1)
 int lastBrightness = 0;
 const int brightnessThreshold = 3; // Only update if change > X
 unsigned long lastLuxUpdate = 0;
-const unsigned long luxUpdateInterval = 100;  // NEW: every 100 milliseconds (10Hz) - ADJUST THIS!
+const unsigned long luxUpdateInterval = 250; // Reduce read frequency to ease I2C contention
+
+#if defined(APDS_AVAILABLE)
+void IRAM_ATTR onApdsInterrupt()
+{
+  apdsProximityInterruptFlag = true;
+}
+#endif
 
 void setupAdaptiveBrightness()
 {
-  // Initialize APDS9960 proximity sensor if found
+#if defined(APDS_AVAILABLE)
+  // Ensure I2C is up on the STEMMA QT pins (MatrixPortal S3: SDA=20, SCL=19)
+  Wire.begin(APDS_SDA_PIN, APDS_SCL_PIN);
+  Wire.setClock(400000); // Fast-mode for APDS9960
+  LOG_PROX_LN("APDS init: starting Wire and begin()");
+
   if (!apds.begin())
   {
     Serial.println("failed to initialize proximity sensor! Please check your wiring.");
-    while (1)
-      ;
+    LOG_PROX_LN("APDS init: begin() failed");
+    apdsFaulted = true;
+    apdsInitialized = false;
+    autoBrightnessEnabled = false; // Fail gracefully: keep rendering with manual brightness
+    return;
   }
+
+  apdsInitialized = true;
+  apdsFaulted = false;
   Serial.println("Proximity sensor initialized!");
+  LOG_PROX_LN("APDS init: begin() succeeded");
+  // Boost sensitivity for proximity and color for auto-brightness
+  apds.setProxGain(APDS9960_PGAIN_8X);
+  //apds.setLEDDrive(APDS9960_LEDDRIVE_100MA);
+  apds.setADCIntegrationTime(49); // ~50ms
+  //apds.setADCGain(APDS9960_AGAIN_8X);
   apds.enableProximity(true);                  // enable proximity mode
   apds.enableColor(true);                      // enable color mode
   apds.setProximityInterruptThreshold(0, 175); // set the interrupt threshold to fire when proximity reading goes above 175
   apds.enableProximityInterrupt();
+#ifdef APDS_INT_PIN
+  pinMode(APDS_INT_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(APDS_INT_PIN), onApdsInterrupt, FALLING);
+#endif
+#else
+  (void)apdsFaulted;
+  (void)apdsInitialized;
+#endif
 }
 
 // Setup functions for adaptive brightness & proximity sensing using APDS9960:
@@ -292,18 +354,23 @@ uint16_t getRawClearChannelValue()
   static unsigned long lastLogTime = 0;
   const unsigned long logInterval = 500; // Log 2 times per second
 
+  if (!apdsInitialized)
+  {
+    return lastKnownClearValue;
+  }
+
   if (apds.colorDataReady())
   {
     uint16_t r, g, b, c;
     apds.getColorData(&r, &g, &b, &c);
 
-    #if DEBUG_BRIGHTNESS
+#if DEBUG_BRIGHTNESS
     Serial.print("Ambient light level (clear channel): ");
     lastKnownClearValue = c;
     Serial.println(c);
-    #else
+#else
     lastKnownClearValue = c; // Update last known good value
-    #endif
+#endif
     return c; // Return the raw clear channel value
   }
   else
@@ -318,13 +385,23 @@ void updateAdaptiveBrightness()
   if (!autoBrightnessEnabled)
   {
     // Only set brightness if it has changed to avoid unnecessary calls
-    if (lastBrightness != userBrightness) {
+    if (lastBrightness != userBrightness)
+    {
       dma_display->setBrightness8(userBrightness);
       lastBrightness = userBrightness;
 #ifdef DEBUG_BRIGHTNESS
       Serial.printf(">>>> MANUAL: BRIGHTNESS SET TO %d <<<<\n", userBrightness);
 #endif
     }
+    return;
+  }
+
+  if (!apdsInitialized || apdsFaulted)
+  {
+    // Sensor unavailable: fall back to manual brightness without blocking FPS
+    autoBrightnessEnabled = false;
+    dma_display->setBrightness8(userBrightness);
+    lastBrightness = userBrightness;
     return;
   }
 
@@ -336,11 +413,31 @@ void updateAdaptiveBrightness()
 
   // --- CRITICAL CALIBRATION SECTION ---
 
-  const int min_brightness_output = userBrightness;   // Fall back to user-set brightness when dark
+  const int min_brightness_output = 80;   // Fall back to user-set brightness when dark NOTE: use  userBrightness to revert to user setting
   const int max_brightness_output = 255;  // Preserve full-range capability
-  const float min_clear_for_map = 150.0f;  // Adjusted dark threshold
-  const float max_clear_for_map = 1200.0f; // Adjusted bright threshold
+  const float min_clear_for_map = 2.0f;  // Adjusted dark threshold
+  const float max_clear_for_map = 50.0f; // Adjusted bright threshold
                                     // OBSERVE rawClearValue via Serial.print to refine these.
+
+   // ADJUST THESE VALUES:
+  // For earlier dimming (dims in brighter conditions):
+  // const float min_clear_for_map = 200.0f;           // Higher value = starts dimming earlier
+  
+  // For later dimming (only dims in very dark conditions):
+  // const float min_clear_for_map = 20.0f;            // Lower value = only dims when very dark
+  
+  // For reaching full brightness sooner (in less bright conditions):
+  // const float max_clear_for_map = 800.0f;           // Lower value = reaches max brightness sooner
+  
+  // For reaching full brightness later (only in very bright conditions):
+  // const float max_clear_for_map = 2000.0f;          // Higher value = needs more light for full brightness
+  
+  // For different minimum brightness level:
+  // const int min_brightness_output = 30;             // Fixed minimum instead of user brightness
+  
+  // For different maximum brightness level:
+  // const int max_brightness_output = 200;            // Cap maximum brightness below 255
+
   // --- END CRITICAL CALIBRATION SECTION ---
 
   long targetBrightnessLong = map(static_cast<long>(smoothedLux),
@@ -350,26 +447,26 @@ void updateAdaptiveBrightness()
                                   max_brightness_output);
   int targetBrightnessCalc = constrain(static_cast<int>(targetBrightnessLong), min_brightness_output, max_brightness_output);
 
-  #if DEBUG_BRIGHTNESS
+#if DEBUG_BRIGHTNESS
   Serial.printf("ADAPT: RawC=%u, SmoothC=%.1f, TargetBr=%d, LastBr=%d, Thr=%d\n",
                 rawClearValue, smoothedLux, targetBrightnessCalc, lastBrightness, brightnessThreshold); // Corrected variable name
-  #endif
+#endif
   if (abs(targetBrightnessCalc - lastBrightness) >= brightnessThreshold)
   {
     uint8_t currentBrightness = static_cast<uint8_t>(targetBrightnessCalc);
     dma_display->setBrightness8(currentBrightness);
     updateGlobalBrightnessScale(currentBrightness);
     lastBrightness = targetBrightnessCalc; // Update lastBrightness ONLY when a display change is made
-    #if DEBUG_BRIGHTNESS
+#if DEBUG_BRIGHTNESS
     Serial.printf(">>>> ADAPT: BRIGHTNESS SET TO %d <<<<\n", targetBrightnessCalc);
-    #endif
+#endif
   }
   else
   {
     // Change is below threshold: keep the previously applied brightness (no-op)
     // No action needed; brightness remains unchanged.
     // lastBrightness remains unchanged because we didn't apply a new value
-#ifdef DEBUG_BRIGHTNESS
+#if DEBUG_BRIGHTNESS
     Serial.printf(">>>> ADAPT: BRIGHTNESS KEPT AT %d <<<<\n", lastBrightness);
 #endif
   }
@@ -384,6 +481,60 @@ void maybeUpdateBrightness()
     updateAdaptiveBrightness();
     lastLuxUpdate = millis();
   }
+}
+
+inline bool hasElapsedSince(unsigned long now, unsigned long last, unsigned long interval)
+{
+  return static_cast<unsigned long>(now - last) >= interval;
+}
+
+inline void markApdsFault()
+{
+  apdsFaulted = true;
+  apdsInitialized = false;
+}
+
+bool shouldReadProximity(unsigned long now)
+{
+#if defined(APDS_AVAILABLE)
+  // If the sensor never came up at boot, try once on demand.
+  if (!apdsInitialized && !apdsFaulted)
+  {
+    apdsInitialized = apds.begin();
+    apdsFaulted = !apdsInitialized;
+    if (apdsInitialized)
+    {
+      apds.enableProximity(true);
+      apds.enableColor(true);
+      apds.setProximityInterruptThreshold(0, 175);
+      apds.enableProximityInterrupt();
+      LOG_PROX_LN("APDS lazy init: begin() succeeded");
+    }
+    else
+    {
+      LOG_PROX_LN("APDS lazy init: begin() failed");
+      markApdsFault();
+    }
+  }
+
+  if (!apdsInitialized || apdsFaulted)
+  {
+    LOG_PROX_LN("APDS not initialized or faulted; skipping proximity read");
+    return false;
+  }
+
+  if (now - lastApdsProximityCheck < APDS_PROX_CACHE_MS)
+  {
+    return false; // Avoid back-to-back reads
+  }
+
+  lastApdsProximityCheck = now;
+
+  return true;
+#else
+  (void)now;
+  return false;
+#endif
 }
 
 constexpr std::size_t color_num = 5;
@@ -450,34 +601,31 @@ void applyConfigOptions()
     configApplySleepMode = false; // Ensure the device remains awake when sleep mode is disabled.
   }
 
-  if (auroraModeEnabled)
+  if (staticColorModeEnabled)
   {
-    Serial.println("Aurora mode enabled: switching to aurora palette.");
-    // Assume auroraPalette and defaultPalette are defined globally.
-    // currentPalette = auroraPalette;
-    configApplyAuroraMode = true;
-  }
-  else
-  {
-    Serial.println("Aurora mode disabled: using default palette.");
-    // currentPalette = defaultPalette;
+    Serial.println("Static color mode enabled: using user-selected color.");
+    constantColor = getStaticColorCached();
+    constantColorConfig = true;
+    configApplyConstantColor = true;
     configApplyAuroraMode = false;
   }
-
-  if (constantColorConfig)
-  {
-    Serial.println("Constant color mode enabled.");
-    uint8_t r = 255, g = 255, b = 255; // Example default values for red, green, and blue
-    uint16_t rgb565 = dma_display->color565(constantColor.r, constantColor.g, constantColor.b);
-    dma_display->fillScreen(rgb565);
-    dma_display->flipDMABuffer();
-    bool configApplyConstantColor = true;
-  }
   else
   {
-    Serial.println("Constant color mode disabled.");
-    // Reset the display to the previous state or palette.
-    bool configApplyConstantColor = false;
+    constantColorConfig = false;
+    configApplyConstantColor = false;
+    if (auroraModeEnabled)
+    {
+      Serial.println("Aurora mode enabled: switching to aurora palette.");
+      // Assume auroraPalette and defaultPalette are defined globally.
+      // currentPalette = auroraPalette;
+      configApplyAuroraMode = true;
+    }
+    else
+    {
+      Serial.println("Aurora mode disabled: using default palette.");
+      // currentPalette = defaultPalette;
+      configApplyAuroraMode = false;
+    }
   }
 }
 
@@ -527,4 +675,3 @@ int dvdVX2 = 1, dvdVY2 = 1;
 uint16_t dvdColor2;
 
 #endif /* MAIN_H */
-

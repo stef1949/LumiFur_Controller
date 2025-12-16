@@ -1,0 +1,280 @@
+name: Build Firmware Artifacts
+
+on:
+  push:
+    branches: [ "main" ]
+    tags: [ "v*" ]
+  pull_request:
+    branches: [ "main" ]
+  release:
+    types: [published]
+
+jobs:
+  build-firmware:
+    name: Build Firmware for ${{ matrix.environment }}
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        environment:
+          - adafruit_matrixportal_esp32s3
+         # - esp32dev
+          - dev
+        
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for git describe
+          
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+          
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ~/.platformio/.cache
+          key: ${{ runner.os }}-pio-${{ hashFiles('**/platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
+            
+      - name: Install PlatformIO
+        run: |
+          pip install --upgrade platformio
+          
+      - name: Install dependencies
+        run: |
+          pip install intelhex
+          
+      - name: Build firmware
+        run: |
+          echo "Building firmware for environment: ${{ matrix.environment }}"
+          echo "PlatformIO version:"
+          pio --version
+          echo "Available environments:"
+          pio project config --json-output | grep -o '"env:[^"]*"' || true
+          echo "Starting build..."
+          pio run -e ${{ matrix.environment }} --verbose
+          
+      - name: Prepare firmware artifacts
+        run: |
+          # Create artifacts directory
+          mkdir -p firmware-artifacts/${{ matrix.environment }}
+          
+          # Set build directory path
+          BUILD_DIR=".pio/build/${{ matrix.environment }}"
+          ARTIFACTS_DIR="firmware-artifacts/${{ matrix.environment }}"
+          
+          echo "Checking build directory: $BUILD_DIR"
+          if [ ! -d "$BUILD_DIR" ]; then
+            echo "❌ Build directory not found: $BUILD_DIR"
+            ls -la .pio/build/ || echo "No .pio/build directory found"
+            exit 1
+          fi
+          
+          echo "Build directory contents:"
+          ls -la "$BUILD_DIR"
+          
+          # Copy firmware files if they exist
+          FILES_COPIED=0
+          
+          if [ -f "$BUILD_DIR/firmware.bin" ]; then
+            cp "$BUILD_DIR/firmware.bin" "$ARTIFACTS_DIR/"
+            echo "✓ firmware.bin copied"
+            FILES_COPIED=$((FILES_COPIED + 1))
+          else
+            echo "⚠️ firmware.bin not found in $BUILD_DIR"
+          fi
+          
+          if [ -f "$BUILD_DIR/partitions.bin" ]; then
+            cp "$BUILD_DIR/partitions.bin" "$ARTIFACTS_DIR/"
+            echo "✓ partitions.bin copied"
+            FILES_COPIED=$((FILES_COPIED + 1))
+          else
+            echo "⚠️ partitions.bin not found in $BUILD_DIR"
+          fi
+          
+          if [ -f "$BUILD_DIR/bootloader.bin" ]; then
+            cp "$BUILD_DIR/bootloader.bin" "$ARTIFACTS_DIR/"
+            echo "✓ bootloader.bin copied"
+            FILES_COPIED=$((FILES_COPIED + 1))
+          else
+            echo "⚠️ bootloader.bin not found in $BUILD_DIR"
+          fi
+          
+          # Also copy any .elf files for debugging
+          if [ -f "$BUILD_DIR/firmware.elf" ]; then
+            cp "$BUILD_DIR/firmware.elf" "$ARTIFACTS_DIR/"
+            echo "✓ firmware.elf copied"
+            FILES_COPIED=$((FILES_COPIED + 1))
+          else
+            echo "⚠️ firmware.elf not found in $BUILD_DIR"
+          fi
+          
+          # Look for other common ESP32 firmware files
+          for file in "$BUILD_DIR"/*.bin; do
+            if [ -f "$file" ]; then
+              filename=$(basename "$file")
+              if [ "$filename" != "firmware.bin" ] && [ "$filename" != "partitions.bin" ] && [ "$filename" != "bootloader.bin" ]; then
+                cp "$file" "$ARTIFACTS_DIR/"
+                echo "✓ Additional binary copied: $filename"
+                FILES_COPIED=$((FILES_COPIED + 1))
+              fi
+            fi
+          done
+          
+          if [ $FILES_COPIED -eq 0 ]; then
+            echo "❌ No firmware files were found to copy!"
+            echo "Available files in build directory:"
+            find "$BUILD_DIR" -type f -name "*.bin" -o -name "*.elf" | head -10
+            exit 1
+          fi
+          
+          # Create a build info file
+          echo "Build Information:" > "$ARTIFACTS_DIR/build-info.txt"
+          echo "Environment: ${{ matrix.environment }}" >> "$ARTIFACTS_DIR/build-info.txt"
+          echo "Git Commit: $(git rev-parse --short HEAD)" >> "$ARTIFACTS_DIR/build-info.txt"
+          echo "Git Branch: $(git rev-parse --abbrev-ref HEAD)" >> "$ARTIFACTS_DIR/build-info.txt"
+          echo "Git Tag: $(git describe --tags --always)" >> "$ARTIFACTS_DIR/build-info.txt"
+          echo "Build Date: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> "$ARTIFACTS_DIR/build-info.txt"
+          echo "Runner: ${{ runner.os }}" >> "$ARTIFACTS_DIR/build-info.txt"
+          echo "Files Copied: $FILES_COPIED" >> "$ARTIFACTS_DIR/build-info.txt"
+          
+          # List created files
+          echo "Created firmware artifacts:"
+          ls -la "$ARTIFACTS_DIR"
+          
+      - name: Upload firmware artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.environment }}
+          path: firmware-artifacts/${{ matrix.environment }}/
+          retention-days: 90
+
+  create-release-bundle:
+    name: Create Release Bundle
+    needs: build-firmware
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Download all firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: all-firmware/
+          
+      - name: Create release bundle
+        run: |
+          # Create release directory structure
+          mkdir -p release-bundle
+          
+          # Process each environment's artifacts
+          for env_dir in all-firmware/firmware-*; do
+            if [ -d "$env_dir" ]; then
+              env_name=$(basename "$env_dir" | sed 's/firmware-//')
+              echo "Processing $env_name artifacts..."
+              
+              # Create environment subdirectory in release bundle
+              mkdir -p "release-bundle/$env_name"
+              
+              # Copy all files from environment artifact
+              cp -r "$env_dir"/* "release-bundle/$env_name/"
+            fi
+          done
+          
+          # Create a master build info file
+          echo "LumiFur Controller Firmware Release" > release-bundle/README.txt
+          echo "====================================" >> release-bundle/README.txt
+          echo "" >> release-bundle/README.txt
+          echo "Release: ${GITHUB_REF_NAME}" >> release-bundle/README.txt
+          echo "Built: $(date -u +'%Y-%m-%d %H:%M:%S UTC')" >> release-bundle/README.txt
+          echo "Commit: $(git rev-parse --short HEAD)" >> release-bundle/README.txt
+          echo "" >> release-bundle/README.txt
+          echo "Available Environments:" >> release-bundle/README.txt
+          for env_dir in release-bundle/*/; do
+            if [ -d "$env_dir" ]; then
+              env_name=$(basename "$env_dir")
+              echo "- $env_name" >> release-bundle/README.txt
+            fi
+          done
+          echo "" >> release-bundle/README.txt
+          echo "Files in each environment:" >> release-bundle/README.txt
+          echo "- firmware.bin:    Main application firmware" >> release-bundle/README.txt
+          echo "- partitions.bin:  Partition table for OTA updates" >> release-bundle/README.txt
+          echo "- bootloader.bin:  ESP32 bootloader" >> release-bundle/README.txt
+          echo "- firmware.elf:    Debug symbols (if available)" >> release-bundle/README.txt
+          echo "- build-info.txt:  Build metadata" >> release-bundle/README.txt
+          
+          # Show final structure
+          echo "Release bundle structure:"
+          find release-bundle -type f | sort
+          
+      - name: Create release archive
+        run: |
+          cd release-bundle
+          tar -czf ../lumifur-firmware-${GITHUB_REF_NAME}.tar.gz *
+          cd ..
+          zip -r lumifur-firmware-${GITHUB_REF_NAME}.zip release-bundle/
+          
+          # Show archive info
+          echo "Created archives:"
+          ls -la lumifur-firmware-${GITHUB_REF_NAME}.*
+          
+      - name: Upload release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: lumifur-firmware-release-${{ github.ref_name }}
+          path: |
+            lumifur-firmware-*.tar.gz
+            lumifur-firmware-*.zip
+          retention-days: 365
+
+  # Optional: Auto-attach to GitHub Release if this is a release event
+  attach-to-release:
+    name: Attach to GitHub Release  
+    needs: create-release-bundle
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    
+    steps:
+      - name: Download release bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: lumifur-firmware-release-${{ github.ref_name }}
+          
+      - name: Attach to release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            lumifur-firmware-*.tar.gz
+            lumifur-firmware-*.zip
+          body: |
+            ## Firmware Artifacts
+            
+            This release includes pre-built firmware for the following environments:
+            - `adafruit_matrixportal_esp32s3` - Primary target (Adafruit MatrixPortal ESP32-S3)
+            - `esp32dev` - Generic ESP32 development boards
+            - `dev` - Development build with extra instrumentation
+            
+            Each environment folder contains:
+            - `firmware.bin` - Main application firmware for OTA updates
+            - `partitions.bin` - Partition table required for OTA functionality
+            - `bootloader.bin` - ESP32 bootloader binary
+            - `firmware.elf` - Debug symbols (if available)
+            - `build-info.txt` - Build metadata and version information
+            
+            ## Installation
+            
+            For OTA updates, use `firmware.bin` and `partitions.bin`.
+            For complete flashing, use all three .bin files.
+            
+            Refer to the [README](https://github.com/stef1949/LumiFur_Controller#build--flash) for detailed installation instructions.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
