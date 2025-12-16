@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'docs/firmware-updater/**'
+      - 'firmware-updater/**'
       - '.github/workflows/deploy-web-updater.yml'
   workflow_dispatch:
 
@@ -24,13 +25,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Locate firmware updater directory
+        id: updater-dir
+        shell: bash
+        run: |
+          if [ -d "docs/firmware-updater" ]; then
+            echo "path=docs/firmware-updater" >> "$GITHUB_OUTPUT"
+          elif [ -d "firmware-updater" ]; then
+            echo "path=firmware-updater" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Firmware updater directory not found. Expected docs/firmware-updater or firmware-updater"
+            exit 1
+          fi
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
       - name: Upload firmware updater artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/firmware-updater
+          path: ${{ steps.updater-dir.outputs.path }}
 
   deploy:
     needs: build
