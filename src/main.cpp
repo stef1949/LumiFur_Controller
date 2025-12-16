@@ -153,12 +153,12 @@ unsigned long &mawChangeTime = gAnimationState.mawChangeTime;
 bool &mawTemporaryChange = gAnimationState.mawTemporaryChange;
 bool &mouthOpen = gAnimationState.mouthOpen;
 unsigned long &lastMouthTriggerTime = gAnimationState.lastMouthTriggerTime;
-BlushState &blushState = gAnimationState.blushState;
-unsigned long &blushStateStartTime = gAnimationState.blushStateStartTime;
+volatile BlushState &blushState = gAnimationState.blushState;
+volatile unsigned long &blushStateStartTime = gAnimationState.blushStateStartTime;
 bool &isBlushFadingIn = gAnimationState.isBlushFadingIn;
 uint8_t &originalViewBeforeBlush = gAnimationState.originalViewBeforeBlush;
 bool &wasBlushOverlay = gAnimationState.wasBlushOverlay;
-uint8_t &blushBrightness = gAnimationState.blushBrightness;
+volatile uint8_t &blushBrightness = gAnimationState.blushBrightness;
 
 float globalBrightnessScale = 0.0f;
 uint16_t globalBrightnessScaleFixed = 256;
@@ -346,6 +346,9 @@ const unsigned long fadeOutDuration = 2000; // Duration for fade-out (2 seconds)
 // Non-blocking sensor read interval
 unsigned long lastSensorReadTime = 0;
 const unsigned long sensorInterval = 250; // sensor read throttled to reduce I2C pressure
+constexpr uint8_t PROX_TRIGGER_THRESHOLD = 20; // Minimum reading to trigger effects
+constexpr uint8_t PROX_RELEASE_THRESHOLD = 10; // Reading that counts as hand removed
+static bool proximityLatchedHigh = false;      // Prevents retriggering until sensor settles
 
 // Variables for plasma effect
 uint16_t time_counter = 0, cycles = 0, fps = 0;
@@ -3647,12 +3650,21 @@ void loop()
         currentView = 0;
       viewChangedByButton = true;
       saveLastView(currentView);
-      lastActivityTime = millis();
+      lastActivityTime = loopNow;
     }
+
     if (debounceButton(BUTTON_DOWN))
     {
       PROFILE_SECTION("ButtonInputs");
-      static bool viewChangedByButton = false;
+      currentView = (currentView - 1);
+      if (currentView < 0)
+      {
+        currentView = totalViews - 1;
+      }
+      viewChangedByButton = true;
+      saveLastView(currentView);
+      lastActivityTime = loopNow;
+    }
 
     if (viewChangedByButton)
     {
@@ -3665,32 +3677,9 @@ void loop()
         blushBrightness = 0;
         // disableBlush(); // Clears pixels, but displayCurrentView will clear anyway
       }
-      if (debounceButton(BUTTON_DOWN))
-      {
-        currentView = (currentView - 1);
-        if (currentView < 0)
-          currentView = totalViews - 1;
-        viewChangedByButton = true;
-        saveLastView(currentView);
-        lastActivityTime = loopNow;
-      }
-
-      if (viewChangedByButton)
-      {
-        LOG_DEBUG("View changed by button: %d\n", currentView);
-        notifyBleTask();
-        // Reset specific view states if necessary when changing views
-        if (currentView != 5)
-        { // If leaving blush view
-          blushState = BlushState::Inactive;
-          blushBrightness = 0;
-          // disableBlush(); // Clears pixels, but displayCurrentView will clear anyway
-        }
-        if (currentView != 9)
-        { // Reset spiral timer
-          spiralStartMillis = 0;
-        }
-        viewChangedByButton = false; // Reset flag
+      if (currentView != 9)
+      { // Reset spiral timer
+        spiralStartMillis = 0;
       }
     }
 #endif
@@ -3730,10 +3719,34 @@ void loop()
 
                    bool bounceJustTriggered = false; // Flag to avoid double blush trigger
 
-                   // Eye Bounce Trigger - Switch to View 17 (Circle Eyes) (MODIFIED)
-                   const uint8_t PROX_THRESHOLD = 5; // Lowered threshold for more reliable trigger
+                   // Require the reading to rise above the trigger threshold and then fall below the release threshold before re-triggering
+                   if (proximityLatchedHigh)
+                   {
+                     if (proximity <= PROX_RELEASE_THRESHOLD)
+                     {
+                       proximityLatchedHigh = false;
+#if DEBUG_PROXIMITY
+                       LOG_PROX("Prox released at %u\n", proximity);
+#endif
+                     }
+                     else
+                     {
+#if DEBUG_PROXIMITY
+                       LOG_PROX("Prox latched high (%u), skipping trigger\n", proximity);
+#endif
+                       return;
+                     }
+                   }
 
-                   if (proximity >= PROX_THRESHOLD && !isEyeBouncing && currentView != 16)
+                   if (proximity < PROX_TRIGGER_THRESHOLD)
+                   {
+                     return;
+                   }
+
+                   proximityLatchedHigh = true;
+
+                   // Eye Bounce Trigger - Switch to View 17 (Circle Eyes) (MODIFIED)
+                   if (!isEyeBouncing && currentView != 16)
                    {
                      LOG_DEBUG_LN("Proximity! Starting eye bounce sequence & switching to Circle Eyes (View 17).");
 #if DEBUG_PROXIMITY
@@ -3770,7 +3783,7 @@ void loop()
                      }
                    }
 
-                   if (proximity >= PROX_THRESHOLD && blushState == BlushState::Inactive && !bounceJustTriggered)
+                   if (blushState == BlushState::Inactive && !bounceJustTriggered)
                    {
                      // Trigger blush if:
                      // 1. Proximity detected
@@ -3887,5 +3900,4 @@ void loop()
     baseInterval = 10; // Use 15 ms for plasma view
   }
   */
-}
 }
