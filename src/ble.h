@@ -77,7 +77,7 @@ void updateLux(); // NEW: Add lux function declaration
 // Fallback defines in case PlatformIO doesn't inject them
 #ifndef FIRMWARE_VERSION
 // #define FIRMWARE_VERSION "unknown"
-#define FIRMWARE_VERSION "3.0.0" // Default version if not defined
+#define FIRMWARE_VERSION "3.5.0" // Default version if not defined
 #endif
 
 #ifndef GIT_COMMIT

@@ -18,7 +18,7 @@ jobs:
       matrix:
         environment:
           - adafruit_matrixportal_esp32s3
-          - esp32dev
+         # - esp32dev
           - dev
         
     steps:
