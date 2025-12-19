@@ -4,7 +4,7 @@
 #include <FastLED.h>
 #include "userPreferences.h"
 #include "deviceConfig.h"
-#include "ble.h"
+#include "ble/ble.h"
 #include "SPI.h"
 #include "xtensa/core-macros.h"
 #include "bitmaps.h"
