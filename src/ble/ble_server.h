@@ -8,7 +8,7 @@ class ServerCallbacks : public NimBLEServerCallbacks
 {
 public:
     void onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo) override;
-    void onPairingRequest(NimBLEServer *pServer, NimBLEConnInfo &connInfo) override;
+    void onPairingRequest(NimBLEServer *pServer, NimBLEConnInfo &connInfo);
     void onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason) override;
     void onMTUChange(uint16_t MTU, NimBLEConnInfo &connInfo) override;
     uint32_t onPassKeyDisplay() override;
