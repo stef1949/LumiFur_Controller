@@ -2,37 +2,323 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="refresh" content="0; url=firmware-updater/" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LumiFur Firmware Updater Redirect</title>
+    <title>LumiFur Controller</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <style>
+      :root {
+        --bg: #f6f7fb;
+        --card: #ffffff;
+        --text: #0f172a;
+        --muted: #4b5563;
+        --accent: #2563eb;
+        --border: #e5e7eb;
+        --shadow: 0 30px 120px rgba(15, 23, 42, 0.08);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
       body {
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
-          sans-serif;
-        background: #0f172a;
-        color: #e5e7eb;
+        margin: 0;
+        font-family: "Inter", system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      header {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        backdrop-filter: blur(10px);
+        background: rgba(246, 247, 251, 0.85);
+        border-bottom: 1px solid var(--border);
+      }
+
+      .nav {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 18px 28px;
         display: flex;
         align-items: center;
-        justify-content: center;
-        min-height: 100vh;
-        margin: 0;
+        gap: 24px;
       }
+
+      .logo {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        color: var(--accent);
+      }
+
+      .logo-mark {
+        width: 36px;
+        height: 36px;
+        border-radius: 10px;
+        background: radial-gradient(circle at 30% 30%, #60a5fa, #1e3a8a);
+        display: grid;
+        place-items: center;
+        color: #fff;
+        font-weight: 800;
+      }
+
+      .nav-links {
+        display: flex;
+        align-items: center;
+        gap: 18px;
+        color: var(--muted);
+        font-weight: 500;
+      }
+
+      .nav-links a:hover,
+      .nav-links .active {
+        color: var(--text);
+      }
+
+      .cta {
+        margin-left: auto;
+        display: flex;
+        gap: 10px;
+      }
+
+      .btn {
+        padding: 10px 16px;
+        border-radius: 12px;
+        border: 1px solid var(--border);
+        background: #fff;
+        color: var(--text);
+        font-weight: 600;
+        box-shadow: 0 10px 30px rgba(37, 99, 235, 0.08);
+        transition: transform 150ms ease, box-shadow 150ms ease;
+      }
+
+      .btn.primary {
+        background: linear-gradient(135deg, #60a5fa, #2563eb);
+        color: #fff;
+        border: none;
+      }
+
+      .btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 14px 40px rgba(37, 99, 235, 0.12);
+      }
+
       main {
-        text-align: center;
-        padding: 1.5rem;
+        max-width: 1200px;
+        margin: 32px auto 80px;
+        padding: 0 28px;
+        display: grid;
+        grid-template-columns: 1fr 1.1fr;
+        gap: 32px;
+        align-items: center;
       }
-      a {
-        color: #60a5fa;
+
+      .hero-copy {
+        display: grid;
+        gap: 22px;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        color: var(--muted);
+        font-weight: 600;
+        letter-spacing: 0.02em;
+      }
+
+      .eyebrow span {
+        display: inline-block;
+        width: 38px;
+        height: 2px;
+        background: var(--muted);
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(38px, 4.2vw, 48px);
+        line-height: 1.05;
+        letter-spacing: 0.01em;
+      }
+
+      .lede {
+        margin: 0;
+        color: var(--muted);
+        line-height: 1.6;
+        font-size: 18px;
+      }
+
+      .tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+      }
+
+      .tag {
+        padding: 8px 12px;
+        border-radius: 12px;
+        background: #eef2ff;
+        color: #4338ca;
+        font-weight: 600;
+        font-size: 14px;
+      }
+
+      .hero-actions {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .spline-shell {
+        position: relative;
+        background: #0f172a;
+        border-radius: 28px;
+        padding: 16px;
+        box-shadow: var(--shadow);
+        border: 1px solid #0b1324;
+        overflow: hidden;
+        min-height: 540px;
+        display: grid;
+        place-items: center;
+      }
+
+      .spline-frame {
+        width: 100%;
+        height: 100%;
+        border: none;
+        border-radius: 20px;
+        background: radial-gradient(circle at 30% 30%, #1e40af, #0b1022 70%);
+        position: relative;
+        overflow: hidden;
+        display: grid;
+        place-items: center;
+      }
+
+      .spline-placeholder {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #c7d2fe;
+        text-align: center;
+        padding: 24px;
+        font-weight: 600;
+        letter-spacing: 0.01em;
+        backdrop-filter: blur(2px);
+      }
+
+      .spline-grid {
+        position: absolute;
+        inset: 0;
+        background-image: linear-gradient(
+            rgba(255, 255, 255, 0.04) 1px,
+            transparent 1px
+          ),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+        background-size: 48px 48px;
+        opacity: 0.8;
+      }
+
+      .footnote {
+        margin: 24px 0 0;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.5;
+      }
+
+      @media (max-width: 1024px) {
+        main {
+          grid-template-columns: 1fr;
+          margin-top: 16px;
+        }
+
+        .spline-shell {
+          min-height: 440px;
+        }
+      }
+
+      @media (max-width: 640px) {
+        .nav {
+          flex-wrap: wrap;
+          gap: 12px;
+        }
+
+        .cta {
+          width: 100%;
+          justify-content: flex-end;
+        }
       }
     </style>
   </head>
   <body>
+    <header>
+      <nav class="nav">
+        <a class="logo" href="#">
+          <span class="logo-mark">L</span>
+          LumiFur
+        </a>
+        <div class="nav-links">
+          <a href="#" class="active">Solutions</a>
+          <a href="#">Applications</a>
+          <a href="#">News</a>
+          <a href="#">Partners</a>
+        </div>
+        <div class="cta">
+          <a class="btn" href="firmware-updater/">Firmware Updater</a>
+          <a class="btn primary" href="#contact">Order a Call</a>
+        </div>
+      </nav>
+    </header>
+
     <main>
-      <h1>Redirecting to the Firmware Updater</h1>
-      <p>
-        If you are not redirected automatically,
-        <a href="firmware-updater/">open the LumiFur Firmware Updater</a>.
-      </p>
+      <section class="hero-copy">
+        <div class="eyebrow"><span></span>Human-friendly automation</div>
+        <h1>
+          Soft robotic illumination for people, designed to work side by side
+          with humans
+        </h1>
+        <p class="lede">
+          LumiFur combines tactile-safe motion control with vivid lighting so
+          creators, scientists, and automation teams can build experiences that
+          feel alive and approachable.
+        </p>
+        <div class="tags">
+          <span class="tag">Collaboration first</span>
+          <span class="tag">Flexible motion</span>
+          <span class="tag">Art-grade lighting</span>
+        </div>
+        <div class="hero-actions">
+          <a class="btn primary" href="firmware-updater/">Update controller</a>
+          <a class="btn" href="#catalog">Download catalog</a>
+          <span class="footnote">Safety guaranteed, intuitive setup.</span>
+        </div>
+      </section>
+
+      <section class="spline-shell" aria-label="LumiFur interactive model">
+        <div class="spline-frame">
+          <!-- Replace this iframe with your Spline embed -->
+          <div class="spline-placeholder">
+            Drop your Spline embed for the LumiFur controller here.<br />
+            It will sit where the robotic arm is in the reference layout.
+          </div>
+          <div class="spline-grid" aria-hidden="true"></div>
+        </div>
+      </section>
     </main>
   </body>
 </html>
