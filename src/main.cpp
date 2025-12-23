@@ -662,6 +662,7 @@ class ConfigCallbacks : public NimBLECharacteristicCallbacks
         // Static color mode takes precedence over aurora mode.
         auroraModeEnabled = false;
       }
+      setAutoBrightness(autoBrightnessEnabled);
       setAuroraMode(auroraModeEnabled);
       setStaticColorMode(staticColorModeEnabled);
       // Log the updated settings.
@@ -714,6 +715,7 @@ class BrightnessCallbacks : public NimBLECharacteristicCallbacks
     {
       userBrightness = (uint8_t)val[0]; // Store the app-set brightness
       brightnessChanged = true;         // Flag that brightness was set by user
+      setUserBrightness(userBrightness);
       // ADDED: Apply brightness immediately if auto-brightness is off
       if (!autoBrightnessEnabled)
       {
@@ -2382,6 +2384,7 @@ void setup()
   initTempSensor(); // Initialize Temperature Sensor
 
   initPreferences(); // Initialize Preferences
+  autoBrightnessEnabled = getAutoBrightness();
   auroraModeEnabled = getAuroraMode();
   staticColorModeEnabled = getStaticColorMode();
   if (staticColorModeEnabled)
@@ -2389,6 +2392,29 @@ void setup()
     auroraModeEnabled = false;
   }
   ensureStaticColorLoaded();
+  {
+    String storedText = getUserText();
+    if (storedText.length() > 0)
+    {
+      size_t copyLen = storedText.length();
+      if (copyLen >= sizeof(txt))
+      {
+        copyLen = sizeof(txt) - 1;
+      }
+      memcpy(txt, storedText.c_str(), copyLen);
+      txt[copyLen] = '\0';
+      auto &scrollState = scroll::state();
+      scrollState.textInitialized = false;
+    }
+    else
+    {
+      txt[0] = '\0';
+    }
+
+    auto &scrollState = scroll::state();
+    scrollState.speedSetting = getScrollSpeed();
+    scroll::updateIntervalFromSpeed();
+  }
 
   // - LOAD LAST VIEW -
   currentView = getLastView();
@@ -2467,7 +2493,9 @@ void setup()
 
   pCommandCharacteristic = pService->createCharacteristic(
       COMMAND_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::WRITE);
+      NIMBLE_PROPERTY::WRITE |
+      NIMBLE_PROPERTY::NOTIFY
+    );
   pCommandCharacteristic->setCallbacks(&cmdCallbacks);
   Serial.print("Command Characteristic created, UUID: ");
   Serial.println(pCommandCharacteristic->getUUID().toString().c_str());
@@ -2478,7 +2506,6 @@ void setup()
   pTemperatureCharacteristic =
       pService->createCharacteristic(
           TEMPERATURE_CHARACTERISTIC_UUID,
-          NIMBLE_PROPERTY::READ |
               NIMBLE_PROPERTY::WRITE |
               NIMBLE_PROPERTY::NOTIFY
           // NIMBLE_PROPERTY::READ_ENC
@@ -2488,9 +2515,9 @@ void setup()
   pConfigCharacteristic = pService->createCharacteristic(
       CONFIG_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
-          NIMBLE_PROPERTY::WRITE |
-          // NIMBLE_PROPERTY::WRITE_NR |
-          NIMBLE_PROPERTY::NOTIFY);
+      NIMBLE_PROPERTY::WRITE |
+    //NIMBLE_PROPERTY::WRITE_NR |
+      NIMBLE_PROPERTY::NOTIFY);
 
   // Set the callback to handle writes.
   pConfigCharacteristic->setCallbacks(&configCallbacks);
@@ -2579,7 +2606,7 @@ void setup()
   pLuxCharacteristic = pService->createCharacteristic(
       LUX_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
-          NIMBLE_PROPERTY::NOTIFY);
+      NIMBLE_PROPERTY::NOTIFY);
 
   // Initialize with current lux value
   uint16_t initialLux = getRawClearChannelValue();
@@ -2600,10 +2627,9 @@ void setup()
 
   pScrollTextCharacteristic = pService->createCharacteristic(
       SCROLL_TEXT_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ_ENC |      // Require encryption for reading
-          NIMBLE_PROPERTY::WRITE_ENC | // Require encryption for writing
-          NIMBLE_PROPERTY::WRITE_NR |
-          NIMBLE_PROPERTY::NOTIFY);
+      NIMBLE_PROPERTY::READ |      //TODO: Require encryption for reading
+      NIMBLE_PROPERTY::WRITE |     //TODO: Require encryption for writing
+      NIMBLE_PROPERTY::NOTIFY);
   pScrollTextCharacteristic->setCallbacks(&scrollTextCallbacks);
 
   // Set initial value (current text)
@@ -2621,9 +2647,9 @@ void setup()
   pStaticColorCharacteristic = pService->createCharacteristic(
       STATIC_COLOR_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ_ENC |
-          NIMBLE_PROPERTY::WRITE_ENC |
-          NIMBLE_PROPERTY::WRITE_NR |
-          NIMBLE_PROPERTY::NOTIFY);
+      NIMBLE_PROPERTY::WRITE_ENC |
+      NIMBLE_PROPERTY::WRITE_NR |
+      NIMBLE_PROPERTY::NOTIFY);
   pStaticColorCharacteristic->setCallbacks(&staticColorCallbacks);
   String initialColorHex = getStaticColorHexString();
   pStaticColorCharacteristic->setValue(initialColorHex.c_str());
@@ -2770,7 +2796,7 @@ void setup()
   // Set initial plasma color palette
   currentPalette = RainbowColors_p;
 
-  snprintf(txt, sizeof(txt), "Stimming right now :3");
+  snprintf(txt, sizeof(txt), "%s", getUserText().c_str());
   initializeScrollingText();
 
   ////////Setup Bouncing Squares////////
@@ -3702,7 +3728,7 @@ void checkSleepMode()
 void loop()
 {
 
-  Serial.println(apds.readProximity());
+  //Serial.println(apds.readProximity());
   
   // unsigned long frameStartTimeMillis = millis(); // Timestamp at frame start
   const unsigned long loopNow = millis();

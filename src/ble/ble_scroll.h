@@ -3,13 +3,6 @@
 
 #include <NimBLEDevice.h>
 
-class ScrollSpeedCallbacks : public NimBLECharacteristicCallbacks
-{
-public:
-    void onWrite(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override;
-    void onRead(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override;
-};
-
 class ScrollTextCallbacks : public NimBLECharacteristicCallbacks
 {
 public:

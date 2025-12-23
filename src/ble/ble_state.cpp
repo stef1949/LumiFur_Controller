@@ -26,5 +26,4 @@ std::string buildTime = std::string(BUILD_DATE) + " " + BUILD_TIME;
 
 OTACallbacks otaCallbacks;
 ServerCallbacks serverCallbacks;
-ScrollSpeedCallbacks scrollSpeedCallbacks;
 ScrollTextCallbacks scrollTextCallbacks;

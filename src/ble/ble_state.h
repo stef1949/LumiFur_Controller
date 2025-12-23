@@ -33,7 +33,6 @@ extern std::string buildTime;
 
 extern OTACallbacks otaCallbacks;
 extern ServerCallbacks serverCallbacks;
-extern ScrollSpeedCallbacks scrollSpeedCallbacks;
 extern ScrollTextCallbacks scrollTextCallbacks;
 
 #endif // BLE_STATE_H

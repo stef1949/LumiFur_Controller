@@ -7,12 +7,12 @@ namespace
 {
 State gState{};
 
-constexpr std::uint8_t kMinSpeed = 1;
-constexpr std::uint8_t kMaxSpeed = 100;
+constexpr std::uint16_t kMinSpeed = 1;
+constexpr std::uint16_t kMaxSpeed = 500;
 constexpr std::uint16_t kFastestInterval = 15;
 constexpr std::uint16_t kSlowestInterval = 250;
 
-std::uint8_t clampSpeed(std::uint8_t speed)
+std::uint16_t clampSpeed(std::uint16_t speed)
 {
   if (speed < kMinSpeed)
   {
@@ -25,7 +25,7 @@ std::uint8_t clampSpeed(std::uint8_t speed)
   return speed;
 }
 
-std::uint16_t computeInterval(std::uint8_t speed)
+std::uint16_t computeInterval(std::uint16_t speed)
 {
   const std::uint8_t clampedSpeed = clampSpeed(speed);
   const std::uint16_t range = kSlowestInterval - kFastestInterval;

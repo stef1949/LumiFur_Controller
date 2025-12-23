@@ -90,9 +90,11 @@ bool downloadFlag = false;
 #define DEBUG_ACCELEROMETER 0 // Set to 1 to enable accelerometer debug outputs
 #define DEBUG_BRIGHTNESS 0    // Set to 1 to enable brightness debug outputs
 #define DEBUG_VIEWS 0         // Set to 1 to enable views debug outputs
-#define DEBUG_VIEW_TIMING 0         // Set to 1 to enable views debug outputs
-#define DEBUG_FPS_COUNTER 0         // Set to 1 to enable FPS counter debug outputs
+#define DEBUG_VIEW_TIMING 0   // Set to 1 to enable views debug outputs
+#define DEBUG_FPS_COUNTER 0   // Set to 1 to enable FPS counter debug outputs
 #define DEBUG_PROXIMITY 0     // Set to 1 to enable proximity sensor debug logs
+#define TEXT_DEBUG 1          // Set to 1 to enable text debug outputs
+#define DEBUG_FLUID_EFFECT 0  // Set to 1 to enable fluid effect debug outputs
 #if DEBUG_MODE
 #define DEBUG_BLE
 // #define DEBUG_VIEWS
@@ -103,8 +105,14 @@ bool downloadFlag = false;
 #define LOG_PROX(...) Serial.printf(__VA_ARGS__)
 #define LOG_PROX_LN(msg) Serial.println(msg)
 #else
-#define LOG_PROX(...) do { } while (0)
-#define LOG_PROX_LN(msg) do { } while (0)
+#define LOG_PROX(...) \
+  do                  \
+  {                   \
+  } while (0)
+#define LOG_PROX_LN(msg) \
+  do                     \
+  {                      \
+  } while (0)
 #endif
 
 // Button config --------------------------------------------------------------
@@ -238,10 +246,10 @@ Adafruit_LIS3DH accel;
 // Sundry globals used for animation ---------------------------------------
 
 // Scrolling text sundries
-int16_t textX;   // Current text position (X)
-int16_t textY;   // Current text position (Y)
-int16_t textMin; // Text pos. (X) when scrolled off left edge
-extern char txt[64];    // Buffer to hold scrolling message text
+int16_t textX;                         // Current text position (X)
+int16_t textY;                         // Current text position (Y)
+int16_t textMin;                       // Text pos. (X) when scrolled off left edge
+extern char txt[64];                   // Buffer to hold scrolling message text
 extern void initializeScrollingText(); // Exposes function
 
 int16_t ball[3][4] = {
@@ -331,9 +339,9 @@ void setupAdaptiveBrightness()
   LOG_PROX_LN("APDS init: begin() succeeded");
   // Boost sensitivity for proximity and color for auto-brightness
   apds.setProxGain(APDS9960_PGAIN_8X);
-  //apds.setLEDDrive(APDS9960_LEDDRIVE_100MA);
+  // apds.setLEDDrive(APDS9960_LEDDRIVE_100MA);
   apds.setADCIntegrationTime(49); // ~50ms
-  //apds.setADCGain(APDS9960_AGAIN_8X);
+  // apds.setADCGain(APDS9960_AGAIN_8X);
   apds.enableProximity(true);                  // enable proximity mode
   apds.enableColor(true);                      // enable color mode
   apds.setProximityInterruptThreshold(0, 175); // set the interrupt threshold to fire when proximity reading goes above 175
@@ -413,28 +421,28 @@ void updateAdaptiveBrightness()
 
   // --- CRITICAL CALIBRATION SECTION ---
 
-  const int min_brightness_output = 80;   // Fall back to user-set brightness when dark NOTE: use  userBrightness to revert to user setting
-  const int max_brightness_output = 255;  // Preserve full-range capability
+  const int min_brightness_output = 80;  // Fall back to user-set brightness when dark NOTE: use  userBrightness to revert to user setting
+  const int max_brightness_output = 255; // Preserve full-range capability
   const float min_clear_for_map = 2.0f;  // Adjusted dark threshold
   const float max_clear_for_map = 50.0f; // Adjusted bright threshold
-                                    // OBSERVE rawClearValue via Serial.print to refine these.
+                                         // OBSERVE rawClearValue via Serial.print to refine these.
 
-   // ADJUST THESE VALUES:
+  // ADJUST THESE VALUES:
   // For earlier dimming (dims in brighter conditions):
   // const float min_clear_for_map = 200.0f;           // Higher value = starts dimming earlier
-  
+
   // For later dimming (only dims in very dark conditions):
   // const float min_clear_for_map = 20.0f;            // Lower value = only dims when very dark
-  
+
   // For reaching full brightness sooner (in less bright conditions):
   // const float max_clear_for_map = 800.0f;           // Lower value = reaches max brightness sooner
-  
+
   // For reaching full brightness later (only in very bright conditions):
   // const float max_clear_for_map = 2000.0f;          // Higher value = needs more light for full brightness
-  
+
   // For different minimum brightness level:
   // const int min_brightness_output = 30;             // Fixed minimum instead of user brightness
-  
+
   // For different maximum brightness level:
   // const int max_brightness_output = 200;            // Cap maximum brightness below 255
 
