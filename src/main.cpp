@@ -19,6 +19,7 @@
 
 #include <Adafruit_PixelDust.h> // For sand simulation
 #include "main.h"
+#include "core/mic/mic.h"
 #include "core/ColorParser.h"
 #include "customEffects/flameEffect.h"
 #include "customEffects/fluidEffect.h"
@@ -53,9 +54,6 @@
 
 // #include "EffectsLayer.hpp" // FastLED CRGB Pixel Buffer for which the patterns are drawn
 // EffectsLayer effects(VPANEL_W, VPANEL_H);
-
-// Setup functions for adaptive brightness using APDS9960:
-// Call setupAdaptiveBrightness() in your setup() to initialize the sensor.
 
 // ----------------------------------------------------------------
 // ----------------------------------------------------------------
@@ -943,10 +941,13 @@ void drawBluetoothStatusIcon()
   }
 
   drawXbm565(iconX, iconY, BLUETOOTH_BACKGROUND_WIDTH, BLUETOOTH_BACKGROUND_HEIGHT, bluetoothBackground, backgroundColor);
+  drawXbm565(iconX + BLUETOOTH_BACKGROUND_WIDTH + 2, iconY, BLUETOOTH_BACKGROUND_WIDTH, BLUETOOTH_BACKGROUND_HEIGHT, bluetoothBackground, backgroundColor);
+
   const int runeX = iconX + static_cast<int>((BLUETOOTH_BACKGROUND_WIDTH - BLUETOOTH_RUNE_WIDTH) / 2);
   const int runeY = iconY + static_cast<int>((BLUETOOTH_BACKGROUND_HEIGHT - BLUETOOTH_RUNE_HEIGHT) / 2);
 
   drawXbm565(runeX, runeY, BLUETOOTH_RUNE_WIDTH, BLUETOOTH_RUNE_HEIGHT, bluetoothRune, runeColor);
+  drawXbm565(runeX + BLUETOOTH_RUNE_WIDTH + 4, runeY, BLUETOOTH_RUNE_WIDTH, BLUETOOTH_RUNE_HEIGHT, bluetoothRune, runeColor);
 }
 
 uint16_t colorWheel(uint8_t pos)
@@ -1862,6 +1863,28 @@ void drawTransFlag()
   dma_display->fillRect(0, stripeHeight * 4, dma_display->width(), stripeHeight, lightBlue); // Bottom light blue stripe
 }
 
+void drawLGBTFlag()
+{
+  int stripeHeight = dma_display->height() / 6; // Height of each stripe
+
+  // Define colors in RGB565 format with intended values:
+  // red: (255,0,0), orange: (255,127,0), yellow: (255,255,0), green: (0,255,0), blue: (0,0,255), purple: (139,0,255)
+  uint16_t red = dma_display->color565(255, 0, 0);
+  uint16_t orange = dma_display->color565(255, 127, 0);
+  uint16_t yellow = dma_display->color565(255, 255, 0);
+  uint16_t green = dma_display->color565(0, 255, 0);
+  uint16_t blue = dma_display->color565(0, 0, 255);
+  uint16_t purple = dma_display->color565(139, 0, 255);
+
+  // Draw stripes
+  dma_display->fillRect(0, 0, dma_display->width(), stripeHeight, red);          // Top red stripe
+  dma_display->fillRect(0, stripeHeight, dma_display->width(), stripeHeight, orange);  // Orange stripe
+  dma_display->fillRect(0, stripeHeight * 2, dma_display->width(), stripeHeight, yellow); // Yellow stripe
+  dma_display->fillRect(0, stripeHeight * 3, dma_display->width(), stripeHeight, green);  // Green stripe
+  dma_display->fillRect(0, stripeHeight * 4, dma_display->width(), stripeHeight, blue);   // Blue stripe
+  dma_display->fillRect(0, stripeHeight * 5, dma_display->width(), stripeHeight, purple); // Bottom purple stripe
+}
+
 void baseFace()
 {
   // Update idle hover here so the render task always sees fresh offsets
@@ -2166,7 +2189,6 @@ static void displayTask(void *pvParameters)
 }
 
 
-const i2s_port_t I2S_PORT = I2S_NUM_0;
 
 static volatile unsigned long softMillis = 0; // our software “millis” counter
 TimerHandle_t softMillisTimer = nullptr;
@@ -2767,24 +2789,6 @@ void setup()
   { // Assuming 16 is the fluid effect view
     fluidEffectInstance->begin();
   }
-  /*
-  #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) || defined(ACCEL_AVAILABLE)
-      pixelDustEffectInstance = new PixelDustEffect(dma_display, &accel, &accelerometerEnabled);
-  #else
-      pixelDustEffectInstance = new PixelDustEffect(dma_display, nullptr, &accelerometerEnabled);
-  #endif
-
-  if (!pixelDustEffectInstance) {
-      Serial.println("FATAL: Failed to allocate PixelDustEffect instance!");
-  }
-  // If the initial view is one of the effects, call its begin()
-      if (currentView == 16 && fluidEffectInstance) { // Old fluid effect view number
-          fluidEffectInstance->begin();
-      }
-      if (currentView == 17 && pixelDustEffectInstance) { // <<< NEW: Assuming PixelDust is view 17
-          pixelDustEffectInstance->begin();
-      }
-  */
 
   lastActivityTime = millis(); // Initialize the activity timer for sleep mode
 
@@ -2831,55 +2835,7 @@ void setup()
   and pressing either of them pulls the input low.
   ------------------------------------------------------------------------- */
 
-  /*
-  // start I2S at 16 kHz with 32-bits per sample
-  if (!I2S.begin(I2S_PHILIPS_MODE, 16000, 32)) {
-    Serial.println("Failed to initialize I2S!");
-    while (1); // do nothing
-  }
-  */
-
-  esp_err_t err_i2s;
-
-  i2s_config_t i2sConfig = {
-      .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-      //.sample_rate = 22050, // Sample rate
-      .sample_rate = 44100, // Sample rate
-      .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-      .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-      .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S | I2S_COMM_FORMAT_STAND_MSB),
-      .intr_alloc_flags = 0, // Interrupt level
-      .dma_buf_count = 2,    // Number of DMA buffers
-      .dma_buf_len = 32,     // Length of each DMA buffer
-      .use_apll = false,
-  };
-  // Configure I2S pins for microphone input (data in only)
-  i2s_pin_config_t pinConfig = {
-      .bck_io_num = MIC_SCK_PIN,
-      .ws_io_num = MIC_WS_PIN,
-      .data_out_num = I2S_PIN_NO_CHANGE,
-      .data_in_num = MIC_SD_PIN};
-
-  err_i2s = i2s_driver_install(I2S_PORT, &i2sConfig, 0, NULL); // Use renamed variable
-  // REG_SET_BIT(I2S_TIMING_REG(I2S_PORT), BIT(9)); // Set I2S timing register
-  if (err_i2s != ESP_OK)
-  {                                                               // Use renamed variable
-    Serial.printf("Failed installing I2S driver: %d\n", err_i2s); // Use renamed variable
-    while (true)
-      ;
-  }
-  err_i2s = i2s_set_pin(I2S_PORT, &pinConfig); // Use renamed variable
-  if (err_i2s != ESP_OK)
-  {                                                         // Use renamed variable
-    Serial.printf("Failed setting I2S pin: %d\n", err_i2s); // Use renamed variable
-    while (true)
-      ;
-  }
-  Serial.println("I2S driver installed.");
-
-  // if you need to drive a power line:
-  pinMode(MIC_PD_PIN, OUTPUT);
-  digitalWrite(MIC_PD_PIN, HIGH);
+  micInit();
 
 #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
 #ifdef BUTTON_UP
@@ -3031,15 +2987,11 @@ void updateDVDLogos()
   // Rendering cadence is handled by displayTask; avoid delaying here.
 }
 
-// Define a threshold for microphone amplitude to trigger mouth open/close
-#ifndef MIC_THRESHOLD
-#define MIC_THRESHOLD 450000 // Adjust this value as needed for your microphone sensitivity
-#endif
-
-static uint8_t mawBrightness = 0; // new: scaled 0–255 based on mic level
 void displayCurrentMaw()
 {
-  // build a gray‐scale color from current mic level
+  const uint8_t mawBrightness = micGetMouthBrightness();
+  mouthOpen = micIsMouthOpen();
+  // build a gray-scale color from current mic level
   uint16_t col = dma_display->color565(mawBrightness,
                                        mawBrightness,
                                        mawBrightness);
@@ -3059,200 +3011,6 @@ void displayCurrentMaw()
 #endif
     drawXbm565(0, 10, 64, 22, maw2Closed, dma_display->color565(255, 255, 255));
     drawXbm565(64, 10, 64, 22, maw2ClosedL, dma_display->color565(255, 255, 255));
-  }
-}
-
-// ——————————————————————————————————————————————————————————————————————
-// Optimized mouth‑movement reader
-static int32_t mouthBuf[128]; // static so it lives in .bss, not on the stack
-
-// --- Microphone Processing Parameters ---
-// EMA (Exponential Moving Average) alpha for ambient noise (smaller = slower adaptation)
-#define AMBIENT_EMA_ALPHA 0.01f
-// EMA alpha for signal smoothing (larger = faster response, less smoothing)
-#define SIGNAL_EMA_ALPHA 0.3f
-// How much louder the signal needs to be than ambient to trigger (absolute value)
-#define SENSITIVITY_OFFSET_ABOVE_AMBIENT 340000 // Adjust this based on mic sensitivity and desired responsiveness
-                                                // This effectively replaces your old MIC_THRESHOLD's primary role
-// Minimum signal level to be considered for ambient noise calculation
-#define MIN_SIGNAL_FOR_AMBIENT_CONSIDERATION 500
-// Time in ms of silence before updating ambient noise more aggressively
-#define AMBIENT_UPDATE_QUIET_PERIOD_MS 1000
-// Minimum and maximum clamp for ambient noise estimation
-#define MIN_AMBIENT_LEVEL 200    // Prevents ambient from dropping too low
-#define MAX_AMBIENT_LEVEL 200000 // Prevents ambient from rising too high due to sustained noise
-
-// --- State Variables (static, so they persist between calls) ---
-static float ambientNoiseLevel = (MIN_AMBIENT_LEVEL + MAX_AMBIENT_LEVEL) / 2.0f; // Initial guess
-static float smoothedSignalLevel = 0.0f;
-static unsigned long lastSoundTime = 0; // When the mouth was last considered open or sound was high
-// static unsigned long lastAmbientUpdateTime = 0;
-
-// Original buffer
-// static int32_t mouthBuf[128];
-
-void updateMouthMovement()
-{
-  unsigned long now = millis();
-  const bool initialMouthOpen = mouthOpen;
-  size_t bytesRead = 0;
-
-  esp_err_t err = i2s_read(
-      I2S_PORT,
-      mouthBuf,
-      sizeof(mouthBuf),
-
-      &bytesRead,
-      pdMS_TO_TICKS(1) // Using a small timeout instead of portMAX_DELAY to prevent blocking indefinitely
-  );
-
-  if (err != ESP_OK || bytesRead == 0)
-  {
-    // Handle error or no data: assume silence
-    if (mouthOpen && (now - lastSoundTime > mouthOpenHoldTime))
-    {
-      mouthOpen = false;
-    }
-    // Keep ambient noise decaying slowly if no signal
-    if (now - lastAmbientUpdateTime > 100)
-    { // Update ambient periodically even in silence
-      ambientNoiseLevel = ambientNoiseLevel * (1.0f - AMBIENT_EMA_ALPHA) + MIN_AMBIENT_LEVEL * AMBIENT_EMA_ALPHA;
-      ambientNoiseLevel = constrain(ambientNoiseLevel, MIN_AMBIENT_LEVEL, MAX_AMBIENT_LEVEL);
-      lastAmbientUpdateTime = now;
-    }
-    smoothedSignalLevel *= (1.0f - SIGNAL_EMA_ALPHA); // Decay smoothed signal
-
-    mawBrightness = 20; // Minimum brightness
-
-    // --- TELEPLOT for no data/error ---
-
-#if DEBUG_MICROPHONE
-    Serial.printf(">mic_avg_abs_signal:0\n");
-    Serial.printf(">mic_smoothed_signal:%.0f\n", smoothedSignalLevel);
-    Serial.printf(">mic_ambient_noise:%.0f\n", ambientNoiseLevel);
-    Serial.printf(">mic_trigger_threshold:%.0f\n", ambientNoiseLevel + SENSITIVITY_OFFSET_ABOVE_AMBIENT);
-    Serial.printf(">mic_maw_brightness:%u\n", mawBrightness);
-    Serial.printf(">mic_mouth_open:%d\n", mouthOpen ? 1 : 0);
-#endif
-    if (mouthOpen != initialMouthOpen)
-    {
-      facePlasmaDirty = true;
-    }
-    return;
-  }
-
-  size_t samples = bytesRead / sizeof(mouthBuf[0]);
-  if (samples == 0)
-  { // Should be caught by bytesRead == 0 above, but as a safeguard
-    // (Same logic as above for error/no data)
-    if (mouthOpen && (now - lastSoundTime > mouthOpenHoldTime))
-    {
-      mouthOpen = false;
-    }
-    smoothedSignalLevel *= (1.0f - SIGNAL_EMA_ALPHA);
-    mawBrightness = 20;
-#ifdef DEBUG_MIC
-    Serial.printf(">mic_avg_abs_signal:0\n");
-    Serial.printf(">mic_smoothed_signal:%.0f\n", smoothedSignalLevel);
-#endif
-    // ... (rest of teleplot for no samples)
-    if (mouthOpen != initialMouthOpen)
-    {
-      facePlasmaDirty = true;
-    }
-    return;
-  }
-
-  // 1. Calculate Average Absolute Signal for this frame
-  uint32_t sumAbs = 0;
-  for (size_t i = 0; i < samples; ++i)
-  {
-    // The `>> 8` shift is from your original code.
-    // For a typical 18-bit I2S mic (like SPH0645), data is in the upper bits.
-    // A more accurate shift might be `>> (32 - 18)` or `>> 14` to get the signed 18-bit value.
-    // However, consistency is key for the dynamic threshold.
-    sumAbs += (uint32_t)abs(mouthBuf[i] >> 8);
-  }
-  float currentAvgAbsSignal = (float)sumAbs / samples;
-
-  // 2. Smooth the current signal
-  smoothedSignalLevel = SIGNAL_EMA_ALPHA * currentAvgAbsSignal + (1.0f - SIGNAL_EMA_ALPHA) * smoothedSignalLevel;
-
-  // 3. Update Ambient Noise Level
-  //    Only update ambient if the current sound is not too loud OR if it's been quiet for a while
-  bool isQuietPeriod = (now - lastSoundTime > AMBIENT_UPDATE_QUIET_PERIOD_MS);
-  if (isQuietPeriod || smoothedSignalLevel < (ambientNoiseLevel + SENSITIVITY_OFFSET_ABOVE_AMBIENT * 0.5f))
-  {
-    // If it's truly quiet, adapt faster to the current (low) signal
-    float currentTargetAmbient = (isQuietPeriod) ? currentAvgAbsSignal : smoothedSignalLevel;
-    // Ensure target for ambient isn't excessively high if there was a brief sound
-    currentTargetAmbient = min(currentTargetAmbient, ambientNoiseLevel + SENSITIVITY_OFFSET_ABOVE_AMBIENT * 0.2f);
-
-    ambientNoiseLevel = AMBIENT_EMA_ALPHA * currentTargetAmbient + (1.0f - AMBIENT_EMA_ALPHA) * ambientNoiseLevel;
-    ambientNoiseLevel = constrain(ambientNoiseLevel, MIN_AMBIENT_LEVEL, MAX_AMBIENT_LEVEL);
-    lastAmbientUpdateTime = now;
-  }
-
-  // 4. Determine Trigger Threshold
-  float triggerThreshold = ambientNoiseLevel + SENSITIVITY_OFFSET_ABOVE_AMBIENT;
-
-  // 5. Decide mouthOpen state
-  if (smoothedSignalLevel > triggerThreshold)
-  {
-    if (!mouthOpen)
-    { // Rising edge, mouth was closed and now should open
-      // Optional: add a slightly higher threshold to OPEN than to STAY open (hysteresis)
-      // For now, simple trigger
-    }
-    mouthOpen = true;
-    lastSoundTime = now; // Update last time a significant sound was detected
-  }
-  else
-  {
-    // Signal is below threshold, check hold time
-    if (mouthOpen && (now - lastSoundTime > mouthOpenHoldTime))
-    {
-      mouthOpen = false;
-    }
-  }
-
-  // 6. Calculate Maw Brightness
-  // Scale brightness based on how much the smoothed signal is above the ambient noise
-  float signalAboveAmbient = smoothedSignalLevel - ambientNoiseLevel;
-  if (signalAboveAmbient < 0)
-    signalAboveAmbient = 0;
-
-  // Map [0, SENSITIVITY_OFFSET_ABOVE_AMBIENT * 2] to [20, 255] for brightness
-  // The range for mapping brightness (e.g. SENSITIVITY_OFFSET_ABOVE_AMBIENT * 2 or *3)
-  // determines how "loud" a sound needs to be to reach full brightness.
-  float brightnessMappingRange = SENSITIVITY_OFFSET_ABOVE_AMBIENT * 2.5f;
-  mawBrightness = map((long)(signalAboveAmbient * 100), // Multiply by 100 for map precision
-                      0,
-                      (long)(brightnessMappingRange * 100),
-                      20,   // Min brightness
-                      255); // Max brightness
-  mawBrightness = constrain(mawBrightness, 20, 255);
-
-  // If mouth is forced closed by hold time, ensure brightness reflects that
-  if (!mouthOpen)
-  {
-    mawBrightness = 20; // Or a very dim value
-  }
-
-  // --- TELEPLOT LINES ---
-
-#if DEBUG_MICROPHONE
-  Serial.printf(">mic_avg_abs_signal:%.0f\n", currentAvgAbsSignal);
-  Serial.printf(">mic_smoothed_signal:%.0f\n", smoothedSignalLevel);
-  Serial.printf(">mic_ambient_noise:%.0f\n", ambientNoiseLevel);
-  Serial.printf(">mic_trigger_threshold:%.0f\n", triggerThreshold);
-  Serial.printf(">mic_maw_brightness:%u\n", mawBrightness);
-  Serial.printf(">mic_mouth_open:%d\n", mouthOpen ? 1 : 0);
-#endif
-
-  if (mouthOpen != initialMouthOpen)
-  {
-    facePlasmaDirty = true;
   }
 }
 // Runs one frame of the Pixel Dust animation
@@ -3434,6 +3192,7 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     renderLoadingBarView,          // VIEW_LOADING_BAR
     patternPlasma,                 // VIEW_PATTERN_PLASMA
     drawTransFlag,                 // VIEW_TRANS_FLAG
+    drawLGBTFlag,                  // VIEW_LGBT_FLAG
     renderFaceWithPlasma,          // VIEW_NORMAL_FACE
     renderFaceWithPlasma,          // VIEW_BLUSH_FACE
     renderFaceWithPlasma,          // VIEW_SEMICIRCLE_EYES
@@ -3467,6 +3226,9 @@ void displayCurrentView(int view)
     displaySleepMode(); // This function handles its own flipDMABuffer or drawing rate
     return;
   }
+
+  mouthOpen = micIsMouthOpen();
+
   dma_display->clearScreen(); // Clear the display
 
   if (view != previousViewLocal)
@@ -4000,7 +3762,6 @@ void loop()
   // --- Display Rendering ---
   {
     PROFILE_SECTION("MouthMovement");
-    updateMouthMovement(); // Update mouth movement if needed
   }
   // displayCurrentView(currentView); // Draw the appropriate view based on state
 

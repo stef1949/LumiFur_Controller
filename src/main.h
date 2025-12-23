@@ -32,6 +32,7 @@ enum View
   VIEW_LOADING_BAR,
   VIEW_PATTERN_PLASMA,
   VIEW_TRANS_FLAG,
+  VIEW_LGBT_FLAG,
   VIEW_NORMAL_FACE,
   VIEW_BLUSH_FACE,
   VIEW_SEMICIRCLE_EYES,
@@ -52,9 +53,7 @@ enum View
   VIEW_PIXEL_DUST,
   VIEW_STATIC_COLOR,
 
-  // This special entry will automatically hold the total number of views.
-  // It must always be the last item in the enum.
-  TOTAL_VIEWS
+  TOTAL_VIEWS // Special entry will automatically hold the total number of views.
 };
 
 // Global variables to store the accessory settings.
@@ -86,7 +85,7 @@ bool downloadFlag = false;
 
 ////////////////////// DEBUG MODE //////////////////////
 #define DEBUG_MODE 0          // Set to 1 to enable debug outputs
-#define DEBUG_MICROPHONE 0    // Set to 1 to enable microphone debug outputs
+#define DEBUG_MICROPHONE 1    // Set to 1 to enable microphone debug outputs
 #define DEBUG_ACCELEROMETER 0 // Set to 1 to enable accelerometer debug outputs
 #define DEBUG_BRIGHTNESS 0    // Set to 1 to enable brightness debug outputs
 #define DEBUG_VIEWS 0         // Set to 1 to enable views debug outputs
@@ -135,14 +134,6 @@ float easeInOutQuad(float t)
   return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
 }
 
-/*
-// Easing functions with bounds checking
-float easeInQuad(float t)
-{
-  return (t >= 1.0f) ? 1.0f : t * t;
-}
-*/
-
 // Easing functions with bounds checking
 float easeInQuad(float t)
 {
@@ -152,13 +143,6 @@ float easeInQuad(float t)
     return 1.0f;
   return t * t;
 }
-
-/*
-float easeOutQuad(float t)
-{
-  return (t <= 0.0f) ? 0.0f : 1.0f - (1.0f - t) * (1.0f - t);
-}
-*/
 
 float easeOutQuad(float t)
 {
@@ -206,9 +190,6 @@ CRGB ColorFromCurrentPalette(uint8_t index = 0, uint8_t brightness = 255, TBlend
   return ColorFromPalette(currentPalette, index, brightness, blendType);
 }
 
-// #include "EffectsLayer.hpp" // FastLED CRGB Pixel Buffer for which the patterns are drawn
-// EffectsLayer effects(VPANEL_W, VPANEL_H);
-
 // Helper functions for drawing text and graphics ----------------------------
 void buffclear(CRGB *buf);
 uint16_t XY16(uint16_t x, uint16_t y);
@@ -219,15 +200,13 @@ void drawText(int colorWheelOffset);
 // Power management scopes
 void reduceCPUSpeed()
 {
-  // Set CPU frequency to lowest setting (80MHz vs 240MHz default)
-  setCpuFrequencyMhz(80);
+  setCpuFrequencyMhz(80); // Set CPU frequency to lowest setting (80MHz vs 240MHz default)
   Serial.println("CPU frequency reduced to 80MHz for power saving");
 }
 
 void restoreNormalCPUSpeed()
 {
-  // Set CPU frequency back to default (240MHz)
-  setCpuFrequencyMhz(240);
+  setCpuFrequencyMhz(240); // Set CPU frequency back to default (240MHz)
   Serial.println("CPU frequency restored to 240MHz");
 }
 
@@ -272,14 +251,10 @@ void err(int x)
 
 uint8_t userBrightness = getUserBrightness(); // e.g., default 255 (100%)
 
-// Map userBrightness (1-255) to hwBrightness (1-255).
-// int hwBrightness = map(userBrightness, 1, 100, 1, 255);
-
-// Map userBrightness (1-255) to sliderBrightness (1-100);
 int sliderBrightness = map(userBrightness, 1, 255, 1, 100);
 
 // Convert the userBrightness into a scale factor (0.0 to 1.0)
-// Here, we simply divide userBrightness by 255.0 to get a proportion.
+// Here, dividing userBrightness by 255.0 to get a proportion.
 extern float globalBrightnessScale;
 extern uint16_t globalBrightnessScaleFixed;
 void updateGlobalBrightnessScale(uint8_t brightness);
