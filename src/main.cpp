@@ -446,6 +446,24 @@ void maybeUpdateTemperature()
 }
 
 void displayCurrentView(int view);
+static bool viewUsesMic(int view)
+{
+  switch (view)
+  {
+  case VIEW_NORMAL_FACE:
+  case VIEW_BLUSH_FACE:
+  case VIEW_SEMICIRCLE_EYES:
+  case VIEW_X_EYES:
+  case VIEW_SLANT_EYES:
+  case VIEW_SPIRAL_EYES:
+  case VIEW_PLASMA_FACE:
+  case VIEW_UWU_EYES:
+  case VIEW_CIRCLE_EYES:
+    return true;
+  default:
+    return false;
+  }
+}
 
 void wakeFromSleepMode()
 {
@@ -455,6 +473,7 @@ void wakeFromSleepMode()
   Serial.println(">>> Waking from sleep mode <<<");
   sleepModeActive = false;
   currentView = preSleepView; // Restore previous view
+  micSetEnabled(viewUsesMic(currentView));
 
   // Restore normal CPU speed
   restoreNormalCPUSpeed();
@@ -1050,7 +1069,8 @@ static void renderScrollingTextView()
 uint16_t plasmaSpeed = 2; // Lower = slower animation
 
 void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
-                   uint8_t time_offset = 0, float scale = 5.0f, float animSpeed = 0.2f)
+                   uint8_t time_offset = 0, float scale = 5.0f, float animSpeed = 0.2f,
+                   uint8_t brightnessScale = 255)
 {
   const int byteWidth = (width + 7) >> 3;
   if (byteWidth <= 0)
@@ -1059,15 +1079,16 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
   }
 
   const bool useStaticColorMode = staticColorModeEnabled;
+  const uint16_t combinedBrightnessScale = static_cast<uint16_t>(
+      (static_cast<uint32_t>(globalBrightnessScaleFixed) * static_cast<uint16_t>(brightnessScale) + 128u) >> 8);
   uint16_t staticColor565 = 0;
   if (useStaticColorMode)
   {
     ensureStaticColorLoaded();
     CRGB color = gStaticColorState.color;
-    const uint16_t scaleBrightness = globalBrightnessScaleFixed;
-    color.r = static_cast<uint8_t>((static_cast<uint16_t>(color.r) * scaleBrightness + 128) >> 8);
-    color.g = static_cast<uint8_t>((static_cast<uint16_t>(color.g) * scaleBrightness + 128) >> 8);
-    color.b = static_cast<uint8_t>((static_cast<uint16_t>(color.b) * scaleBrightness + 128) >> 8);
+    color.r = static_cast<uint8_t>((static_cast<uint16_t>(color.r) * combinedBrightnessScale + 128) >> 8);
+    color.g = static_cast<uint8_t>((static_cast<uint16_t>(color.g) * combinedBrightnessScale + 128) >> 8);
+    color.b = static_cast<uint8_t>((static_cast<uint16_t>(color.b) * combinedBrightnessScale + 128) >> 8);
     staticColor565 = dma_display->color565(color.r, color.g, color.b);
   }
 
@@ -1085,7 +1106,7 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
   const uint8_t t2 = static_cast<uint8_t>(t >> 1);
   const uint8_t t3 = static_cast<uint8_t>(((effectiveTimeFixed / 3U) >> 8) & 0xFF);
 
-  const uint16_t brightnessScale = globalBrightnessScaleFixed;
+  const uint16_t brightnessScaleFixed = combinedBrightnessScale;
 
   for (int j = 0; j < height; ++j)
   {
@@ -1115,7 +1136,7 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
 
           const uint8_t paletteIndex = static_cast<uint8_t>(v + time_offset);
           CRGB color = ColorFromPalette(currentPalette, paletteIndex);
-          const uint16_t scale = brightnessScale;
+          const uint16_t scale = brightnessScaleFixed;
           color.r = static_cast<uint8_t>((static_cast<uint16_t>(color.r) * scale + 128) >> 8);
           color.g = static_cast<uint8_t>((static_cast<uint16_t>(color.g) * scale + 128) >> 8);
           color.b = static_cast<uint8_t>((static_cast<uint16_t>(color.b) * scale + 128) >> 8);
@@ -1400,8 +1421,9 @@ void drawPlasmaFace()
   // drawPlasmaXbm(0, 16, 64, 16, maw, 32, 2.0);
   // drawPlasmaXbm(64, 16, 64, 16, mawL, 32, 2.0);
 
-  drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 32, 0.5);
-  drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 32, 0.5);
+  const uint8_t mouthBrightness = micGetMouthBrightness();
+  drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 32, 0.5f, 0.2f, mouthBrightness);
+  drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 32, 0.5f, 0.2f, mouthBrightness);
 }
 
 void updatePlasmaFace()
@@ -1897,15 +1919,16 @@ void baseFace()
 
   blinkingEyes(); // This function now correctly uses the global offsets internally
 
+  const uint8_t mouthBrightness = micGetMouthBrightness();
   if (mouthOpen)
   {
-    drawPlasmaXbm(0, 10, 64, 22, maw2, 0, 1.0);
-    drawPlasmaXbm(64, 10, 64, 22, maw2L, 128, 1.0); // Left eye open (phase offset)
+    drawPlasmaXbm(0, 10, 64, 22, maw2, 0, 1.0f, 0.2f, mouthBrightness);
+    drawPlasmaXbm(64, 10, 64, 22, maw2L, 128, 1.0f, 0.2f, mouthBrightness); // Left eye open (phase offset)
   }
   else
   {
-    drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 0, 1.0);     // Right eye
-    drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0); // Left eye (phase offset)
+    drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 0, 1.0f, 0.2f, mouthBrightness);     // Right eye
+    drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0f, 0.2f, mouthBrightness); // Left eye (phase offset)
   }
 
   drawPlasmaXbm(56, 4 + final_y_offset, 8, 8, nose, 64, 2.0);
@@ -3009,8 +3032,8 @@ void displayCurrentMaw()
 #if DEBUG_MODE
     Serial.println("Displaying Closed maw");
 #endif
-    drawXbm565(0, 10, 64, 22, maw2Closed, dma_display->color565(255, 255, 255));
-    drawXbm565(64, 10, 64, 22, maw2ClosedL, dma_display->color565(255, 255, 255));
+    drawXbm565(0, 10, 64, 22, maw2Closed, col);
+    drawXbm565(64, 10, 64, 22, maw2ClosedL, col);
   }
 }
 // Runs one frame of the Pixel Dust animation
@@ -3192,7 +3215,7 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     renderLoadingBarView,          // VIEW_LOADING_BAR
     patternPlasma,                 // VIEW_PATTERN_PLASMA
     drawTransFlag,                 // VIEW_TRANS_FLAG
-    drawLGBTFlag,                  // VIEW_LGBT_FLAG
+//    drawLGBTFlag,                  // VIEW_LGBT_FLAG NOTE: Commented out as requires re-ordering
     renderFaceWithPlasma,          // VIEW_NORMAL_FACE
     renderFaceWithPlasma,          // VIEW_BLUSH_FACE
     renderFaceWithPlasma,          // VIEW_SEMICIRCLE_EYES
@@ -3211,7 +3234,8 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     renderFullscreenSpiralWhite,   // VIEW_FULLSCREEN_SPIRAL_WHITE
     renderScrollingTextView,       // VIEW_SCROLLING_TEXT
     renderPixelDustView,           // VIEW_PIXEL_DUST
-    staticColor                    // VIEW_STATIC_COLOR
+    staticColor,                    // VIEW_STATIC_COLOR
+    drawLGBTFlag                  // VIEW_LGBT_FLAG
 };
 
 static_assert(sizeof(VIEW_RENDERERS) / sizeof(ViewRenderFunc) == TOTAL_VIEWS, "View renderer table mismatch");
@@ -3234,6 +3258,7 @@ void displayCurrentView(int view)
   if (view != previousViewLocal)
   { // Check if the view has changed
     facePlasmaDirty = true;
+    micSetEnabled(viewUsesMic(view));
     if (view == 5)
     {
       // Reset fade logic when entering the blush view
@@ -3405,6 +3430,7 @@ void enterSleepMode()
     return; // Already sleeping
   Serial.println("Entering sleep mode");
   sleepModeActive = true;
+  micSetEnabled(false);
   preSleepView = currentView;                   // Save current view
   dma_display->setBrightness8(sleepBrightness); // Lower display brightness
   updateGlobalBrightnessScale(sleepBrightness);

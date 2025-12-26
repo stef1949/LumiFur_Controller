@@ -11,6 +11,7 @@
 static TaskHandle_t s_micTaskHandle = nullptr;
 static volatile bool s_mouthOpen = false;
 static volatile uint8_t s_mouthBrightness = MIC_MIN_BRIGHTNESS;
+static volatile bool s_micEnabled = true;
 
 static void configureI2S()
 {
@@ -20,10 +21,10 @@ static void configureI2S()
       .bits_per_sample = MIC_BITS_PER_SAMPLE,
       .channel_format = MIC_CHANNEL_FORMAT,
       .communication_format = static_cast<i2s_comm_format_t>(MIC_COMM_FORMAT),
-      .intr_alloc_flags = 0,
+      .intr_alloc_flags = 1,
       .dma_buf_count = MIC_DMA_BUF_COUNT,
       .dma_buf_len = MIC_DMA_BUF_LEN,
-      .use_apll = false,
+      .use_apll = true,
       .tx_desc_auto_clear = false,
       .fixed_mclk = 0};
 
@@ -59,13 +60,69 @@ static void micTask(void *param)
   static int32_t micBuffer[MIC_DMA_BUF_LEN];
   float ambientNoiseLevel = (MIC_MIN_AMBIENT_LEVEL + MIC_MAX_AMBIENT_LEVEL) * 0.5f;
   float smoothedSignalLevel = 0.0f;
+  float brightnessEma = static_cast<float>(MIC_MIN_BRIGHTNESS);
   unsigned long lastSoundTime = 0;
   unsigned long lastAmbientUpdateTime = 0;
+  unsigned long lastFrameTime = 0;
+  unsigned long activeMs = 0;
+  unsigned long impulseHoldUntil = 0;
   unsigned long mouthOpenSince = 0;
   bool wasMouthOpen = false;
+  bool i2sRunning = true;
+
+  auto resetMicState = [&]()
+  {
+    ambientNoiseLevel = (MIC_MIN_AMBIENT_LEVEL + MIC_MAX_AMBIENT_LEVEL) * 0.5f;
+    smoothedSignalLevel = 0.0f;
+    brightnessEma = static_cast<float>(MIC_MIN_BRIGHTNESS);
+    s_mouthBrightness = MIC_MIN_BRIGHTNESS;
+    s_mouthOpen = false;
+    lastSoundTime = 0;
+    lastAmbientUpdateTime = 0;
+    lastFrameTime = 0;
+    activeMs = 0;
+    impulseHoldUntil = 0;
+    mouthOpenSince = 0;
+    wasMouthOpen = false;
+  };
+
+  auto updateBrightness = [&](float targetBrightness)
+  {
+    const float alpha = (targetBrightness > brightnessEma) ? MIC_BRIGHTNESS_ATTACK_ALPHA : MIC_BRIGHTNESS_RELEASE_ALPHA;
+    brightnessEma += alpha * (targetBrightness - brightnessEma);
+    brightnessEma = constrain(brightnessEma,
+                              static_cast<float>(MIC_MIN_BRIGHTNESS),
+                              static_cast<float>(MIC_MAX_BRIGHTNESS));
+    s_mouthBrightness = static_cast<uint8_t>(brightnessEma + 0.5f);
+  };
 
   for (;;)
   {
+    if (!s_micEnabled)
+    {
+      if (i2sRunning)
+      {
+        i2s_stop(MIC_I2S_PORT);
+#ifdef MIC_PD_PIN
+        digitalWrite(MIC_PD_PIN, LOW);
+#endif
+        i2sRunning = false;
+      }
+      resetMicState();
+      vTaskDelay(pdMS_TO_TICKS(50));
+      continue;
+    }
+
+    if (!i2sRunning)
+    {
+#ifdef MIC_PD_PIN
+      digitalWrite(MIC_PD_PIN, HIGH);
+#endif
+      i2s_start(MIC_I2S_PORT);
+      i2sRunning = true;
+      resetMicState();
+    }
+
     size_t bytesRead = 0;
     esp_err_t err = i2s_read(
         MIC_I2S_PORT,
@@ -75,6 +132,12 @@ static void micTask(void *param)
         pdMS_TO_TICKS(MIC_READ_TIMEOUT_MS));
 
     const unsigned long now = millis();
+    unsigned long elapsedMs = 0;
+    if (lastFrameTime != 0 && now >= lastFrameTime)
+    {
+      elapsedMs = now - lastFrameTime;
+    }
+    lastFrameTime = now;
 
     if (err != ESP_OK || bytesRead == 0)
     {
@@ -84,7 +147,8 @@ static void micTask(void *param)
       }
 
       smoothedSignalLevel *= (1.0f - MIC_SIGNAL_EMA_ALPHA);
-      s_mouthBrightness = MIC_MIN_BRIGHTNESS;
+      updateBrightness(static_cast<float>(MIC_MIN_BRIGHTNESS));
+      activeMs = 0;
 
 #if DEBUG_MICROPHONE
       Serial.printf(">mic_avg_abs_signal:0\n");
@@ -108,25 +172,65 @@ static void micTask(void *param)
     }
 
     uint64_t sumAbs = 0;
+    uint32_t peakAbs = 0;
     for (size_t i = 0; i < samples; ++i)
     {
       int32_t shifted = micBuffer[i] >> MIC_SAMPLE_SHIFT;
       uint32_t absVal = shifted < 0 ? static_cast<uint32_t>(-shifted) : static_cast<uint32_t>(shifted);
       sumAbs += absVal;
+      if (absVal > peakAbs)
+      {
+        peakAbs = absVal;
+      }
     }
 
     float currentAvgAbsSignal = static_cast<float>(sumAbs) / static_cast<float>(samples);
+    const float openThreshold = ambientNoiseLevel + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT;
+    const float impulseAvgLimit = ambientNoiseLevel + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * MIC_IMPULSE_MAX_AVG_RATIO;
+    const float peakToAvg = (currentAvgAbsSignal > 1.0f) ? (static_cast<float>(peakAbs) / currentAvgAbsSignal) : 0.0f;
+    const bool isImpulse = (peakToAvg >= MIC_IMPULSE_PEAK_RATIO) && (currentAvgAbsSignal < impulseAvgLimit);
+
+    if (isImpulse)
+    {
+      impulseHoldUntil = now + MIC_IMPULSE_HOLDOFF_MS;
+    }
+
+    if (now < impulseHoldUntil)
+    {
+      if (s_mouthOpen && (now - lastSoundTime > MIC_MOUTH_OPEN_HOLD_MS))
+      {
+        s_mouthOpen = false;
+      }
+
+      smoothedSignalLevel *= (1.0f - MIC_SIGNAL_EMA_ALPHA);
+      updateBrightness(static_cast<float>(MIC_MIN_BRIGHTNESS));
+      activeMs = 0;
+      wasMouthOpen = s_mouthOpen;
+      vTaskDelay(1);
+      continue;
+    }
+
     smoothedSignalLevel = MIC_SIGNAL_EMA_ALPHA * currentAvgAbsSignal + (1.0f - MIC_SIGNAL_EMA_ALPHA) * smoothedSignalLevel;
 
-    const float openThreshold = ambientNoiseLevel + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT;
     const float closeThreshold = ambientNoiseLevel + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * MIC_CLOSE_HYSTERESIS_RATIO;
 
-    if (smoothedSignalLevel > closeThreshold)
+    if (smoothedSignalLevel > openThreshold)
+    {
+      activeMs += elapsedMs;
+    }
+    else
+    {
+      activeMs = 0;
+    }
+
+    const bool qualifies = activeMs >= MIC_MIN_OPEN_MS;
+
+    if (smoothedSignalLevel > closeThreshold && (s_mouthOpen || qualifies))
     {
       lastSoundTime = now;
     }
 
-    if (smoothedSignalLevel > openThreshold)
+    if (!s_mouthOpen && smoothedSignalLevel > openThreshold && qualifies)
     {
       s_mouthOpen = true;
     }
@@ -166,14 +270,9 @@ static void micTask(void *param)
     if (normalized > 1.0f)
       normalized = 1.0f;
 
-    uint8_t brightness = static_cast<uint8_t>(MIC_MIN_BRIGHTNESS +
-                                              (MIC_MAX_BRIGHTNESS - MIC_MIN_BRIGHTNESS) * normalized);
-    if (!s_mouthOpen)
-    {
-      brightness = MIC_MIN_BRIGHTNESS;
-    }
-
-    s_mouthBrightness = brightness;
+    const float targetBrightness = static_cast<float>(MIC_MIN_BRIGHTNESS) +
+                                   (static_cast<float>(MIC_MAX_BRIGHTNESS - MIC_MIN_BRIGHTNESS) * normalized);
+    updateBrightness(targetBrightness);
 
     if (s_mouthOpen)
     {
@@ -210,6 +309,7 @@ void micInit()
 #endif
 
   configureI2S();
+  s_micEnabled = true;
 
   const BaseType_t result = xTaskCreatePinnedToCore(
       micTask,
@@ -229,6 +329,11 @@ void micInit()
   {
     Serial.println("Failed to create MicTask");
   }
+}
+
+void micSetEnabled(bool enabled)
+{
+  s_micEnabled = enabled;
 }
 
 bool micIsMouthOpen()

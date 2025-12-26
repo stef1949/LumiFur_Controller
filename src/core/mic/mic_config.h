@@ -8,16 +8,25 @@
 #define MIC_CHANNEL_FORMAT I2S_CHANNEL_FMT_ONLY_LEFT
 #define MIC_COMM_FORMAT I2S_COMM_FORMAT_STAND_I2S
 #define MIC_DMA_BUF_COUNT 8
-#define MIC_DMA_BUF_LEN 256
+#define MIC_DMA_BUF_LEN 64
 #define MIC_READ_TIMEOUT_MS 20
 
 // SPH0645 outputs ~18-bit left-aligned samples in a 32-bit frame.
-#define MIC_SAMPLE_SHIFT 13
+#define MIC_SAMPLE_SHIFT 14
 
 // Mouth animation tuning
 #define MIC_MOUTH_OPEN_HOLD_MS 300
-#define MIC_MIN_BRIGHTNESS 20
+#define MIC_MIN_BRIGHTNESS 50
 #define MIC_MAX_BRIGHTNESS 255
+// Brightness smoothing (EMA on mapped brightness).
+#define MIC_BRIGHTNESS_ATTACK_ALPHA 0.35f  // Rise speed (higher = faster)
+#define MIC_BRIGHTNESS_RELEASE_ALPHA 0.08f // Fall speed (lower = smoother)
+// Knock/tap rejection:
+// Require sustained audio before opening the mouth, and ignore short impulses.
+#define MIC_MIN_OPEN_MS 40
+#define MIC_IMPULSE_PEAK_RATIO 6.0f
+#define MIC_IMPULSE_MAX_AVG_RATIO 0.5f
+#define MIC_IMPULSE_HOLDOFF_MS 80
 
 // Envelope + ambient tracking
 // Envelope smoothing factors (Exponential Moving Average):
@@ -41,13 +50,13 @@
 
 // Ambient clamping:
 // Prevents the ambient estimate from going unrealistically low/high (helps stability across environments).
-#define MIC_MIN_AMBIENT_LEVEL 200.0f
-#define MIC_MAX_AMBIENT_LEVEL 200000.0f
+#define MIC_MIN_AMBIENT_LEVEL 10000.0f
+#define MIC_MAX_AMBIENT_LEVEL 30000.0f
 
 // Safety rule:
 // If the current signal is above this, we treat it as "active audio" and avoid updating ambient
 // (so speech doesn't become the new noise floor).
-#define MIC_MIN_SIGNAL_FOR_AMBIENT 1000.0f
+#define MIC_MIN_SIGNAL_FOR_AMBIENT 100.0f
 
 // Silence handling:
 // When quiet, update the ambient estimate at this interval to slowly follow changing background noise.

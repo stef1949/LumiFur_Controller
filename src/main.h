@@ -32,7 +32,7 @@ enum View
   VIEW_LOADING_BAR,
   VIEW_PATTERN_PLASMA,
   VIEW_TRANS_FLAG,
-  VIEW_LGBT_FLAG,
+ //VIEW_LGBT_FLAG, NOTE: Commented out as requires re-ordering
   VIEW_NORMAL_FACE,
   VIEW_BLUSH_FACE,
   VIEW_SEMICIRCLE_EYES,
@@ -52,6 +52,7 @@ enum View
   VIEW_SCROLLING_TEXT,
   VIEW_PIXEL_DUST,
   VIEW_STATIC_COLOR,
+  VIEW_LGBT_FLAG,
 
   TOTAL_VIEWS // Special entry will automatically hold the total number of views.
 };
