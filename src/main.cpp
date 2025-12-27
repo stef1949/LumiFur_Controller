@@ -1760,9 +1760,6 @@ void blinkingEyes()
     // Default case uses the slanteyes defined before the switch
   }
 
-  // Redundant direct draw branches removed — the switch above sets the correct bitmaps/positions
-  // and the subsequent drawBitmapAdvanced calls handle drawing for the selected view.
-
   // Draw the right eye (viewer's perspective)
   drawBitmapAdvanced(rightEyeX + final_x_offset, rightEyeY + final_y_offset,
                      eyeWidth, eyeHeight, rightEyeBitmap, solidColor,
