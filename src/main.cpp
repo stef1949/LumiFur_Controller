@@ -364,7 +364,7 @@ static float lastAccelDeltaX = 0, lastAccelDeltaY = 0, lastAccelDeltaZ = 0;
 static bool accelSampleValid = false;
 static bool lastMotionAboveShake = false;
 static bool lastMotionAboveSleep = false;
-uint8_t preSleepView = 4;                  // Store the view before sleep
+uint8_t preSleepView = VIEW_NORMAL_FACE;                  // Store the view before sleep
 uint8_t sleepBrightness = 15;              // Brightness level during sleep (0-255)
 uint8_t normalBrightness = userBrightness; // Normal brightness level
 volatile bool notifyPending = false;
@@ -1359,7 +1359,7 @@ void updateEyeBounceAnimation()
       newOffset = 0;
       eyeBounceCount = 0;
 
-      if (currentView == 17)
+      if (currentView == VIEW_CIRCLE_EYES)
       {
         currentView = viewBeforeEyeBounce;
         saveLastView(currentView);
@@ -1711,8 +1711,8 @@ void blinkingEyes()
   // Select eye assets and properties based on the current view
   switch (currentView)
   {
-  case 4: // Normal
-  case 5: // Blush
+  case VIEW_NORMAL_FACE: // Normal
+  case VIEW_BLUSH_FACE: // Blush
     rightEyeBitmap = (const uint8_t *)Eye;
     leftEyeBitmap = (const uint8_t *)EyeL;
     eyeWidth = 32;
@@ -1722,7 +1722,7 @@ void blinkingEyes()
     leftEyeX = 96;
     leftEyeY = 0;
     break;
-  case 6: // Semicircle
+  case VIEW_SEMICIRCLE_EYES: // Semicircle
     rightEyeBitmap = (const uint8_t *)semicircleeyes;
     leftEyeBitmap = (const uint8_t *)semicircleeyes; // Same bitmap, different plasma offset
     eyeWidth = 32;
@@ -1732,7 +1732,7 @@ void blinkingEyes()
     leftEyeX = 94;
     leftEyeY = 2;
     break;
-  case 7: // X eyes
+  case VIEW_X_EYES: // X eyes
     rightEyeBitmap = (const uint8_t *)x_eyes;
     leftEyeBitmap = (const uint8_t *)x_eyes; // Same bitmap
     eyeWidth = 31;
@@ -1742,12 +1742,12 @@ void blinkingEyes()
     leftEyeX = 96;
     leftEyeY = 0;
     break;
-  case 8: // Slant eyes (This is also the default)
+  case VIEW_SLANT_EYES: // Slant eyes (This is also the default)
     // Values are already set by default
     break;
-  case 9:   // Spiral eyes
+  case VIEW_SPIRAL_EYES:   // Spiral eyes
     return; // Spiral view handles its own drawing, so we exit here.
-  case 17:  // Circle eyes
+  case VIEW_CIRCLE_EYES:  // Circle eyes
     rightEyeBitmap = (const uint8_t *)circleeyes;
     leftEyeBitmap = (const uint8_t *)circleeyes; // Same bitmap
     eyeWidth = 25;
@@ -1931,7 +1931,7 @@ void baseFace()
   drawPlasmaXbm(56, 4 + final_y_offset, 8, 8, nose, 64, 2.0);
   drawPlasmaXbm(64, 4 + final_y_offset, 8, 8, noseL, 64, 2.0);
 
-  if (currentView > 3)
+  if (currentView >= VIEW_NORMAL_FACE)
   { // Only draw blush effect for face views, not utility views
     if (blushState != BlushState::Inactive)
     { // Only draw if blush is active
@@ -2805,7 +2805,7 @@ void setup()
   // e.g., currentView = getLastView();
 
   // If the initial view is the fluid effect, call begin()
-  if (currentView == 16 && fluidEffectInstance)
+  if (currentView == VIEW_FLUID_EFFECT && fluidEffectInstance)
   { // Assuming 16 is the fluid effect view
     fluidEffectInstance->begin();
   }
@@ -3212,7 +3212,7 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     renderLoadingBarView,          // VIEW_LOADING_BAR
     patternPlasma,                 // VIEW_PATTERN_PLASMA
     drawTransFlag,                 // VIEW_TRANS_FLAG
-//    drawLGBTFlag,                  // VIEW_LGBT_FLAG NOTE: Commented out as requires re-ordering
+//  drawLGBTFlag,                  // VIEW_LGBT_FLAG NOTE: Commented out as requires re-ordering
     renderFaceWithPlasma,          // VIEW_NORMAL_FACE
     renderFaceWithPlasma,          // VIEW_BLUSH_FACE
     renderFaceWithPlasma,          // VIEW_SEMICIRCLE_EYES
@@ -3256,7 +3256,7 @@ void displayCurrentView(int view)
   { // Check if the view has changed
     facePlasmaDirty = true;
     micSetEnabled(viewUsesMic(view));
-    if (view == 5)
+    if (view == VIEW_BLUSH_FACE)
     {
       // Reset fade logic when entering the blush view
       blushStateStartTime = millis();
@@ -3266,7 +3266,7 @@ void displayCurrentView(int view)
       Serial.println("Entered blush view, resetting fade logic");
 #endif
     }
-    if (view == 16)
+    if (view == VIEW_FLUID_EFFECT)
     { // If switching to Fluid Animation view
       if (fluidEffectInstance)
       {
@@ -3536,15 +3536,15 @@ void loop()
     // --- Motion Detection (for shake effect to change view) ---
     {
       PROFILE_SECTION("MotionDetection");
-      if (accelerometerEnabled && g_accelerometer_initialized && currentView != 16)
+      if (accelerometerEnabled && g_accelerometer_initialized && currentView != VIEW_FLUID_EFFECT)
       {
         useShakeSensitivity = true; // Use high threshold for shake detection
         if (detectMotion())
         { // detectMotion uses the current useShakeSensitivity
-          if (currentView != 9)
+          if (currentView != VIEW_SPIRAL_EYES)
           {                              // Prevent re-triggering if already spiral
             previousView = currentView;  // Save the current view.
-            currentView = 9;             // Switch to spiral eyes view
+            currentView = VIEW_SPIRAL_EYES;             // Switch to spiral eyes view
             spiralStartMillis = loopNow; // Record the trigger time.
             LOG_DEBUG_LN("Shake detected! Switching to Spiral View.");
             notifyBleTask();
@@ -3587,13 +3587,13 @@ void loop()
       LOG_DEBUG("View changed by button: %d\n", currentView);
       notifyBleTask();
       // Reset specific view states if necessary when changing views
-      if (currentView != 5)
+      if (currentView != VIEW_BLUSH_FACE)
       { // If leaving blush view
         blushState = BlushState::Inactive;
         blushBrightness = 0;
         // disableBlush(); // Clears pixels, but displayCurrentView will clear anyway
       }
-      if (currentView != 9)
+      if (currentView != VIEW_SPIRAL_EYES)
       { // Reset spiral timer
         spiralStartMillis = 0;
       }
@@ -3662,7 +3662,7 @@ void loop()
                    proximityLatchedHigh = true;
 
                    // Eye Bounce Trigger - Switch to View 17 (Circle Eyes) (MODIFIED)
-                   if (!isEyeBouncing && currentView != 16)
+                   if (!isEyeBouncing && currentView != VIEW_FLUID_EFFECT)
                    {
                      LOG_DEBUG_LN("Proximity! Starting eye bounce sequence & switching to Circle Eyes (View 17).");
 #if DEBUG_PROXIMITY
@@ -3670,11 +3670,11 @@ void loop()
 #endif
 
                      // Store current view and switch to Circle Eyes (view 17)
-                     if (currentView != 9 && currentView != 17)
+                     if (currentView != VIEW_SPIRAL_EYES && currentView != VIEW_CIRCLE_EYES)
                      {                                    // Avoid conflicting with spiral or re-triggering
                        viewBeforeEyeBounce = currentView; // <<< MODIFIED: Store current view here
 
-                       currentView = 17; // Switch to "Circle Eyes" view
+                       currentView = VIEW_CIRCLE_EYES; // Switch to "Circle Eyes" view
                        // saveLastView(currentView); // Optional: save temporary view 17
                        notifyBleTask();
                      }
@@ -3707,7 +3707,7 @@ void loop()
                      // 3. Bounce wasn't *just* triggered (which might have handled its own blush)
                      // 4. Current view is NOT the dedicated blush view (5)
                      //    AND current view is NOT the temporary bounce/circle view (17)
-                     if (currentView != 5 && currentView != 17)
+                     if (currentView != VIEW_BLUSH_FACE && currentView != VIEW_CIRCLE_EYES)
                      {
                        LOG_DEBUG_LN("Proximity! Triggering blush overlay effect.");
 #if DEBUG_PROXIMITY
@@ -3761,7 +3761,7 @@ void loop()
     // --- Revert from Spiral View Timer ---
     // Use a local copy to avoid updating spiralStartMillis inside hasElapsedSince
     unsigned long spiralStartMillisCopy = spiralStartMillis;
-    if (currentView == 9 && spiralStartMillisCopy > 0 && hasElapsedSince(loopNow, spiralStartMillisCopy, 5000))
+    if (currentView == VIEW_SPIRAL_EYES && spiralStartMillisCopy > 0 && hasElapsedSince(loopNow, spiralStartMillisCopy, 5000))
     {
       LOG_DEBUG_LN("Spiral timeout, reverting view.");
       currentView = previousView;
@@ -3811,7 +3811,7 @@ void loop()
 
   /*
   // If the current view is one of the plasma views, increase the interval to reduce load
-  if (currentView == 2 || currentView == 10) {
+  if (currentView == VIEW_PATTERN_PLASMA || currentView == VIEW_PLASMA_FACE) {
     baseInterval = 10; // Use 15 ms for plasma view
   }
   */
