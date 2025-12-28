@@ -4,6 +4,8 @@
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 bool devicePairing = false;
+uint32_t pairingPasskey = 0;
+bool pairingPasskeyValid = false;
 
 NimBLEServer *pServer = nullptr;
 NimBLECharacteristic *pCharacteristic = nullptr;

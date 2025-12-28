@@ -1,6 +1,8 @@
 #include "ble/ble_server.h"
 #include "ble/ble_state.h"
 
+#include "esp_system.h"
+
 void ServerCallbacks::onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo)
 {
     deviceConnected = true;
@@ -23,6 +25,7 @@ void ServerCallbacks::onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo)
 void ServerCallbacks::onPairingRequest(NimBLEServer *pServer, NimBLEConnInfo &connInfo)
 {
     devicePairing = true;
+    pairingPasskeyValid = false;
 #if DEBUG_BLE
     Serial.printf("Pairing request from: %s\n", connInfo.getAddress().toString().c_str());
 #endif
@@ -31,6 +34,8 @@ void ServerCallbacks::onPairingRequest(NimBLEServer *pServer, NimBLEConnInfo &co
 void ServerCallbacks::onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason)
 {
     deviceConnected = false;
+    devicePairing = false;
+    pairingPasskeyValid = false;
     NimBLEDevice::startAdvertising();
 #if DEBUG_BLE
     Serial.println("Client disconnected - advertising");
@@ -50,10 +55,14 @@ uint32_t ServerCallbacks::onPassKeyDisplay()
      * This should return a random 6 digit number for security
      *  or make your own static passkey as done here.
      */
+    const uint32_t passkey = esp_random() % 1000000;
+    pairingPasskey = passkey;
+    pairingPasskeyValid = true;
+    devicePairing = true;
 #if DEBUG_BLE
-    Serial.printf("Server Passkey Display\n");
+    Serial.printf("Server Passkey Display: %06" PRIu32 "\n", passkey);
 #endif
-    return 123456;
+    return passkey;
 }
 
 void ServerCallbacks::onConfirmPassKey(NimBLEConnInfo &connInfo, uint32_t pass_key)
@@ -61,6 +70,9 @@ void ServerCallbacks::onConfirmPassKey(NimBLEConnInfo &connInfo, uint32_t pass_k
 #if DEBUG_BLE
     Serial.printf("The passkey YES/NO number: %" PRIu32 "\n", pass_key);
 #endif
+    pairingPasskey = pass_key;
+    pairingPasskeyValid = true;
+    devicePairing = true;
     /** Inject false if passkeys don't match. */
     NimBLEDevice::injectConfirmPasskey(connInfo, true);
 }
@@ -72,7 +84,11 @@ void ServerCallbacks::onAuthenticationComplete(NimBLEConnInfo &connInfo)
         Serial.printf("Encryption not established for: %s\n", connInfo.getAddress().toString().c_str());
         // Instead of disconnecting, you might choose to leave the connection or handle it gracefully.
         // For production use you can decide to force disconnect once you’re sure your client supports pairing.
+        devicePairing = false;
+        pairingPasskeyValid = false;
         return;
     }
+    devicePairing = false;
+    pairingPasskeyValid = false;
     Serial.printf("Secured connection to: %s\n", connInfo.getAddress().toString().c_str());
 }
