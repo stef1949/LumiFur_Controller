@@ -199,9 +199,9 @@ void updateLux()
         // Verify that the device is connected and the lux characteristic pointer is valid.
         if (deviceConnected && pLuxCharacteristic != nullptr)
         {
-            // Get current lux value from the APDS9960 sensor
-            extern uint16_t getRawClearChannelValue(); // Function from main.h
-            uint16_t currentLux = getRawClearChannelValue();
+            // Get current lux value from the APDS9960 sensor (in lux)
+            extern uint16_t getAmbientLuxU16(); // Function from main.h
+            uint16_t currentLux = getAmbientLuxU16();
 
             // Only send update if lux has changed significantly to avoid spam
             if (abs(static_cast<int>(currentLux) - static_cast<int>(lastSentLuxValue)) >= luxChangeThreshold)
