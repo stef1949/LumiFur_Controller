@@ -21,6 +21,11 @@ static char dino [] PROGMEM = {
 	0x80, 0x08, 0x40, 0x28, 0x20, 0x38, 0x10, 0x40, 0x16, 0xc0, 0x16, 0x80, 0x12, 0x40, 0x1d, 0xc0
 };
 
+// 'cactus', 5x6px
+static char cactus [] PROGMEM = {
+	0xa0, 0xa8, 0x68, 0x30, 0x20, 0x70
+};
+
 // DVD-Video_Logo, 23x10px
 static char DvDLogo [] PROGMEM = {
 	0x7f, 0x83, 0xf8, 0x63, 0xc7, 0x8e, 0x63, 0x6d, 0x8e, 0x63, 0x79, 0x8c, 0x7e, 0x79, 0xf8, 0x78, 
@@ -318,7 +323,7 @@ static uint8_t spiralL[] PROGMEM = {
   0x00, 0x00, 0x00, 0x00
 };
 // 0buffer icons for transitions
-uint8_t bufferL[] = {
+static uint8_t bufferL[] = {
     0b00000000, 0b00000000,
                      0b00000000, 0b00000000,
                      0b00000000, 0b00000000,
@@ -328,7 +333,7 @@ uint8_t bufferL[] = {
                      0b00000000, 0b00000000,
                      0b00000000, 0b00000000
                      };
-uint8_t bufferR[] = {
+static uint8_t bufferR[] = {
     0b00000000, 0b00000000,
                      0b00000000, 0b00000000,
                      0b00000000, 0b00000000,
@@ -338,7 +343,7 @@ uint8_t bufferR[] = {
                      0b00000000, 0b00000000,
                      0b00000000, 0b00000000
                      };
-uint8_t fftIcon1[] = {
+static uint8_t fftIcon1[] = {
     0b00000000, 0b00000000,
                       0b00000000, 0b00000000,
                       0b00000000, 0b00000000,
@@ -348,7 +353,7 @@ uint8_t fftIcon1[] = {
                       0b00000000, 0b00000000,
                       0b00000000, 0b00000000
                       };
-uint8_t fftIcon2[] = {
+static uint8_t fftIcon2[] = {
     0b00000000, 0b00000000,
                       0b00000000, 0b00000000,
                       0b00000000, 0b00000000,
@@ -358,7 +363,7 @@ uint8_t fftIcon2[] = {
                       0b00000000, 0b00000000,
                       0b00000000, 0b00000000
                       };
-uint8_t fftIcon1L[] = {
+static uint8_t fftIcon1L[] = {
     0b00000000, 0b00000000,
                        0b00000000, 0b00000000,
                        0b00000000, 0b00000000,
@@ -368,7 +373,7 @@ uint8_t fftIcon1L[] = {
                        0b00000000, 0b00000000,
                        0b00000000, 0b00000000
                        };
-uint8_t fftIcon2L[] = {
+static uint8_t fftIcon2L[] = {
     0b00000000, 0b00000000,
                        0b00000000, 0b00000000,
                        0b00000000, 0b00000000,

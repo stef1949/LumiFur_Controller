@@ -13,6 +13,7 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include <esp_task_wdt.h>
+#include <cmath>
 
 // #include "customFonts/lequahyper20pt7b.h" // Stylized font
 // #include <Fonts/FreeSansBold18pt7b.h>     // Larger font
@@ -50,6 +51,7 @@ enum View
   VIEW_FULLSCREEN_SPIRAL_PALETTE,
   VIEW_FULLSCREEN_SPIRAL_WHITE,
   VIEW_SCROLLING_TEXT,
+  VIEW_DINO_GAME,
   VIEW_PIXEL_DUST,
   VIEW_STATIC_COLOR,
   //VIEW_LGBT_FLAG
@@ -86,13 +88,13 @@ bool downloadFlag = false;
 
 ////////////////////// DEBUG MODE //////////////////////
 #define DEBUG_MODE 0          // Set to 1 to enable debug outputs
-#define DEBUG_MICROPHONE 1    // Set to 1 to enable microphone debug outputs
+#define DEBUG_MICROPHONE 0    // Set to 1 to enable microphone debug outputs
 #define DEBUG_ACCELEROMETER 0 // Set to 1 to enable accelerometer debug outputs
 #define DEBUG_BRIGHTNESS 0    // Set to 1 to enable brightness debug outputs
 #define DEBUG_VIEWS 0         // Set to 1 to enable views debug outputs
 #define DEBUG_VIEW_TIMING 0   // Set to 1 to enable views debug outputs
 #define DEBUG_FPS_COUNTER 0   // Set to 1 to enable FPS counter debug outputs
-#define DEBUG_PROXIMITY 0     // Set to 1 to enable proximity sensor debug logs
+#define DEBUG_PROXIMITY 1     // Set to 1 to enable proximity sensor debug logs
 #define TEXT_DEBUG 1          // Set to 1 to enable text debug outputs
 #define DEBUG_FLUID_EFFECT 0  // Set to 1 to enable fluid effect debug outputs
 #if DEBUG_MODE
@@ -275,12 +277,24 @@ constexpr unsigned long APDS_PROX_CACHE_MS = 50;     // Minimum spacing between 
 
 // float ambientLux = 0.0;
 static uint16_t lastKnownClearValue = 0; // Initialize to a sensible default
+static uint16_t lastKnownRedValue = 0;
+static uint16_t lastKnownGreenValue = 0;
+static uint16_t lastKnownBlueValue = 0;
+static float lastKnownLuxValue = 0.0f;
+static apds9960AGain_t apdsColorGain = APDS9960_AGAIN_4X;
+static uint16_t apdsIntegrationTimeMs = 10;
+constexpr uint16_t APDS_LUX_INTEGRATION_MIN_MS = 3;
+constexpr uint16_t APDS_LUX_INTEGRATION_MAX_MS = 100;
+constexpr uint16_t APDS_CLEAR_LOW_COUNT = 200;
+constexpr uint16_t APDS_CLEAR_HIGH_COUNT = 60000;
+constexpr float APDS_LUX_REFERENCE_INTEGRATION_MS = 10.0f;
+constexpr float APDS_LUX_REFERENCE_GAIN = 4.0f;
 float smoothedLux = 50.0f;
 const float luxSmoothingFactor = 0.15f;        // Adjust between 0.05 - 0.3
 float currentBrightness = 128.0f;              // NEW: Current brightness as a float for smoothing
-const float brightnessSmoothingFactor = 0.05f; // NEW: How quickly brightness adapts (0.01-0.1)
+const float brightnessSmoothingFactor = 0.90f; // NEW: How quickly brightness adapts (0.01-0.1)
 int lastBrightness = 0;
-const int brightnessThreshold = 3; // Only update if change > X
+const int brightnessThreshold = 1; // Only update if change > X
 unsigned long lastLuxUpdate = 0;
 const unsigned long luxUpdateInterval = 250; // Reduce read frequency to ease I2C contention
 
@@ -316,8 +330,8 @@ void setupAdaptiveBrightness()
   // Boost sensitivity for proximity and color for auto-brightness
   apds.setProxGain(APDS9960_PGAIN_8X);
   // apds.setLEDDrive(APDS9960_LEDDRIVE_100MA);
-  apds.setADCIntegrationTime(49); // ~50ms
-  // apds.setADCGain(APDS9960_AGAIN_8X);
+  apds.setADCGain(apdsColorGain);
+  apds.setADCIntegrationTime(apdsIntegrationTimeMs); // Tuning for lux range
   apds.enableProximity(true);                  // enable proximity mode
   apds.enableColor(true);                      // enable color mode
   apds.setProximityInterruptThreshold(0, 175); // set the interrupt threshold to fire when proximity reading goes above 175
@@ -333,14 +347,121 @@ void setupAdaptiveBrightness()
 }
 
 // Setup functions for adaptive brightness & proximity sensing using APDS9960:
-uint16_t getRawClearChannelValue()
+static float apdsGainToFloat(apds9960AGain_t gain)
+{
+  switch (gain)
+  {
+  case APDS9960_AGAIN_1X:
+    return 1.0f;
+  case APDS9960_AGAIN_4X:
+    return 4.0f;
+  case APDS9960_AGAIN_16X:
+    return 16.0f;
+  case APDS9960_AGAIN_64X:
+    return 64.0f;
+  default:
+    return 4.0f;
+  }
+}
+
+static apds9960AGain_t apdsStepGain(apds9960AGain_t gain, bool increase)
+{
+  switch (gain)
+  {
+  case APDS9960_AGAIN_1X:
+    return increase ? APDS9960_AGAIN_4X : APDS9960_AGAIN_1X;
+  case APDS9960_AGAIN_4X:
+    return increase ? APDS9960_AGAIN_16X : APDS9960_AGAIN_1X;
+  case APDS9960_AGAIN_16X:
+    return increase ? APDS9960_AGAIN_64X : APDS9960_AGAIN_4X;
+  case APDS9960_AGAIN_64X:
+    return increase ? APDS9960_AGAIN_64X : APDS9960_AGAIN_16X;
+  default:
+    return APDS9960_AGAIN_4X;
+  }
+}
+
+static float calculateLuxFromRgb(uint16_t r, uint16_t g, uint16_t b)
+{
+  float illuminance = (-0.32466f * r) + (1.57837f * g) + (-0.73191f * b);
+  if (illuminance < 0.0f)
+  {
+    illuminance = 0.0f;
+  }
+  return illuminance;
+}
+
+static float scaleLuxForSettings(float luxRaw)
+{
+  const float gain = apdsGainToFloat(apdsColorGain);
+  const float integrationMs = static_cast<float>(apdsIntegrationTimeMs);
+  if (gain <= 0.0f || integrationMs <= 0.0f)
+  {
+    return luxRaw;
+  }
+  const float scale = (APDS_LUX_REFERENCE_INTEGRATION_MS * APDS_LUX_REFERENCE_GAIN) / (integrationMs * gain);
+  return luxRaw * scale;
+}
+
+static void adjustApdsColorRange(uint16_t clear)
+{
+  bool changed = false;
+
+  if (clear >= APDS_CLEAR_HIGH_COUNT)
+  {
+    if (apdsColorGain != APDS9960_AGAIN_1X)
+    {
+      apdsColorGain = apdsStepGain(apdsColorGain, false);
+      changed = true;
+    }
+    else if (apdsIntegrationTimeMs > APDS_LUX_INTEGRATION_MIN_MS)
+    {
+      apdsIntegrationTimeMs = static_cast<uint16_t>(apdsIntegrationTimeMs / 2);
+      if (apdsIntegrationTimeMs < APDS_LUX_INTEGRATION_MIN_MS)
+      {
+        apdsIntegrationTimeMs = APDS_LUX_INTEGRATION_MIN_MS;
+      }
+      changed = true;
+    }
+  }
+  else if (clear <= APDS_CLEAR_LOW_COUNT)
+  {
+    if (apdsColorGain != APDS9960_AGAIN_64X)
+    {
+      apdsColorGain = apdsStepGain(apdsColorGain, true);
+      changed = true;
+    }
+    else if (apdsIntegrationTimeMs < APDS_LUX_INTEGRATION_MAX_MS)
+    {
+      apdsIntegrationTimeMs = static_cast<uint16_t>(apdsIntegrationTimeMs * 2);
+      if (apdsIntegrationTimeMs > APDS_LUX_INTEGRATION_MAX_MS)
+      {
+        apdsIntegrationTimeMs = APDS_LUX_INTEGRATION_MAX_MS;
+      }
+      changed = true;
+    }
+  }
+
+  if (changed)
+  {
+    apds.setADCGain(apdsColorGain);
+    apds.setADCIntegrationTime(apdsIntegrationTimeMs);
+#if DEBUG_BRIGHTNESS
+    Serial.printf("APDS range adjust: gain=%.0fx it=%ums\n",
+                  apdsGainToFloat(apdsColorGain),
+                  apdsIntegrationTimeMs);
+#endif
+  }
+}
+
+static void updateAmbientLightSample()
 {
   static unsigned long lastLogTime = 0;
   const unsigned long logInterval = 500; // Log 2 times per second
 
   if (!apdsInitialized)
   {
-    return lastKnownClearValue;
+    return;
   }
 
   if (apds.colorDataReady())
@@ -348,19 +469,54 @@ uint16_t getRawClearChannelValue()
     uint16_t r, g, b, c;
     apds.getColorData(&r, &g, &b, &c);
 
-#if DEBUG_BRIGHTNESS
-    Serial.print("Ambient light level (clear channel): ");
+    lastKnownRedValue = r;
+    lastKnownGreenValue = g;
+    lastKnownBlueValue = b;
     lastKnownClearValue = c;
-    Serial.println(c);
-#else
-    lastKnownClearValue = c; // Update last known good value
+
+    lastKnownLuxValue = scaleLuxForSettings(calculateLuxFromRgb(r, g, b));
+
+    adjustApdsColorRange(c);
+
+#if DEBUG_BRIGHTNESS
+    unsigned long now = millis();
+    if (now - lastLogTime >= logInterval)
+    {
+      lastLogTime = now;
+      Serial.printf("Ambient light: clear=%u lux=%.1f gain=%.0fx it=%ums\n",
+                    c,
+                    lastKnownLuxValue,
+                    apdsGainToFloat(apdsColorGain),
+                    apdsIntegrationTimeMs);
+    }
 #endif
-    return c; // Return the raw clear channel value
   }
-  else
+}
+
+uint16_t getRawClearChannelValue()
+{
+  updateAmbientLightSample();
+  return lastKnownClearValue;
+}
+
+float getAmbientLux()
+{
+  updateAmbientLightSample();
+  return lastKnownLuxValue;
+}
+
+uint16_t getAmbientLuxU16()
+{
+  float lux = getAmbientLux();
+  if (lux < 0.0f)
   {
-    return lastKnownClearValue; // Return the last good value if current not available
+    lux = 0.0f;
   }
+  if (lux > 65535.0f)
+  {
+    lux = 65535.0f;
+  }
+  return static_cast<uint16_t>(lux + 0.5f);
 }
 
 void updateAdaptiveBrightness()
@@ -372,11 +528,13 @@ void updateAdaptiveBrightness()
     if (lastBrightness != userBrightness)
     {
       dma_display->setBrightness8(userBrightness);
+      updateGlobalBrightnessScale(userBrightness);
       lastBrightness = userBrightness;
 #ifdef DEBUG_BRIGHTNESS
       Serial.printf(">>>> MANUAL: BRIGHTNESS SET TO %d <<<<\n", userBrightness);
 #endif
     }
+    currentBrightness = static_cast<float>(userBrightness);
     return;
   }
 
@@ -385,36 +543,35 @@ void updateAdaptiveBrightness()
     // Sensor unavailable: fall back to manual brightness without blocking FPS
     autoBrightnessEnabled = false;
     dma_display->setBrightness8(userBrightness);
+    updateGlobalBrightnessScale(userBrightness);
     lastBrightness = userBrightness;
+    currentBrightness = static_cast<float>(userBrightness);
     return;
   }
 
-  uint16_t rawClearValue = getRawClearChannelValue();
+  float currentLux = getAmbientLux();
 
-  float currentLuxEquivalent = static_cast<float>(rawClearValue);
-
-  smoothedLux = (luxSmoothingFactor * currentLuxEquivalent) + ((1.0f - luxSmoothingFactor) * smoothedLux);
+  smoothedLux = (luxSmoothingFactor * currentLux) + ((1.0f - luxSmoothingFactor) * smoothedLux);
 
   // --- CRITICAL CALIBRATION SECTION ---
 
-  const int min_brightness_output = 80;  // Fall back to user-set brightness when dark NOTE: use  userBrightness to revert to user setting
-  const int max_brightness_output = 255; // Preserve full-range capability
-  const float min_clear_for_map = 2.0f;  // Adjusted dark threshold
-  const float max_clear_for_map = 50.0f; // Adjusted bright threshold
-                                         // OBSERVE rawClearValue via Serial.print to refine these.
+  const int min_brightness_output = 80;   // Minimum display brightness
+  const int max_brightness_output = 255;  // Preserve full-range capability
+  const float min_lux_for_map = 5.0f;     // Dim indoor light
+  const float max_lux_for_map = 10000.0f; // Bright outdoor shade
 
   // ADJUST THESE VALUES:
-  // For earlier dimming (dims in brighter conditions):
-  // const float min_clear_for_map = 200.0f;           // Higher value = starts dimming earlier
+  // For earlier brightening (brighter in lower lux):
+  // const float min_lux_for_map = 20.0f;             // Higher value = starts brightening earlier
 
-  // For later dimming (only dims in very dark conditions):
-  // const float min_clear_for_map = 20.0f;            // Lower value = only dims when very dark
+  // For later brightening (only brightens in higher lux):
+  // const float min_lux_for_map = 1.0f;              // Lower value = only brightens when very dark
 
   // For reaching full brightness sooner (in less bright conditions):
-  // const float max_clear_for_map = 800.0f;           // Lower value = reaches max brightness sooner
+  // const float max_lux_for_map = 2000.0f;            // Lower value = reaches max brightness sooner
 
   // For reaching full brightness later (only in very bright conditions):
-  // const float max_clear_for_map = 2000.0f;          // Higher value = needs more light for full brightness
+  // const float max_lux_for_map = 20000.0f;           // Higher value = needs more light for full brightness
 
   // For different minimum brightness level:
   // const int min_brightness_output = 30;             // Fixed minimum instead of user brightness
@@ -424,25 +581,44 @@ void updateAdaptiveBrightness()
 
   // --- END CRITICAL CALIBRATION SECTION ---
 
-  long targetBrightnessLong = map(static_cast<long>(smoothedLux),
-                                  static_cast<long>(min_clear_for_map),
-                                  static_cast<long>(max_clear_for_map),
-                                  min_brightness_output,
-                                  max_brightness_output);
-  int targetBrightnessCalc = constrain(static_cast<int>(targetBrightnessLong), min_brightness_output, max_brightness_output);
+  float luxForMap = smoothedLux;
+  if (luxForMap < min_lux_for_map)
+  {
+    luxForMap = min_lux_for_map;
+  }
+
+  const float logMin = log10f(min_lux_for_map);
+  const float logMax = log10f(max_lux_for_map);
+  float t = (log10f(luxForMap) - logMin) / (logMax - logMin);
+  t = constrain(t, 0.0f, 1.0f);
+
+  int targetBrightnessCalc = static_cast<int>(
+      min_brightness_output + (t * static_cast<float>(max_brightness_output - min_brightness_output)) + 0.5f);
+  targetBrightnessCalc = constrain(targetBrightnessCalc, min_brightness_output, max_brightness_output);
+
+  const float targetBrightness = static_cast<float>(targetBrightnessCalc);
+  currentBrightness += brightnessSmoothingFactor * (targetBrightness - currentBrightness);
+  int smoothedBrightness = static_cast<int>(currentBrightness + 0.5f);
+  smoothedBrightness = constrain(smoothedBrightness, min_brightness_output, max_brightness_output);
 
 #if DEBUG_BRIGHTNESS
-  Serial.printf("ADAPT: RawC=%u, SmoothC=%.1f, TargetBr=%d, LastBr=%d, Thr=%d\n",
-                rawClearValue, smoothedLux, targetBrightnessCalc, lastBrightness, brightnessThreshold); // Corrected variable name
+  Serial.printf("ADAPT: Clear=%u, Lux=%.1f, SmoothLux=%.1f, TargetBr=%d, SmoothBr=%d, LastBr=%d, Thr=%d\n",
+                lastKnownClearValue,
+                currentLux,
+                smoothedLux,
+                targetBrightnessCalc,
+                smoothedBrightness,
+                lastBrightness,
+                brightnessThreshold);
 #endif
-  if (abs(targetBrightnessCalc - lastBrightness) >= brightnessThreshold)
+  if (abs(smoothedBrightness - lastBrightness) >= brightnessThreshold)
   {
-    uint8_t currentBrightness = static_cast<uint8_t>(targetBrightnessCalc);
-    dma_display->setBrightness8(currentBrightness);
-    updateGlobalBrightnessScale(currentBrightness);
-    lastBrightness = targetBrightnessCalc; // Update lastBrightness ONLY when a display change is made
+    uint8_t brightnessToApply = static_cast<uint8_t>(smoothedBrightness);
+    dma_display->setBrightness8(brightnessToApply);
+    updateGlobalBrightnessScale(brightnessToApply);
+    lastBrightness = smoothedBrightness; // Update lastBrightness ONLY when a display change is made
 #if DEBUG_BRIGHTNESS
-    Serial.printf(">>>> ADAPT: BRIGHTNESS SET TO %d <<<<\n", targetBrightnessCalc);
+    Serial.printf(">>>> ADAPT: BRIGHTNESS SET TO %d <<<<\n", smoothedBrightness);
 #endif
   }
   else
@@ -557,6 +733,8 @@ void applyConfigOptions()
     Serial.println("Auto brightness disabled. Applying user-set brightness.");
     dma_display->setBrightness8(userBrightness);
     updateGlobalBrightnessScale(userBrightness);
+    lastBrightness = userBrightness;
+    currentBrightness = static_cast<float>(userBrightness);
     Serial.printf("Applied manual brightness: %u\n", userBrightness);
   }
 
