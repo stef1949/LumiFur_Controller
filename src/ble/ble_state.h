@@ -15,6 +15,19 @@ extern bool devicePairing;
 extern uint32_t pairingPasskey;
 extern bool pairingPasskeyValid;
 
+struct PairingSnapshot
+{
+  bool pairing;
+  bool passkeyValid;
+  uint32_t passkey;
+  bool resetPending;
+};
+
+PairingSnapshot getPairingSnapshot();
+void setPairingState(bool pairing, bool passkeyValid, uint32_t passkey, bool updatePasskey);
+void setPairingResetPending(bool pending);
+bool isPairingResetPending();
+
 extern NimBLEServer *pServer;
 extern NimBLECharacteristic *pCharacteristic;
 extern NimBLECharacteristic *pFaceCharacteristic;

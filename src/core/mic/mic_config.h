@@ -69,7 +69,7 @@
 #define MIC_OPEN_REBASE_ALPHA 0.02f
 
 #ifndef DEBUG_MICROPHONE
-#define DEBUG_MICROPHONE 1
+// #define DEBUG_MICROPHONE 1
 #endif
 
 #endif // MIC_CONFIG_H

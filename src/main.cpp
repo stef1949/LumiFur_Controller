@@ -19,6 +19,7 @@
 
 #include <Adafruit_PixelDust.h> // For sand simulation
 #include "main.h"
+#include "dino_game.h"
 #include "core/mic/mic.h"
 #include "core/ColorParser.h"
 #include "customEffects/flameEffect.h"
@@ -111,6 +112,7 @@ constexpr unsigned long AUTO_BRIGHTNESS_INTERVAL_MS = 250;
 constexpr unsigned long LUX_UPDATE_INTERVAL_MS = 500;
 constexpr unsigned long SLEEP_CHECK_INTERVAL_MS = 60;
 constexpr unsigned long PAIRING_RESET_HOLD_MS = 3000;
+constexpr unsigned long PAIRING_RESET_DEBOUNCE_MS = 50;
 
 static unsigned long lastAutoBrightnessUpdate = 0;
 static unsigned long lastLuxUpdateTime = 0;
@@ -345,9 +347,14 @@ const unsigned long fadeOutDuration = 2000; // Duration for fade-out (2 seconds)
 // Non-blocking sensor read interval
 unsigned long lastSensorReadTime = 0;
 const unsigned long sensorInterval = 250; // sensor read throttled to reduce I2C pressure
-constexpr uint8_t PROX_TRIGGER_THRESHOLD = 20; // Minimum reading to trigger effects
-constexpr uint8_t PROX_RELEASE_THRESHOLD = 10; // Reading that counts as hand removed
-static bool proximityLatchedHigh = false;      // Prevents retriggering until sensor settles
+constexpr uint8_t PROX_TRIGGER_DELTA = 6;     // How far above baseline to trigger
+constexpr uint8_t PROX_RELEASE_DELTA = 2;     // How close to baseline to release
+constexpr unsigned long PROX_LATCH_TIMEOUT_MS = 1200;
+constexpr float PROX_BASELINE_ALPHA = 0.05f;  // Baseline smoothing factor
+static bool proximityLatchedHigh = false;     // Prevents retriggering until sensor settles
+static unsigned long proximityLatchedAt = 0;
+static float proximityBaseline = 0.0f;
+static bool proximityBaselineValid = false;
 
 // Variables for plasma effect
 uint16_t time_counter = 0, cycles = 0, fps = 0;
@@ -485,6 +492,8 @@ void wakeFromSleepMode()
   // Restore normal brightness
   dma_display->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
+  lastBrightness = userBrightness;
+  currentBrightness = static_cast<float>(userBrightness);
 
   lastActivityTime = millis(); // Reset activity timer
 
@@ -707,6 +716,8 @@ class ConfigCallbacks : public NimBLECharacteristicCallbacks
           Serial.println("Auto brightness has been DISABLED. Applying user-set brightness.");
           dma_display->setBrightness8(userBrightness);
           updateGlobalBrightnessScale(userBrightness);
+          lastBrightness = userBrightness;
+          currentBrightness = static_cast<float>(userBrightness);
           Serial.printf("Applied manual brightness: %u\n", userBrightness);
         }
       }
@@ -739,6 +750,8 @@ class BrightnessCallbacks : public NimBLECharacteristicCallbacks
       {
         dma_display->setBrightness8(userBrightness);
         updateGlobalBrightnessScale(userBrightness);
+        lastBrightness = userBrightness;
+        currentBrightness = static_cast<float>(userBrightness);
         Serial.printf("Applied manual brightness: %u\n", userBrightness);
       }
       Serial.printf("Brightness set to %u\n", userBrightness);
@@ -795,6 +808,7 @@ class DescriptorCallbacks : public NimBLEDescriptorCallbacks
 
 void handleBLEStatusLED()
 {
+  const PairingSnapshot pairingSnapshot = getPairingSnapshot();
   if (deviceConnected != oldDeviceConnected)
   {
     bluetoothStatusChangeMillis = millis();
@@ -814,7 +828,7 @@ void handleBLEStatusLED()
   {
     fadeInAndOutLED(0, 0, 100); // Blue fade when disconnected
   }
-  if (devicePairing)
+  if (pairingSnapshot.pairing)
   {
     fadeInAndOutLED(128, 0, 128); // Blue when pairing
   }
@@ -828,16 +842,20 @@ static void resetBlePairing()
     return;
   }
 
-  pairingPasskeyValid = false;
-  devicePairing = false;
-
+  setPairingState(false, false, 0, false);
   const std::vector<uint16_t> peers = pServer->getPeerDevices();
-  for (uint16_t connHandle : peers)
+  if (!peers.empty())
   {
-    pServer->disconnect(connHandle);
+    setPairingResetPending(true);
+    for (uint16_t connHandle : peers)
+    {
+      pServer->disconnect(connHandle);
+    }
+    return;
   }
 
   const bool cleared = NimBLEDevice::deleteAllBonds();
+  setPairingResetPending(false);
   NimBLEDevice::startAdvertising();
 #if DEBUG_BLE
   Serial.printf("BLE pairing reset: bonds cleared=%s\n", cleared ? "true" : "false");
@@ -995,31 +1013,51 @@ void drawBluetoothStatusIcon()
 
 static void drawPairingPasskeyOverlay()
 {
-  if (!dma_display || !devicePairing || !pairingPasskeyValid)
+  if (!dma_display)
   {
     return;
   }
 
+  const PairingSnapshot pairingSnapshot = getPairingSnapshot();
+  if (!pairingSnapshot.pairing || !pairingSnapshot.passkeyValid)
+  {
+    return;
+  }
+
+  static bool labelMetricsCached = false;
+  static int16_t labelX1 = 0;
+  static int16_t labelY1 = 0;
+  static uint16_t labelW = 0;
+  static uint16_t labelH = 0;
+  static bool keyMetricsCached = false;
+  static uint32_t cachedPasskey = 0;
+  static int16_t keyX1 = 0;
+  static int16_t keyY1 = 0;
+  static uint16_t keyW = 0;
+  static uint16_t keyH = 0;
+
+  const uint32_t passkey = pairingSnapshot.passkey;
   char passkeyStr[7];
-  snprintf(passkeyStr, sizeof(passkeyStr), "%06lu", static_cast<unsigned long>(pairingPasskey));
+  snprintf(passkeyStr, sizeof(passkeyStr), "%06lu", static_cast<unsigned long>(passkey));
 
   const char *label = "PASSKEY";
 
-  int16_t labelX1 = 0;
-  int16_t labelY1 = 0;
-  uint16_t labelW = 0;
-  uint16_t labelH = 0;
-  dma_display->setFont(&TomThumb);
-  dma_display->setTextSize(1);
-  dma_display->getTextBounds(label, 0, 0, &labelX1, &labelY1, &labelW, &labelH);
+  if (!labelMetricsCached)
+  {
+    dma_display->setFont(&TomThumb);
+    dma_display->setTextSize(1);
+    dma_display->getTextBounds(label, 0, 0, &labelX1, &labelY1, &labelW, &labelH);
+    labelMetricsCached = true;
+  }
 
-  int16_t keyX1 = 0;
-  int16_t keyY1 = 0;
-  uint16_t keyW = 0;
-  uint16_t keyH = 0;
-  dma_display->setFont(&FreeSans9pt7b);
-  dma_display->setTextSize(1);
-  dma_display->getTextBounds(passkeyStr, 0, 0, &keyX1, &keyY1, &keyW, &keyH);
+  if (!keyMetricsCached || passkey != cachedPasskey)
+  {
+    dma_display->setFont(&FreeSans9pt7b);
+    dma_display->setTextSize(1);
+    dma_display->getTextBounds(passkeyStr, 0, 0, &keyX1, &keyY1, &keyW, &keyH);
+    cachedPasskey = passkey;
+    keyMetricsCached = true;
+  }
 
   const int padding = 2;
   const int gap = 1;
@@ -1041,6 +1079,7 @@ static void drawPairingPasskeyOverlay()
     boxY = 0;
   }
 
+  dma_display->clearScreen();
   const uint16_t backgroundColor = dma_display->color565(0, 0, 0);
   const uint16_t borderColor = dma_display->color565(255, 255, 255);
   dma_display->fillRect(boxX, boxY, boxW, boxH, backgroundColor);
@@ -1950,16 +1989,23 @@ void drawBlush()
   // Set blush color based on brightness
   uint16_t blushColor = dma_display->color565(blushBrightness, 0, blushBrightness);
 
-  // Clear only the blush area to prevent artifacts
-  dma_display->fillRect(45, 1, 18, 13, 0); // Clear right blush area
-  dma_display->fillRect(72, 1, 18, 13, 0); // Clear left blush area
+  const int blushWidth = 11;
+  const int blushHeight = 13;
+  const int blushCount = 3;
+  const int blushY = 1;
+  const int rightStartX = 23;
+  const int leftStartX = 72;
+  const int totalBlushWidth = blushWidth * blushCount;
 
-  drawXbm565(45, 1, 11, 13, blush, blushColor);
-  drawXbm565(40, 1, 11, 13, blush, blushColor);
-  drawXbm565(35, 1, 11, 13, blush, blushColor);
-  drawXbm565(72, 1, 11, 13, blushL, blushColor);
-  drawXbm565(77, 1, 11, 13, blushL, blushColor);
-  drawXbm565(82, 1, 11, 13, blushL, blushColor);
+  // Clear only the blush area to prevent artifacts
+  dma_display->fillRect(rightStartX, blushY, totalBlushWidth, blushHeight, 0);
+  dma_display->fillRect(leftStartX, blushY, totalBlushWidth, blushHeight, 0);
+
+  for (int i = 0; i < blushCount; ++i)
+  {
+    drawXbm565(rightStartX + (i * blushWidth), blushY, blushWidth, blushHeight, blush, blushColor);
+    drawXbm565(leftStartX + (i * blushWidth), blushY, blushWidth, blushHeight, blushL, blushColor);
+  }
 }
 
 void drawTransFlag()
@@ -2031,13 +2077,6 @@ void baseFace()
   drawPlasmaXbm(56, 4 + final_y_offset, 8, 8, nose, 64, 2.0);
   drawPlasmaXbm(64, 4 + final_y_offset, 8, 8, noseL, 64, 2.0);
 
-  if (currentView >= VIEW_NORMAL_FACE)
-  { // Only draw blush effect for face views, not utility views
-    if (blushState != BlushState::Inactive)
-    { // Only draw if blush is active
-      drawBlush();
-    }
-  }
   facePlasmaDirty = false;
 }
 
@@ -2405,6 +2444,8 @@ void setupPixelDust()
   }
 }
 
+
+
 // Add an enum for clarity (optional, but good practice)
 enum SpiralColorMode
 {
@@ -2625,6 +2666,7 @@ void setup()
       CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
           NIMBLE_PROPERTY::WRITE |
+          NIMBLE_PROPERTY::WRITE_ENC |
           NIMBLE_PROPERTY::NOTIFY
       // NIMBLE_PROPERTY::READ_ENC  // only allow reading if paired / encrypted
       // NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
@@ -2638,6 +2680,7 @@ void setup()
   pCommandCharacteristic = pService->createCharacteristic(
       COMMAND_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::WRITE |
+      NIMBLE_PROPERTY::WRITE_ENC |
       NIMBLE_PROPERTY::NOTIFY
     );
   pCommandCharacteristic->setCallbacks(&cmdCallbacks);
@@ -2660,6 +2703,7 @@ void setup()
       CONFIG_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
       NIMBLE_PROPERTY::WRITE |
+      NIMBLE_PROPERTY::WRITE_ENC |
     //NIMBLE_PROPERTY::WRITE_NR |
       NIMBLE_PROPERTY::NOTIFY);
 
@@ -2726,6 +2770,7 @@ void setup()
       NIMBLE_PROPERTY::READ |
           // NIMBLE_PROPERTY::NOTIFY |
           NIMBLE_PROPERTY::WRITE |
+          NIMBLE_PROPERTY::WRITE_ENC |
           NIMBLE_PROPERTY::WRITE_NR);
   pBrightnessCharacteristic->setCallbacks(&brightnessCallbacks);
   // initialize with current brightness
@@ -2734,6 +2779,7 @@ void setup()
       OTA_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
           NIMBLE_PROPERTY::WRITE |
+          NIMBLE_PROPERTY::WRITE_ENC |
           NIMBLE_PROPERTY::WRITE_NR |
           NIMBLE_PROPERTY::NOTIFY);
   pOtaCharacteristic->setCallbacks(&otaCallbacks);
@@ -2753,7 +2799,7 @@ void setup()
       NIMBLE_PROPERTY::NOTIFY);
 
   // Initialize with current lux value
-  uint16_t initialLux = getRawClearChannelValue();
+  uint16_t initialLux = getAmbientLuxU16();
   uint8_t luxBytes[2] = {
       static_cast<uint8_t>(initialLux & 0xFF),
       static_cast<uint8_t>((initialLux >> 8) & 0xFF)};
@@ -2771,8 +2817,9 @@ void setup()
 
   pScrollTextCharacteristic = pService->createCharacteristic(
       SCROLL_TEXT_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ |      //TODO: Require encryption for reading
-      NIMBLE_PROPERTY::WRITE |     //TODO: Require encryption for writing
+      NIMBLE_PROPERTY::READ |
+      NIMBLE_PROPERTY::WRITE |
+      NIMBLE_PROPERTY::WRITE_ENC |     // Require encryption for writes.
       NIMBLE_PROPERTY::NOTIFY);
   pScrollTextCharacteristic->setCallbacks(&scrollTextCallbacks);
 
@@ -2844,12 +2891,16 @@ void setup()
   dma_display->begin();
   dma_display->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
+  lastBrightness = userBrightness;
+  currentBrightness = static_cast<float>(userBrightness);
   initFlameEffect(dma_display);
 #else
   chain = new MatrixPanel_I2S_DMA(mxconfig);
   chain->begin();
   chain->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
+  lastBrightness = userBrightness;
+  currentBrightness = static_cast<float>(userBrightness);
   // create VirtualDisplay object based on our newly created dma_display object
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
   initFlameEffect(matrix);
@@ -3178,18 +3229,26 @@ void PixelDustEffect()
   sand.iterate(ax_scaled, ay_scaled, 0);
 
   dimension_t px, py;
-      int color_index = 0;
-     if (N_COLORS > 0)
-     {
-       color_index = static_cast<int>((static_cast<uint32_t>(px) * N_COLORS) / PANE_WIDTH);
-       if (color_index >= N_COLORS)
-       {
-         color_index = N_COLORS - 1;
-       }
+  for (grain_count_t i = 0; i < N_GRAINS; ++i)
+  {
+    sand.getPosition(i, &px, &py);
+    int color_index = 0;
+    if (N_COLORS > 0)
+    {
+      color_index = static_cast<int>((static_cast<uint32_t>(px) * N_COLORS) / PANE_WIDTH);
+      if (color_index >= N_COLORS)
+      {
+        color_index = N_COLORS - 1;
       }
-      dma_display->drawPixel(px, py, colors[color_index]);
     }
-  
+    const int px_i = static_cast<int>(px);
+    const int py_i = static_cast<int>(py);
+    if (px_i >= 0 && py_i >= 0 && px_i < PANE_WIDTH && py_i < PANE_HEIGHT)
+    {
+      dma_display->drawPixel(px_i, py_i, colors[color_index]);
+    }
+  }
+}
 
 
 using ViewRenderFunc = void (*)();
@@ -3314,7 +3373,7 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     renderLoadingBarView,          // VIEW_LOADING_BAR
     patternPlasma,                 // VIEW_PATTERN_PLASMA
     drawTransFlag,                 // VIEW_TRANS_FLAG
-//  drawLGBTFlag,                  // VIEW_LGBT_FLAG NOTE: Commented out as requires re-ordering
+    drawLGBTFlag,                  // VIEW_LGBT_FLAG
     renderFaceWithPlasma,          // VIEW_NORMAL_FACE
     renderFaceWithPlasma,          // VIEW_BLUSH_FACE
     renderFaceWithPlasma,          // VIEW_SEMICIRCLE_EYES
@@ -3332,9 +3391,9 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     renderFullscreenSpiralPalette, // VIEW_FULLSCREEN_SPIRAL_PALETTE
     renderFullscreenSpiralWhite,   // VIEW_FULLSCREEN_SPIRAL_WHITE
     renderScrollingTextView,       // VIEW_SCROLLING_TEXT
+    renderDinoGameView,            // VIEW_DINO_GAME
     renderPixelDustView,           // VIEW_PIXEL_DUST
-    staticColor,                    // VIEW_STATIC_COLOR
-    drawLGBTFlag                  // VIEW_LGBT_FLAG
+    staticColor                     // VIEW_STATIC_COLOR
 };
 
 static_assert(sizeof(VIEW_RENDERERS) / sizeof(ViewRenderFunc) == TOTAL_VIEWS, "View renderer table mismatch");
@@ -3383,6 +3442,10 @@ void displayCurrentView(int view)
     {
       setupPixelDust();
     }
+    if (view == VIEW_DINO_GAME)
+    {
+      resetDinoGame(millis());
+    }
     previousViewLocal = view;
   }
 
@@ -3394,6 +3457,11 @@ void displayCurrentView(int view)
   if (renderer)
   {
     renderer();
+  }
+
+  if (blushState != BlushState::Inactive)
+  {
+    drawBlush();
   }
 #if DEBUG_MODE
   const uint32_t rendererMicros = micros() - rendererStartMicros;
@@ -3639,7 +3707,7 @@ void loop()
     // --- Motion Detection (for shake effect to change view) ---
     {
       PROFILE_SECTION("MotionDetection");
-      if (accelerometerEnabled && g_accelerometer_initialized && currentView != VIEW_FLUID_EFFECT)
+      if (accelerometerEnabled && g_accelerometer_initialized && currentView != VIEW_FLUID_EFFECT && currentView != VIEW_DINO_GAME && !isEyeBouncing && !proximityLatchedHigh)
       {
         useShakeSensitivity = true; // Use high threshold for shake detection
         if (detectMotion())
@@ -3664,15 +3732,31 @@ void loop()
     static bool pairingHoldActive = false;
     static bool pairingHoldTriggered = false;
     static unsigned long pairingHoldStartMs = 0;
+    static bool pairingHoldRaw = false;
+    static bool pairingHoldStable = false;
+    static unsigned long pairingHoldLastChangeMs = 0;
 
 #if defined(BUTTON_UP) && defined(BUTTON_DOWN)
-    const bool pairingHoldPressed = (digitalRead(BUTTON_UP) == LOW) && (digitalRead(BUTTON_DOWN) == LOW);
+    const bool pairingHoldSample = (digitalRead(BUTTON_UP) == LOW) && (digitalRead(BUTTON_DOWN) == LOW);
 #else
-    const bool pairingHoldPressed = false;
+    const bool pairingHoldSample = false;
 #endif
+
+    if (pairingHoldSample != pairingHoldRaw)
+    {
+      pairingHoldRaw = pairingHoldSample;
+      pairingHoldLastChangeMs = loopNow;
+    }
+    if ((loopNow - pairingHoldLastChangeMs) >= PAIRING_RESET_DEBOUNCE_MS)
+    {
+      pairingHoldStable = pairingHoldRaw;
+    }
+
+    const bool pairingHoldPressed = pairingHoldStable;
 
     if (pairingHoldPressed)
     {
+      lastActivityTime = loopNow;
       if (!pairingHoldActive)
       {
         pairingHoldActive = true;
@@ -3768,14 +3852,37 @@ void loop()
 
                    bool bounceJustTriggered = false; // Flag to avoid double blush trigger
 
+                   if (!proximityBaselineValid)
+                   {
+                     proximityBaseline = static_cast<float>(proximity);
+                     proximityBaselineValid = true;
+                   }
+
+                   int baselineRounded = static_cast<int>(proximityBaseline + 0.5f);
+                   uint8_t triggerThreshold = static_cast<uint8_t>(
+                       constrain(baselineRounded + PROX_TRIGGER_DELTA, 0, 255));
+                   uint8_t releaseThreshold = static_cast<uint8_t>(
+                       constrain(baselineRounded + PROX_RELEASE_DELTA, 0, 255));
+
+                   if (!proximityLatchedHigh && proximity <= releaseThreshold)
+                   {
+                     proximityBaseline += PROX_BASELINE_ALPHA * (static_cast<float>(proximity) - proximityBaseline);
+                     baselineRounded = static_cast<int>(proximityBaseline + 0.5f);
+                     triggerThreshold = static_cast<uint8_t>(
+                         constrain(baselineRounded + PROX_TRIGGER_DELTA, 0, 255));
+                     releaseThreshold = static_cast<uint8_t>(
+                         constrain(baselineRounded + PROX_RELEASE_DELTA, 0, 255));
+                   }
+
                    // Require the reading to rise above the trigger threshold and then fall below the release threshold before re-triggering
                    if (proximityLatchedHigh)
                    {
-                     if (proximity <= PROX_RELEASE_THRESHOLD)
+                     const bool timeout = (sensorNow - proximityLatchedAt) >= PROX_LATCH_TIMEOUT_MS;
+                     if (proximity <= releaseThreshold || (timeout && proximity < triggerThreshold))
                      {
                        proximityLatchedHigh = false;
 #if DEBUG_PROXIMITY
-                       LOG_PROX("Prox released at %u\n", proximity);
+                       LOG_PROX("Prox released at %u (rel=%u base=%d)\n", proximity, releaseThreshold, baselineRounded);
 #endif
                      }
                      else
@@ -3787,15 +3894,23 @@ void loop()
                      }
                    }
 
-                   if (proximity < PROX_TRIGGER_THRESHOLD)
+                   if (proximity < triggerThreshold)
                    {
                      return;
                    }
 
                    proximityLatchedHigh = true;
+                   proximityLatchedAt = sensorNow;
+
+                   if (currentView == VIEW_DINO_GAME)
+                   {
+                     queueDinoJump();
+                     lastActivityTime = sensorNow;
+                     return;
+                   }
 
                    // Eye Bounce Trigger - Switch to View 17 (Circle Eyes) (MODIFIED)
-                   if (!isEyeBouncing && currentView != VIEW_FLUID_EFFECT)
+                   if (!isEyeBouncing)
                    {
                      LOG_DEBUG_LN("Proximity! Starting eye bounce sequence & switching to Circle Eyes (View 17).");
 #if DEBUG_PROXIMITY
@@ -3803,10 +3918,9 @@ void loop()
 #endif
 
                      // Store current view and switch to Circle Eyes (view 17)
-                     if (currentView != VIEW_SPIRAL_EYES && currentView != VIEW_CIRCLE_EYES)
-                     {                                    // Avoid conflicting with spiral or re-triggering
-                       viewBeforeEyeBounce = currentView; // <<< MODIFIED: Store current view here
-
+                     if (currentView != VIEW_CIRCLE_EYES)
+                     {
+                       viewBeforeEyeBounce = currentView;
                        currentView = VIEW_CIRCLE_EYES; // Switch to "Circle Eyes" view
                        // saveLastView(currentView); // Optional: save temporary view 17
                        notifyBleTask();
