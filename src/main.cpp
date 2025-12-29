@@ -110,6 +110,7 @@ bool brightnessChanged = false;
 constexpr unsigned long AUTO_BRIGHTNESS_INTERVAL_MS = 250;
 constexpr unsigned long LUX_UPDATE_INTERVAL_MS = 500;
 constexpr unsigned long SLEEP_CHECK_INTERVAL_MS = 60;
+constexpr unsigned long PAIRING_RESET_HOLD_MS = 3000;
 
 static unsigned long lastAutoBrightnessUpdate = 0;
 static unsigned long lastLuxUpdateTime = 0;
@@ -820,6 +821,29 @@ void handleBLEStatusLED()
   statusPixel.show();
 }
 
+static void resetBlePairing()
+{
+  if (!pServer)
+  {
+    return;
+  }
+
+  pairingPasskeyValid = false;
+  devicePairing = false;
+
+  const std::vector<uint16_t> peers = pServer->getPeerDevices();
+  for (uint16_t connHandle : peers)
+  {
+    pServer->disconnect(connHandle);
+  }
+
+  const bool cleared = NimBLEDevice::deleteAllBonds();
+  NimBLEDevice::startAdvertising();
+#if DEBUG_BLE
+  Serial.printf("BLE pairing reset: bonds cleared=%s\n", cleared ? "true" : "false");
+#endif
+}
+
 // Bitmap Drawing Functions ------------------------------------------------
 void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t color = 0xffff)
 {
@@ -967,6 +991,82 @@ void drawBluetoothStatusIcon()
 
   drawXbm565(runeX, runeY, BLUETOOTH_RUNE_WIDTH, BLUETOOTH_RUNE_HEIGHT, bluetoothRune, runeColor);
   drawXbm565(runeX + BLUETOOTH_RUNE_WIDTH + 4, runeY, BLUETOOTH_RUNE_WIDTH, BLUETOOTH_RUNE_HEIGHT, bluetoothRune, runeColor);
+}
+
+static void drawPairingPasskeyOverlay()
+{
+  if (!dma_display || !devicePairing || !pairingPasskeyValid)
+  {
+    return;
+  }
+
+  char passkeyStr[7];
+  snprintf(passkeyStr, sizeof(passkeyStr), "%06lu", static_cast<unsigned long>(pairingPasskey));
+
+  const char *label = "PASSKEY";
+
+  int16_t labelX1 = 0;
+  int16_t labelY1 = 0;
+  uint16_t labelW = 0;
+  uint16_t labelH = 0;
+  dma_display->setFont(&TomThumb);
+  dma_display->setTextSize(1);
+  dma_display->getTextBounds(label, 0, 0, &labelX1, &labelY1, &labelW, &labelH);
+
+  int16_t keyX1 = 0;
+  int16_t keyY1 = 0;
+  uint16_t keyW = 0;
+  uint16_t keyH = 0;
+  dma_display->setFont(&FreeSans9pt7b);
+  dma_display->setTextSize(1);
+  dma_display->getTextBounds(passkeyStr, 0, 0, &keyX1, &keyY1, &keyW, &keyH);
+
+  const int padding = 2;
+  const int gap = 1;
+  const int contentW = (labelW > keyW) ? labelW : keyW;
+  const int boxW = contentW + (padding * 2);
+  const int boxH = labelH + keyH + gap + (padding * 2);
+
+  const int screenW = dma_display->width();
+  const int screenH = dma_display->height();
+  int boxX = (screenW - boxW) / 2;
+  int boxY = (screenH - boxH) / 2;
+
+  if (boxX < 0)
+  {
+    boxX = 0;
+  }
+  if (boxY < 0)
+  {
+    boxY = 0;
+  }
+
+  const uint16_t backgroundColor = dma_display->color565(0, 0, 0);
+  const uint16_t borderColor = dma_display->color565(255, 255, 255);
+  dma_display->fillRect(boxX, boxY, boxW, boxH, backgroundColor);
+  dma_display->drawRect(boxX, boxY, boxW, boxH, borderColor);
+
+  const int labelLeft = boxX + (boxW - labelW) / 2;
+  const int labelTop = boxY + padding;
+  const int labelCursorX = labelLeft - labelX1;
+  const int labelCursorY = labelTop - labelY1;
+
+  dma_display->setFont(&TomThumb);
+  dma_display->setTextSize(1);
+  dma_display->setTextColor(borderColor);
+  dma_display->setCursor(labelCursorX, labelCursorY);
+  dma_display->print(label);
+
+  const int keyLeft = boxX + (boxW - keyW) / 2;
+  const int keyTop = labelTop + labelH + gap;
+  const int keyCursorX = keyLeft - keyX1;
+  const int keyCursorY = keyTop - keyY1;
+
+  dma_display->setFont(&FreeSans9pt7b);
+  dma_display->setTextSize(1);
+  dma_display->setTextColor(borderColor);
+  dma_display->setCursor(keyCursorX, keyCursorY);
+  dma_display->print(passkeyStr);
 }
 
 uint16_t colorWheel(uint8_t pos)
@@ -2102,9 +2202,10 @@ void displaySleepMode()
   /*
   drawXbm565(0, 20, 10, 8, maw2Closed, dma_display->color565(120, 120, 120));
   drawXbm565(64, 20, 10, 8, maw2ClosedL, dma_display->color565(120, 120, 120));
-*/
+  */
   dma_display->drawFastHLine(PANE_WIDTH / 2 - 15, PANE_HEIGHT - 8, 30, dma_display->color565(120, 120, 120));
   drawBluetoothStatusIcon();
+  drawPairingPasskeyOverlay();
   dma_display->flipDMABuffer();
 }
 
@@ -2491,8 +2592,9 @@ void setup()
   NimBLEDevice::setPower(ESP_PWR_LVL_P21, NimBLETxPowerType::All); // Power level 21 (highest) for best range
   // NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
   NimBLEDevice::setSecurityAuth(true, true, true);
+  // Keep default passkey so onPassKeyDisplay supplies a dynamic code.
   NimBLEDevice::setSecurityPasskey(123456);
-  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_KEYBOARD_DISPLAY);
+  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY);
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(&serverCallbacks);
 
@@ -3332,6 +3434,7 @@ void displayCurrentView(int view)
 #endif
 
   drawBluetoothStatusIcon();
+  drawPairingPasskeyOverlay();
 
   if (!sleepModeActive || currentView == VIEW_TRANS_FLAG || currentView == VIEW_BSOD)
   {
@@ -3557,9 +3660,39 @@ void loop()
 
 // --- Handle button inputs for view changes ---
 #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) || defined(BUTTONS_AVAILABLE) // Add define if you use external buttons
+    // Hold both buttons to clear BLE bonds and restart pairing.
+    static bool pairingHoldActive = false;
+    static bool pairingHoldTriggered = false;
+    static unsigned long pairingHoldStartMs = 0;
+
+#if defined(BUTTON_UP) && defined(BUTTON_DOWN)
+    const bool pairingHoldPressed = (digitalRead(BUTTON_UP) == LOW) && (digitalRead(BUTTON_DOWN) == LOW);
+#else
+    const bool pairingHoldPressed = false;
+#endif
+
+    if (pairingHoldPressed)
+    {
+      if (!pairingHoldActive)
+      {
+        pairingHoldActive = true;
+        pairingHoldStartMs = loopNow;
+      }
+      else if (!pairingHoldTriggered && (loopNow - pairingHoldStartMs >= PAIRING_RESET_HOLD_MS))
+      {
+        pairingHoldTriggered = true;
+        resetBlePairing();
+      }
+    }
+    else
+    {
+      pairingHoldActive = false;
+      pairingHoldTriggered = false;
+    }
+
     bool viewChangedByButton = false;
 
-    if (debounceButton(BUTTON_UP))
+    if (!pairingHoldPressed && debounceButton(BUTTON_UP))
     {
       currentView = (currentView + 1);
       if (currentView >= totalViews)
@@ -3569,7 +3702,7 @@ void loop()
       lastActivityTime = loopNow;
     }
 
-    if (debounceButton(BUTTON_DOWN))
+    if (!pairingHoldPressed && debounceButton(BUTTON_DOWN))
     {
       PROFILE_SECTION("ButtonInputs");
       currentView = (currentView - 1);

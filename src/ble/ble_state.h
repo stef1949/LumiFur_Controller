@@ -2,6 +2,7 @@
 #define BLE_STATE_H
 
 #include <NimBLEDevice.h>
+#include <cstdint>
 #include <string>
 
 #include "ble/ble_ota.h"
@@ -11,6 +12,8 @@
 extern bool deviceConnected;
 extern bool oldDeviceConnected;
 extern bool devicePairing;
+extern uint32_t pairingPasskey;
+extern bool pairingPasskeyValid;
 
 extern NimBLEServer *pServer;
 extern NimBLECharacteristic *pCharacteristic;
