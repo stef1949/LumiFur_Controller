@@ -3004,13 +3004,11 @@ void setup()
 
   micInit();
 
-#if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
 #ifdef BUTTON_UP
   pinMode(BUTTON_UP, INPUT_PULLUP);
 #endif
 #ifdef BUTTON_DOWN
   pinMode(BUTTON_DOWN, INPUT_PULLUP);
-#endif
 #endif
 
   // uint8_t wheelval = 0; // Wheel value for color cycling
@@ -3712,7 +3710,7 @@ void loop()
     }
 
 // --- Handle button inputs for view changes ---
-#if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) || defined(BUTTONS_AVAILABLE) // Add define if you use external buttons
+#if defined(BUTTON_UP) && defined(BUTTON_DOWN)
     // Hold both buttons to clear BLE bonds and restart pairing.
     static bool pairingHoldActive = false;
     static bool pairingHoldTriggered = false;
@@ -3721,11 +3719,7 @@ void loop()
     static bool pairingHoldStable = false;
     static unsigned long pairingHoldLastChangeMs = 0;
 
-#if defined(BUTTON_UP) && defined(BUTTON_DOWN)
     const bool pairingHoldSample = (digitalRead(BUTTON_UP) == LOW) && (digitalRead(BUTTON_DOWN) == LOW);
-#else
-    const bool pairingHoldSample = false;
-#endif
 
     if (pairingHoldSample != pairingHoldRaw)
     {
