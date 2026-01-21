@@ -1,7 +1,11 @@
 # Unity Tests for LumiFur Controller
 
+[![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=main)](https://coveralls.io/github/stef1949/LumiFur_Controller?branch=main)
+
 ## Overview
 This directory contains comprehensive Unity framework tests for the LumiFur Controller firmware.
+
+**Code Coverage**: See [docs/COVERAGE.md](../docs/COVERAGE.md) for detailed information about code coverage tracking with Coveralls.
 
 ## Test Suites
 
