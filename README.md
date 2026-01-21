@@ -5,7 +5,7 @@
   LumiFur Controller<br>
   
   [![CodeQL Advanced Build with PlatformIO](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml)
-  ![version](https://img.shields.io/badge/version-1.0.0-blue)
+  <img alt="GitHub Release" src="https://img.shields.io/github/v/release/stef1949/lumifur">
   <a href="https://github.com/stef1949/LumiFur_Controller" alt="Activity">
         <img src="https://img.shields.io/github/commit-activity/m/stef1949/LumiFur_Controller" /></a>
   [![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=main)](https://coveralls.io/github/stef1949/LumiFur_Controller?branch=main)
@@ -75,10 +75,14 @@ Additional PlatformIO environments are defined in `platformio.ini`, including a 
 - The onboard NeoPixel pulses blue while advertising and turns green when a BLE client connects.
 
 ## Testing
-- Run the GoogleTest suite with coverage via `pio test -e codeql`.
-- Execute Unity-based module tests with `pio test -e native2`.
-- Coverage reports and additional tooling scripts are located under `test/` and `test/test_coverage/`.
-- Lightweight smoke tests for the Web Bluetooth firmware updater can run without PlatformIO: `python -m unittest discover docs/firmware-updater/tests`.
+
+[![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=main)](https://coveralls.io/github/stef1949/LumiFur_Controller?branch=main)
+
+- **77 Unity tests** covering core functionality: Run with `pio test -e native2`
+- **Code coverage** tracked via [Coveralls](https://coveralls.io/github/stef1949/LumiFur_Controller) - see [docs/COVERAGE.md](docs/COVERAGE.md) for details
+- Run the GoogleTest suite with coverage via `pio test -e codeql`
+- Coverage reports and additional tooling scripts are located under `test/`
+- Lightweight smoke tests for the Web Bluetooth firmware updater can run without PlatformIO: `python -m unittest discover docs/firmware-updater/tests`
 
 ## Web Firmware Updater
 - A browser-based OTA helper lives at `docs/firmware-updater/index.html`. Serve the folder over HTTPS or `http://localhost` (for example, `python -m http.server 8000` from the repo root) because Web Bluetooth is blocked on `file://` origins. Open the page in a supported browser (Chrome or Edge), click **Connect** to choose your LumiFur controller, select a compiled `.bin` firmware file, and press **Upload Firmware** to stream it over the OTA characteristic (`01931c44-3867-7427-96ab-8d7ac0ae09ee`).

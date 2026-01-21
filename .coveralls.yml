@@ -1,0 +1,18 @@
+# Coveralls configuration for LumiFur Controller
+service_name: github-actions
+
+# Specify coverage file location
+coverage_clover: coverage.xml
+coverage_lcov: coverage_filtered.info
+
+# Exclude patterns
+exclude:
+  - test/*
+  - .pio/*
+  - lib/*
+  - include/*
+  - docs/*
+  - build/*
+
+# Only track source files
+src_dir: src/
