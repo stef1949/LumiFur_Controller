@@ -2,9 +2,7 @@ name: Test Coverage with Coveralls
 
 on:
   push:
-    branches: [ "main", "copilot/**" ]
   pull_request:
-    branches: [ "main" ]
 
 jobs:
   test-coverage:

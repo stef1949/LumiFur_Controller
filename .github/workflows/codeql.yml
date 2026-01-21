@@ -2,9 +2,7 @@ name: "CodeQL Advanced Build with PlatformIO"
 
 on:
   push:
-    branches: [ "main" ]
   pull_request:
-    branches: [ "main" ]
   schedule:
     - cron: '26 15 * * 4'
 
