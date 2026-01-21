@@ -133,6 +133,22 @@ if run_test "test_ble" \
 fi
 ((total_tests++))
 
+# Accelerometer tests
+if run_test "test_accelerometer" \
+    "$PROJECT_DIR/test/test_accelerometer/test_accelerometer.cpp" \
+    ""; then
+    ((passed_tests++))
+fi
+((total_tests++))
+
+# Microphone tests
+if run_test "test_microphone" \
+    "$PROJECT_DIR/test/test_microphone/test_microphone.cpp" \
+    ""; then
+    ((passed_tests++))
+fi
+((total_tests++))
+
 # Print summary
 echo ""
 echo "==========================================="

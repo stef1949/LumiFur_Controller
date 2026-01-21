@@ -24,6 +24,20 @@ Tests for BLE (Bluetooth Low Energy) module (`src/ble.h`)
 - Tests circular buffer behavior, wraparound logic, and chunk calculation
 - Validates temperature precision and history capacity
 
+### test_accelerometer
+Tests for accelerometer motion detection (`src/main.cpp`)
+- **19 tests** covering threshold detection, motion flags, and delta calculations
+- Tests shake vs sleep threshold switching
+- Validates motion detection on multiple axes
+- Boundary condition testing for motion thresholds
+
+### test_microphone
+Tests for microphone audio processing (`src/main.cpp`)
+- **25 tests** covering maw brightness calculation, mouth state detection, and signal processing
+- Tests trigger threshold calculations and signal-to-brightness mapping
+- Validates Arduino map/constrain helper functions
+- Boundary condition testing for audio levels
+
 ### Existing Tests
 - `test_main/` - Main application tests
 - `test_timers/` - Timer threshold tests
@@ -71,12 +85,14 @@ g++ -std=c++11 \
 
 ## Test Results (Latest Run)
 
-✅ **All 33 tests passing**
+✅ **All 77 tests passing**
 
 - AnimationState: 7/7 ✅
 - ScrollState: 6/6 ✅  
 - Easing Functions: 7/7 ✅
 - BLE Module: 13/13 ✅
+- Accelerometer: 19/19 ✅
+- Microphone: 25/25 ✅
 
 ## Adding New Tests
 
