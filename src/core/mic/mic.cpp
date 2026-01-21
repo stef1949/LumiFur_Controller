@@ -300,7 +300,7 @@ static void micTask(void *param)
     vTaskDelay(1);
   }
 }
-
+// cppcheck-suppress unusedFunction
 void micInit()
 {
 #ifdef MIC_PD_PIN

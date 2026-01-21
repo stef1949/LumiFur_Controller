@@ -60,6 +60,7 @@ void setPairingState(bool pairing, bool passkeyValid, uint32_t passkey, bool upd
   portEXIT_CRITICAL(&pairingMux);
 }
 
+// cppcheck-suppress unusedFunction
 void setPairingResetPending(bool pending)
 {
   portENTER_CRITICAL(&pairingMux);
@@ -67,6 +68,7 @@ void setPairingResetPending(bool pending)
   portEXIT_CRITICAL(&pairingMux);
 }
 
+// cppcheck-suppress unusedFunction
 bool isPairingResetPending()
 {
   bool pending = false;
