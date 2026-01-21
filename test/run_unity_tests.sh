@@ -125,6 +125,14 @@ if run_test "test_easing_functions" \
 fi
 ((total_tests++))
 
+# BLE tests
+if run_test "test_ble" \
+    "$PROJECT_DIR/test/test_ble/test_ble.cpp" \
+    ""; then
+    ((passed_tests++))
+fi
+((total_tests++))
+
 # Print summary
 echo ""
 echo "==========================================="

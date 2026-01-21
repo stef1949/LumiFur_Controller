@@ -18,6 +18,12 @@ Tests for easing functions (`src/main.h`)
 - **7 tests** covering `easeInQuad`, `easeOutQuad`, and `easeInOutQuad` functions
 - Includes boundary condition tests, mid-value tests, and monotonicity verification
 
+### test_ble
+Tests for BLE (Bluetooth Low Energy) module (`src/ble.h`)
+- **13 tests** covering temperature history management, scroll speed clamping, and packet structure
+- Tests circular buffer behavior, wraparound logic, and chunk calculation
+- Validates temperature precision and history capacity
+
 ### Existing Tests
 - `test_main/` - Main application tests
 - `test_timers/` - Timer threshold tests
@@ -65,11 +71,12 @@ g++ -std=c++11 \
 
 ## Test Results (Latest Run)
 
-✅ **All 20 tests passing**
+✅ **All 33 tests passing**
 
 - AnimationState: 7/7 ✅
 - ScrollState: 6/6 ✅  
 - Easing Functions: 7/7 ✅
+- BLE Module: 13/13 ✅
 
 ## Adding New Tests
 

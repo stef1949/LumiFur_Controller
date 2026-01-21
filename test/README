@@ -30,12 +30,13 @@ The LumiFur Controller project includes comprehensive Unity framework tests:
 - **test_animation_state** - AnimationState module tests (7 tests)
 - **test_scroll_state** - ScrollState module tests (6 tests)
 - **test_easing_functions** - Easing functions tests (7 tests)
+- **test_ble** - BLE module tests (13 tests)
 - **test_main** - Main application tests
 - **test_timers** - Timer threshold tests
 - **test_bitmaps** - Bitmap validation tests
 - **color_parser** - Color parsing tests (GoogleTest)
 
-**Total: 20+ tests** ensuring code quality and correctness.
+**Total: 33+ tests** ensuring code quality and correctness.
 
 ## Documentation
 
