@@ -47,7 +47,7 @@ jobs:
       - name: Generate coverage report
         run: |
           # Find all .gcda files and generate coverage
-          find . pio/build/native2 -name "*.gcda" -type f || echo "No .gcda files found"
+          find .pio/build/native2 -name "*.gcda" -type f || echo "No .gcda files found"
           
           # Generate lcov coverage data - capture ALL data first
           lcov --capture \
@@ -71,13 +71,15 @@ jobs:
           
           # Filter out unwanted files (only if coverage.info has content)
           if [ -s coverage.info ]; then
-            lcov --remove coverage.info \
+            if ! lcov --remove coverage.info \
                  '*/test/*' \
                  '*/.pio/build/*/unity*' \
                  '*/lib/*' \
                  '/usr/*' \
                  --output-file coverage_filtered.info \
-                 --ignore-errors unused || cp coverage. info coverage_filtered.info
+                 --ignore-errors unused; then
+              cp coverage.info coverage_filtered.info
+            fi
           fi
 
       - name: Display coverage summary

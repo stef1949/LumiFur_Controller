@@ -89,6 +89,26 @@ void test_scroll_speed_boundary_fast(void)
   TEST_ASSERT_EQUAL_UINT16(250, s.textIntervalMs);
 }
 
+void test_scroll_speed_clamps_below_min(void)
+{
+  State &s = state();
+  
+  s.speedSetting = 0;
+  updateIntervalFromSpeed();
+  
+  TEST_ASSERT_EQUAL_UINT16(15, s.textIntervalMs);
+}
+
+void test_scroll_speed_clamps_above_max(void)
+{
+  State &s = state();
+  
+  s.speedSetting = 999;
+  updateIntervalFromSpeed();
+  
+  TEST_ASSERT_EQUAL_UINT16(250, s.textIntervalMs);
+}
+
 void test_scroll_speed_mid_range(void)
 {
   State &s = state();
@@ -110,6 +130,8 @@ void setup()
   RUN_TEST(test_scroll_reset_timing);
   RUN_TEST(test_scroll_speed_boundary_slow);
   RUN_TEST(test_scroll_speed_boundary_fast);
+  RUN_TEST(test_scroll_speed_clamps_below_min);
+  RUN_TEST(test_scroll_speed_clamps_above_max);
   RUN_TEST(test_scroll_speed_mid_range);
   
   UNITY_END();
