@@ -1,51 +1,66 @@
-const char* unity_h = "#include <unity.h>\n"
-"#include \"src/main.h\"\n"
-"\n"
-"void setup() {\n"
-"    UNITY_BEGIN();\n"
-"    // Add your test functions here\n"
-"    UNITY_END();\n"
-"}\n"
-"\n"
-"void loop() {\n"
-"}\n";
-
-void test_getCurrentThreshold_shake() {\n"
-"    float thr = getCurrentThreshold();\n"
-"    TEST_ASSERT_NOT_NULL(thr);\n"
-"}\n"
-"\n"
-"void test_getCurrentThreshold_sleep() {\n"
-"    float thr = getCurrentThreshold();\n"
-"    TEST_ASSERT_NOT_NULL(thr);\n"
-"}\n"
-"\n"
-"void test_onSoftMillisTimer_increments() {\n"
-"    // Implement your test logic here\n"
-"}\n";
-
 #include <unity.h>
-#include "src/main.h"
 
-void setup() {
-    UNITY_BEGIN();
-    // Add your test functions here
-    UNITY_END();
+using TimerHandle_t = void *;
+
+static bool useShakeSensitivity = false;
+static constexpr float SLEEP_THRESHOLD = 1.0f;
+static constexpr float SHAKE_THRESHOLD = 1.0f;
+static volatile unsigned long softMillis = 0;
+
+static float getCurrentThreshold()
+{
+  return useShakeSensitivity ? SHAKE_THRESHOLD : SLEEP_THRESHOLD;
 }
 
-void loop() {
+static void onSoftMillisTimer(TimerHandle_t)
+{
+  softMillis++;
 }
 
-const char* test_threshold_timer_cpp = "void test_getCurrentThreshold_shake() {\n"
-"    float thr = getCurrentThreshold();\n"
-"    TEST_ASSERT_NOT_NULL(thr);\n"
-"}\n"
-"\n"
-"void test_getCurrentThreshold_sleep() {\n"
-"    float thr = getCurrentThreshold();\n"
-"    TEST_ASSERT_NOT_NULL(thr);\n"
-"}\n"
-"\n"
-"void test_onSoftMillisTimer_increments() {\n"
-"    // Implement your test logic here\n"
-"}\n";
+void setUp(void)
+{
+  useShakeSensitivity = false;
+  softMillis = 0;
+}
+
+void tearDown(void)
+{
+}
+
+void test_getCurrentThreshold_shake(void)
+{
+  useShakeSensitivity = true;
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, SHAKE_THRESHOLD, getCurrentThreshold());
+}
+
+void test_getCurrentThreshold_sleep(void)
+{
+  useShakeSensitivity = false;
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, SLEEP_THRESHOLD, getCurrentThreshold());
+}
+
+void test_onSoftMillisTimer_increments(void)
+{
+  unsigned long before = softMillis;
+  onSoftMillisTimer(nullptr);
+  TEST_ASSERT_EQUAL_UINT(before + 1, softMillis);
+}
+
+void setup()
+{
+  UNITY_BEGIN();
+  RUN_TEST(test_getCurrentThreshold_shake);
+  RUN_TEST(test_getCurrentThreshold_sleep);
+  RUN_TEST(test_onSoftMillisTimer_increments);
+  UNITY_END();
+}
+
+int main()
+{
+  setup();
+  return 0;
+}
+
+void loop()
+{
+}

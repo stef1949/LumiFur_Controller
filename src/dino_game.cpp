@@ -13,7 +13,7 @@
 #endif
 
 extern MatrixPanel_I2S_DMA *dma_display;
-extern void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t color);
+extern void drawXbm565(int x, int y, int width, int height, const uint8_t *xbm, uint16_t color);
 
 namespace
 {

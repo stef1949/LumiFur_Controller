@@ -1,10 +1,28 @@
 #include <unity.h>
 
-// Declare the easing functions we want to test
-// These are defined in main.h but we'll declare them here for testing
-float easeInQuad(float t);
-float easeOutQuad(float t);
-float easeInOutQuad(float t);
+// Local easing implementations for the unit tests.
+static float easeInOutQuad(float t)
+{
+  return t < 0.5f ? 2.0f * t * t : -1.0f + (4.0f - 2.0f * t) * t;
+}
+
+static float easeInQuad(float t)
+{
+  if (t < 0.0f)
+    return 0.0f;
+  if (t > 1.0f)
+    return 1.0f;
+  return t * t;
+}
+
+static float easeOutQuad(float t)
+{
+  if (t < 0.0f)
+    return 0.0f;
+  if (t > 1.0f)
+    return 1.0f;
+  return 1.0f - (1.0f - t) * (1.0f - t);
+}
 
 void setUp(void)
 {
@@ -131,6 +149,12 @@ void setup()
   RUN_TEST(test_easing_functions_monotonic);
   
   UNITY_END();
+}
+
+int main()
+{
+  setup();
+  return 0;
 }
 
 void loop()

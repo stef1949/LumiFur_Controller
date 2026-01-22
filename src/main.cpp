@@ -862,7 +862,7 @@ static void resetBlePairing()
 }
 
 // Bitmap Drawing Functions ------------------------------------------------
-void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t color = 0xffff)
+void drawXbm565(int x, int y, int width, int height, const uint8_t *xbm, uint16_t color = 0xffff)
 {
   // Ensure width is padded to the nearest byte boundary
   int byteWidth = (width + 7) / 8;
@@ -1206,7 +1206,7 @@ static void renderScrollingTextView()
 
 uint16_t plasmaSpeed = 2; // Lower = slower animation
 
-void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
+void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
                    uint8_t time_offset = 0, float scale = 5.0f, float animSpeed = 0.2f,
                    uint8_t brightnessScale = 255)
 {

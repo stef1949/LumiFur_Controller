@@ -117,6 +117,12 @@ void setup()
   UNITY_END();
 }
 
+int main()
+{
+  setup();
+  return 0;
+}
+
 void loop()
 {
   // Unity tests run once

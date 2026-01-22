@@ -27,7 +27,7 @@ std::uint16_t clampSpeed(std::uint16_t speed)
 
 std::uint16_t computeInterval(std::uint16_t speed)
 {
-  const std::uint8_t clampedSpeed = clampSpeed(speed);
+  const std::uint16_t clampedSpeed = clampSpeed(speed);
   const std::uint16_t range = kSlowestInterval - kFastestInterval;
   const std::uint16_t steps = static_cast<std::uint16_t>(kMaxSpeed - kMinSpeed);
   const std::uint16_t offset = static_cast<std::uint16_t>(

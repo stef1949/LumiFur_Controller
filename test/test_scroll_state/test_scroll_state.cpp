@@ -19,9 +19,8 @@ void test_scroll_state_initialization(void)
   
   // Test initial values
   TEST_ASSERT_EQUAL_UINT8(4, s.speedSetting);
-  // At speed=4, interval should be computed: 15 + ((4-1)*235/99) ≈ 22
-  TEST_ASSERT_GREATER_OR_EQUAL_UINT16(15, s.textIntervalMs);
-  TEST_ASSERT_LESS_OR_EQUAL_UINT16(30, s.textIntervalMs);
+  // At speed=4, interval should be 15 + ((4-1) * 235 / 499) = 16.
+  TEST_ASSERT_EQUAL_UINT16(16, s.textIntervalMs);
   TEST_ASSERT_EQUAL_UINT32(0, s.lastScrollTickMs);
   TEST_ASSERT_EQUAL_UINT32(0, s.lastBackgroundTickMs);
   TEST_ASSERT_EQUAL_UINT8(0, s.backgroundOffset);
@@ -83,10 +82,10 @@ void test_scroll_speed_boundary_fast(void)
   
   // Test maximum speed (slowest scroll = longest interval)
   // Note: Higher speed number = slower scrolling in this implementation
-  s.speedSetting = 100;
+  s.speedSetting = 500;
   updateIntervalFromSpeed();
   
-  // At speed=100, interval = 15 + 235 = 250 (slowest scrolling)
+  // At speed=500, interval = 15 + 235 = 250 (slowest scrolling)
   TEST_ASSERT_EQUAL_UINT16(250, s.textIntervalMs);
 }
 
@@ -98,9 +97,8 @@ void test_scroll_speed_mid_range(void)
   s.speedSetting = 50;
   updateIntervalFromSpeed();
   
-  // Should be somewhere in the middle
-  TEST_ASSERT_GREATER_THAN_UINT16(50, s.textIntervalMs);
-  TEST_ASSERT_LESS_THAN_UINT16(200, s.textIntervalMs);
+  // At speed=50, interval = 15 + ((50-1) * 235 / 499) = 38.
+  TEST_ASSERT_EQUAL_UINT16(38, s.textIntervalMs);
 }
 
 void setup()
@@ -117,7 +115,14 @@ void setup()
   UNITY_END();
 }
 
+int main()
+{
+  setup();
+  return 0;
+}
+
 void loop()
 {
   // Unity tests run once
 }
+
