@@ -5,7 +5,7 @@
   LumiFur Controller<br>
   
   [![CodeQL Advanced Build with PlatformIO](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/stef1949/LumiFur_Controller/actions/workflows/codeql.yml)
-  <img alt="GitHub Release" src="https://img.shields.io/github/v/release/stef1949/lumifur">
+  <img alt="GitHub Release" src="https://img.shields.io/github/v/release/stef1949/lumifur_controller">
   <a href="https://github.com/stef1949/LumiFur_Controller" alt="Activity">
         <img src="https://img.shields.io/github/commit-activity/m/stef1949/LumiFur_Controller" /></a>
   [![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=dev)](https://coveralls.io/github/stef1949/LumiFur_Controller?)
