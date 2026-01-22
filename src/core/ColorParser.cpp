@@ -119,19 +119,49 @@ bool parseColorFromAscii(const std::string &input, RgbColor &colorOut)
     return false;
   }
 
+  bool hasSeparator = false;
+  bool hasHexLetter = false;
+  bool hexPreferred = false;
+  size_t startIndex = 0;
+  if (trimmed[0] == '#')
+  {
+    hexPreferred = true;
+    startIndex = 1;
+  }
+  else if (trimmed.size() > 1 && trimmed[0] == '0' && (trimmed[1] == 'x' || trimmed[1] == 'X'))
+  {
+    hexPreferred = true;
+    startIndex = 2;
+  }
+
   std::string hexDigits;
   hexDigits.reserve(trimmed.size());
-  for (char c : trimmed)
+  for (size_t i = startIndex; i < trimmed.size(); ++i)
   {
-    if (std::isxdigit(static_cast<unsigned char>(c)))
+    unsigned char c = static_cast<unsigned char>(trimmed[i]);
+    if (c == ',' || c == ';' || std::isspace(c))
     {
-      hexDigits.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(c))));
+      hasSeparator = true;
+      continue;
+    }
+    if (std::isxdigit(c))
+    {
+      if (std::isalpha(c))
+      {
+        hasHexLetter = true;
+      }
+      hexDigits.push_back(static_cast<char>(std::toupper(c)));
     }
   }
 
-  if (hexDigits.size() >= 6)
+  if (hexDigits.size() >= 6 && (hexPreferred || hasHexLetter || !hasSeparator))
   {
     return parseHexColorDigits(hexDigits.substr(0, 6), colorOut);
+  }
+
+  if (hexPreferred)
+  {
+    return false;
   }
 
   return parseDecimalColorComponents(trimmed, colorOut);
