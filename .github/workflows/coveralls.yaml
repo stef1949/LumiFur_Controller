@@ -47,31 +47,37 @@ jobs:
       - name: Generate coverage report
         run: |
           # Find all .gcda files and generate coverage
-          find .pio/build/native2 -name "*.gcda" -type f || echo "No .gcda files found"
+          find . pio/build/native2 -name "*.gcda" -type f || echo "No .gcda files found"
           
-          # Generate lcov coverage data
+          # Generate lcov coverage data - capture ALL data first
           lcov --capture \
                --directory .pio/build/native2 \
+               --base-directory . \
                --output-file coverage.info \
                --rc lcov_branch_coverage=1 \
-               --no-external || echo "lcov capture failed, trying gcovr..."
+               --ignore-errors source || echo "lcov capture failed, trying gcovr..."
           
-          # If lcov fails, try gcovr as fallback
-          if [ ! -f coverage.info ]; then
+          # If lcov fails or produces empty file, try gcovr as fallback
+          if [ ! -s coverage.info ]; then
+            echo "lcov failed, using gcovr instead"
             gcovr --root . \
-                  --filter 'src/.*' \
+                  --filter 'src/core/.*' \
                   --exclude 'test/.*' \
                   --exclude '.pio/.*' \
-                  --lcov coverage.info
+                  --exclude 'unity.*' \
+                  --lcov coverage.info \
+                  --gcov-ignore-errors=no_working_dir_found
           fi
           
-          # Filter out unwanted files
-          if [ -f coverage.info ]; then
+          # Filter out unwanted files (only if coverage.info has content)
+          if [ -s coverage.info ]; then
             lcov --remove coverage.info \
                  '*/test/*' \
-                 '*/.pio/*' \
+                 '*/.pio/build/*/unity*' \
                  '*/lib/*' \
-                 --output-file coverage_filtered.info
+                 '/usr/*' \
+                 --output-file coverage_filtered.info \
+                 --ignore-errors unused || cp coverage. info coverage_filtered.info
           fi
 
       - name: Display coverage summary
