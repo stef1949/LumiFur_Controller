@@ -8,7 +8,7 @@
   <img alt="GitHub Release" src="https://img.shields.io/github/v/release/stef1949/lumifur_controller">
   <a href="https://github.com/stef1949/LumiFur_Controller" alt="Activity">
         <img src="https://img.shields.io/github/commit-activity/m/stef1949/LumiFur_Controller" /></a>
-  [![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=dev)](https://coveralls.io/github/stef1949/LumiFur_Controller?)
+  [![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=main)](https://coveralls.io/github/stef1949/LumiFur_Controller?branch=main)
 </h1>
 A real-time firmware for animating a HUB75 LED matrix Protogen mask with sensor-driven interactions, Bluetooth LE control, and OTA updates on the ESP32-based MatrixPortal platform.
 
