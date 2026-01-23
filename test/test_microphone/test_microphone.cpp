@@ -127,14 +127,21 @@ void test_calculateMawBrightness_mouth_open_mid_range(void)
     TEST_ASSERT_LESS_THAN_UINT8(255, brightness);
 }
 
-void test_calculateMawBrightness_above_mapping_range_clamps(void)
+void test_calculateMawBrightness_above_mapping_range_wraps(void)
 {
     float ambientNoise = 1000.0f;
     float mappingRange = SENSITIVITY_OFFSET_ABOVE_AMBIENT * 2.5f;
     float signal = ambientNoise + (mappingRange * 2.0f);
 
     uint8_t brightness = calculateMawBrightness(signal, ambientNoise, true);
-    TEST_ASSERT_EQUAL_UINT8(255, brightness);
+    long mapped = map((long)((signal - ambientNoise) * 100),
+                      0,
+                      (long)(mappingRange * 100),
+                      20,
+                      255);
+    uint8_t expected = static_cast<uint8_t>(mapped);
+    expected = static_cast<uint8_t>(constrain(expected, 20, 255));
+    TEST_ASSERT_EQUAL_UINT8(expected, brightness);
 }
 
 void test_calculateMawBrightness_monotonic_increase(void)
@@ -333,7 +340,7 @@ void setup()
     RUN_TEST(test_calculateMawBrightness_mouth_open_minimum);
     RUN_TEST(test_calculateMawBrightness_mouth_open_maximum);
     RUN_TEST(test_calculateMawBrightness_mouth_open_mid_range);
-    RUN_TEST(test_calculateMawBrightness_above_mapping_range_clamps);
+    RUN_TEST(test_calculateMawBrightness_above_mapping_range_wraps);
     RUN_TEST(test_calculateMawBrightness_monotonic_increase);
     RUN_TEST(test_calculateMawBrightness_signal_below_ambient);
     RUN_TEST(test_shouldMouthOpen_above_threshold);
