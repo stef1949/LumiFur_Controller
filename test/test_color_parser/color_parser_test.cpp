@@ -91,6 +91,15 @@ void test_parse_decimal_components_with_spaces(void)
   TEST_ASSERT_EQUAL_UINT8(7, color.b);
 }
 
+void test_parse_decimal_components_with_plus_signs(void)
+{
+  RgbColor color{};
+  TEST_ASSERT_TRUE(parseDecimalColorComponents("+1, +2, +3", color));
+  TEST_ASSERT_EQUAL_UINT8(1, color.r);
+  TEST_ASSERT_EQUAL_UINT8(2, color.g);
+  TEST_ASSERT_EQUAL_UINT8(3, color.b);
+}
+
 void test_parse_decimal_components_invalid_count(void)
 {
   RgbColor color{};
@@ -137,6 +146,15 @@ void test_parse_ascii_hex_with_noise(void)
   TEST_ASSERT_EQUAL_UINT8(0x34, color.b);
 }
 
+void test_parse_ascii_hex_with_commas(void)
+{
+  RgbColor color{};
+  TEST_ASSERT_TRUE(parseColorFromAscii("#12,34,56", color));
+  TEST_ASSERT_EQUAL_UINT8(0x12, color.r);
+  TEST_ASSERT_EQUAL_UINT8(0x34, color.g);
+  TEST_ASSERT_EQUAL_UINT8(0x56, color.b);
+}
+
 void test_parse_ascii_hex_with_separators_letters(void)
 {
   RgbColor color{};
@@ -162,6 +180,15 @@ void test_parse_ascii_hex_0x_prefix(void)
   TEST_ASSERT_EQUAL_UINT8(0x10, color.r);
   TEST_ASSERT_EQUAL_UINT8(0xAF, color.g);
   TEST_ASSERT_EQUAL_UINT8(0x20, color.b);
+}
+
+void test_parse_ascii_hex_0x_prefix_with_spaces(void)
+{
+  RgbColor color{};
+  TEST_ASSERT_TRUE(parseColorFromAscii("0x12 34 56", color));
+  TEST_ASSERT_EQUAL_UINT8(0x12, color.r);
+  TEST_ASSERT_EQUAL_UINT8(0x34, color.g);
+  TEST_ASSERT_EQUAL_UINT8(0x56, color.b);
 }
 
 void test_parse_ascii_hex_prefix_with_spaces(void)
@@ -284,6 +311,22 @@ void test_parse_payload_ascii_decimal(void)
   TEST_ASSERT_EQUAL_UINT8(128, color.b);
 }
 
+void test_parse_payload_ascii_invalid_length(void)
+{
+  const char payload[] = "GG";
+  RgbColor color{};
+  std::string hex;
+  TEST_ASSERT_FALSE(parseColorPayload(reinterpret_cast<const uint8_t *>(payload), sizeof(payload) - 1, color, hex));
+}
+
+void test_parse_payload_binary_invalid_length(void)
+{
+  uint8_t payload[4] = {1, 2, 3, 4};
+  RgbColor color{};
+  std::string hex;
+  TEST_ASSERT_FALSE(parseColorPayload(payload, sizeof(payload), color, hex));
+}
+
 void test_parse_payload_ascii_hex_prefix(void)
 {
   const char payload[] = "0x0a0b0c";
@@ -327,15 +370,18 @@ void setup()
   RUN_TEST(test_parse_decimal_components_with_clamping);
   RUN_TEST(test_parse_decimal_components_with_separators);
   RUN_TEST(test_parse_decimal_components_with_spaces);
+  RUN_TEST(test_parse_decimal_components_with_plus_signs);
   RUN_TEST(test_parse_decimal_components_invalid_count);
   RUN_TEST(test_parse_decimal_components_invalid_chars);
   RUN_TEST(test_parse_decimal_components_trailing_garbage);
   RUN_TEST(test_parse_decimal_components_trailing_separator);
   RUN_TEST(test_parse_ascii_hex);
   RUN_TEST(test_parse_ascii_hex_with_noise);
+  RUN_TEST(test_parse_ascii_hex_with_commas);
   RUN_TEST(test_parse_ascii_hex_with_separators_letters);
   RUN_TEST(test_parse_ascii_hex_plain);
   RUN_TEST(test_parse_ascii_hex_0x_prefix);
+  RUN_TEST(test_parse_ascii_hex_0x_prefix_with_spaces);
   RUN_TEST(test_parse_ascii_hex_prefix_with_spaces);
   RUN_TEST(test_parse_ascii_hex_prefix_too_short);
   RUN_TEST(test_parse_ascii_hex_prefix_invalid);
@@ -350,6 +396,8 @@ void setup()
   RUN_TEST(test_parse_raw_payload_full_range);
   RUN_TEST(test_parse_payload_ascii_hex);
   RUN_TEST(test_parse_payload_ascii_decimal);
+  RUN_TEST(test_parse_payload_ascii_invalid_length);
+  RUN_TEST(test_parse_payload_binary_invalid_length);
   RUN_TEST(test_parse_payload_ascii_hex_prefix);
   RUN_TEST(test_parse_payload_invalid_length);
   RUN_TEST(test_rejects_invalid_inputs);
