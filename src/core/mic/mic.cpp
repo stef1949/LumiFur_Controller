@@ -6,6 +6,7 @@
 #include "driver/i2s.h"
 
 #include "mic_config.h"
+#include "mic_math.h"
 #include "mic_pins.h"
 
 static TaskHandle_t s_micTaskHandle = nullptr;
@@ -88,11 +89,7 @@ static void micTask(void *param)
 
   auto updateBrightness = [&](float targetBrightness)
   {
-    const float alpha = (targetBrightness > brightnessEma) ? MIC_BRIGHTNESS_ATTACK_ALPHA : MIC_BRIGHTNESS_RELEASE_ALPHA;
-    brightnessEma += alpha * (targetBrightness - brightnessEma);
-    brightnessEma = constrain(brightnessEma,
-                              static_cast<float>(MIC_MIN_BRIGHTNESS),
-                              static_cast<float>(MIC_MAX_BRIGHTNESS));
+    brightnessEma = micUpdateBrightnessEma(brightnessEma, targetBrightness);
     s_mouthBrightness = static_cast<uint8_t>(brightnessEma + 0.5f);
   };
 
@@ -185,10 +182,8 @@ static void micTask(void *param)
     }
 
     float currentAvgAbsSignal = static_cast<float>(sumAbs) / static_cast<float>(samples);
-    const float openThreshold = ambientNoiseLevel + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT;
-    const float impulseAvgLimit = ambientNoiseLevel + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * MIC_IMPULSE_MAX_AVG_RATIO;
-    const float peakToAvg = (currentAvgAbsSignal > 1.0f) ? (static_cast<float>(peakAbs) / currentAvgAbsSignal) : 0.0f;
-    const bool isImpulse = (peakToAvg >= MIC_IMPULSE_PEAK_RATIO) && (currentAvgAbsSignal < impulseAvgLimit);
+    const float openThreshold = micComputeOpenThreshold(ambientNoiseLevel);
+    const bool isImpulse = micIsImpulse(peakAbs, currentAvgAbsSignal, ambientNoiseLevel);
 
     if (isImpulse)
     {
@@ -212,7 +207,7 @@ static void micTask(void *param)
 
     smoothedSignalLevel = MIC_SIGNAL_EMA_ALPHA * currentAvgAbsSignal + (1.0f - MIC_SIGNAL_EMA_ALPHA) * smoothedSignalLevel;
 
-    const float closeThreshold = ambientNoiseLevel + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * MIC_CLOSE_HYSTERESIS_RATIO;
+    const float closeThreshold = micComputeCloseThreshold(ambientNoiseLevel);
 
     if (smoothedSignalLevel > openThreshold)
     {
@@ -240,7 +235,7 @@ static void micTask(void *param)
     }
 
     const bool isQuietPeriod = (now - lastSoundTime > MIC_AMBIENT_UPDATE_QUIET_PERIOD_MS);
-    const float ambientUpdateLimit = ambientNoiseLevel + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * MIC_AMBIENT_UPDATE_BAND;
+    const float ambientUpdateLimit = micComputeAmbientUpdateLimit(ambientNoiseLevel);
     if (!s_mouthOpen && smoothedSignalLevel <= ambientUpdateLimit && (now - lastAmbientUpdateTime > MIC_AMBIENT_SILENCE_UPDATE_MS))
     {
       float alpha = 0.0f;
@@ -261,17 +256,7 @@ static void micTask(void *param)
       }
     }
 
-    float signalAboveAmbient = smoothedSignalLevel - ambientNoiseLevel;
-    if (signalAboveAmbient < 0.0f)
-      signalAboveAmbient = 0.0f;
-
-    float brightnessMappingRange = MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * 2.5f;
-    float normalized = signalAboveAmbient / brightnessMappingRange;
-    if (normalized > 1.0f)
-      normalized = 1.0f;
-
-    const float targetBrightness = static_cast<float>(MIC_MIN_BRIGHTNESS) +
-                                   (static_cast<float>(MIC_MAX_BRIGHTNESS - MIC_MIN_BRIGHTNESS) * normalized);
+    const float targetBrightness = micComputeBrightnessTarget(smoothedSignalLevel, ambientNoiseLevel);
     updateBrightness(targetBrightness);
 
     if (s_mouthOpen)

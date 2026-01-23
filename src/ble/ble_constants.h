@@ -21,7 +21,7 @@
 
 // Fallback defines in case PlatformIO doesn't inject them
 #ifndef FIRMWARE_VERSION
-// #define FIRMWARE_VERSION "unknown"
+
 #define FIRMWARE_VERSION "3.6.0" // Default version if not defined
 #endif
 
