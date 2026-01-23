@@ -4,6 +4,11 @@
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
 
+// Optional debug flag for fluid effect logging.
+#ifndef DEBUG_FLUID_EFFECT
+#define DEBUG_FLUID_EFFECT 0
+#endif
+
 // Determine which display class header to use based on VIRTUAL_PANE define
 #ifdef VIRTUAL_PANE
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
@@ -30,20 +35,29 @@ class Adafruit_LIS3DH;
 #endif
 
 
-#define MAX_PARTICLES_FLUID 70 // Number of particles. Adjust for performance/look. (Was 80)
+#define MAX_PARTICLES_FLUID 1000 // Number of particles. Adjust for performance/look. (Was 80)
 
+// Simple particle used by FluidEffect. Units are in screen pixels.
 struct FluidParticle {
     float x, y;   // Position
     float xv, yv; // Velocity
+    uint8_t panel_index; // 0 = left panel, 1 = right panel
 };
 
+// FluidEffect
+// - A lightweight particle-based "fluid" simulation rendered as pixels.
+// - Uses repulsion between nearby particles and gravity to create motion.
+// - Optional accelerometer input tilts the gravity vector in real time.
+// - Tunables below trade off look vs. performance (e.g., MAX_PARTICLES_FLUID).
 class FluidEffect {
 public:
     FluidEffect(MatrixDisplayAdaptor* display, Adafruit_LIS3DH* accel = nullptr, bool* accelEnabled = nullptr);
     ~FluidEffect();
 
-    void begin();           // Called when the effect starts or is switched to
-    void updateAndDraw();   // Called every frame to update simulation and draw
+    // Called when the effect starts or is switched to.
+    void begin();
+    // Called every frame to update simulation state and draw pixels.
+    void updateAndDraw();
 
 private:
     MatrixDisplayAdaptor* dma_display; // Renamed to avoid conflict with global dma_display if any scope issues
@@ -52,22 +66,45 @@ private:
 
     FluidParticle particles[MAX_PARTICLES_FLUID];
     int num_active_particles;
+    int pane_width;
+    int pane_height;
 
-    // Simulation parameters
+    // Simulation parameters.
+    // Notes:
+    // - GRAVITY_BASE is in pixels/frame^2 and applies downward by default.
+    // - PARTICLE_INTERACTION_DISTANCE defines the radius for repulsion.
+    // - WALL_DAMPING should be negative to bounce and lose energy on impact.
     static constexpr float GRAVITY_BASE = 0.035f; // Slightly less for potentially smaller screens (was 0.04)
-    static constexpr float PARTICLE_INTERACTION_DISTANCE = 6.0f; // (was 7.0)
+    static constexpr float PARTICLE_INTERACTION_DISTANCE = 1.5f; // (was 7.0)
     static constexpr float PARTICLE_INTERACTION_DISTANCE_SQ = PARTICLE_INTERACTION_DISTANCE * PARTICLE_INTERACTION_DISTANCE;
     static constexpr float PARTICLE_REPEL_FACTOR = 0.07f; // (was 0.08)
-    static constexpr float PARTICLE_DRAG = 0.98f;         // (was 0.985)
+    static constexpr float PARTICLE_DRAG = 0.99f;         // (was 0.985)
     static constexpr float WALL_DAMPING = -0.35f;         // (was -0.4)
     static constexpr float ACCEL_SENSITIVITY_MULTIPLIER = 0.018f; // (was 0.015)
     static constexpr float DT_FLUID = 1.0f;              
+    static constexpr float MAX_SPEED_SQ = 0.4f;          // Color mapping upper bound for speed^2
+    static constexpr int GRID_CELL_SIZE = 2;             // Spatial bin size in pixels
+    static constexpr int GRID_COLS_MAX = (PANE_WIDTH_DEFAULT_FLUID + GRID_CELL_SIZE - 1) / GRID_CELL_SIZE;
+    static constexpr int GRID_ROWS_MAX = (PANE_HEIGHT_DEFAULT_FLUID + GRID_CELL_SIZE - 1) / GRID_CELL_SIZE;
+    static constexpr int GRID_MAX_CELLS = GRID_COLS_MAX * GRID_ROWS_MAX;
 
+    int grid_cols;
+    int grid_rows;
+    int grid_cell_count;
+    int16_t grid_head[GRID_MAX_CELLS];
+    int16_t grid_next[MAX_PARTICLES_FLUID];
+
+    // Reset particle positions and velocities to a starting cluster.
     void initializeParticles();
+    // Apply base gravity plus accelerometer-based tilt (if enabled).
     void applyGravityAndAccel();
+    // Apply short-range repulsion to keep particles separated.
     void applyParticleInteractions();
+    // Integrate velocities into positions and apply drag.
     void updateParticlePositions();
+    // Keep particles inside the screen bounds with damped bounces.
     void applyScreenCollisions();
+    // Render particles as pixels using speed-based coloring.
     void drawParticles();
 };
 

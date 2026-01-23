@@ -19,6 +19,8 @@
 
 #include <Adafruit_PixelDust.h> // For sand simulation
 #include "main.h"
+#include "dino_game.h"
+#include "core/mic/mic.h"
 #include "core/ColorParser.h"
 #include "customEffects/flameEffect.h"
 #include "customEffects/fluidEffect.h"
@@ -54,9 +56,6 @@
 // #include "EffectsLayer.hpp" // FastLED CRGB Pixel Buffer for which the patterns are drawn
 // EffectsLayer effects(VPANEL_W, VPANEL_H);
 
-// Setup functions for adaptive brightness using APDS9960:
-// Call setupAdaptiveBrightness() in your setup() to initialize the sensor.
-
 // ----------------------------------------------------------------
 // ----------------------------------------------------------------
 // ------------------- LumiFur Global Variables -------------------
@@ -69,11 +68,11 @@ FluidEffect *fluidEffectInstance = nullptr; // Global pointer for our fluid effe
 //  Retrieve the brightness value from preferences
 bool g_accelerometer_initialized = false;
 
-constexpr unsigned long MOTION_SAMPLE_INTERVAL_FAST = 15;  // ms between accel reads when looking for shakes
+constexpr unsigned long MOTION_SAMPLE_INTERVAL_FAST = 15; // ms between accel reads when looking for shakes
 
 // --- Performance Tuning ---
 // Target ~50-60 FPS. Adjust as needed based on view complexity.
-const unsigned long targetFrameIntervalMillis = 12;            // ~100 FPS pacing
+const unsigned long targetFrameIntervalMillis = 12; // ~100 FPS pacing
 constexpr uint32_t SLOW_FRAME_THRESHOLD_US = targetFrameIntervalMillis * 1000UL;
 
 #if DEBUG_MODE
@@ -112,6 +111,8 @@ bool brightnessChanged = false;
 constexpr unsigned long AUTO_BRIGHTNESS_INTERVAL_MS = 250;
 constexpr unsigned long LUX_UPDATE_INTERVAL_MS = 500;
 constexpr unsigned long SLEEP_CHECK_INTERVAL_MS = 60;
+constexpr unsigned long PAIRING_RESET_HOLD_MS = 3000;
+constexpr unsigned long PAIRING_RESET_DEBOUNCE_MS = 50;
 
 static unsigned long lastAutoBrightnessUpdate = 0;
 static unsigned long lastLuxUpdateTime = 0;
@@ -119,7 +120,7 @@ static unsigned long lastSleepCheckTime = 0;
 
 // View switching
 volatile uint8_t currentView = VIEW_FLAME_EFFECT; // Current view (volatile so the display task sees updates)
-const int totalViews = TOTAL_VIEWS;      // Total number of views is now calculated automatically
+const int totalViews = TOTAL_VIEWS;               // Total number of views is now calculated automatically
 // int userBrightness = 20; // Default brightness level (0-255)
 
 // Plasma animation optimization
@@ -211,31 +212,31 @@ static void setStaticColor(const CRGB &color)
   constantColor = color;
 }
 
-  static void setStaticColorToDefault()
+static void setStaticColorToDefault()
+{
+  setStaticColor(constantColor);
+}
+
+static bool applyStaticColorBytes(const uint8_t *data, size_t length, bool persistPreference, std::string *normalizedOut)
+{
+  std::string normalized;
+  CRGB parsedColor;
+  if (!parseColorPayloadToCRGB(data, length, parsedColor, normalized))
   {
-    setStaticColor(constantColor);
+    return false;
   }
 
-  static bool applyStaticColorBytes(const uint8_t *data, size_t length, bool persistPreference, std::string *normalizedOut)
+  setStaticColor(parsedColor);
+  if (persistPreference)
   {
-    std::string normalized;
-    CRGB parsedColor;
-    if (!parseColorPayloadToCRGB(data, length, parsedColor, normalized))
-    {
-      return false;
-    }
-
-    setStaticColor(parsedColor);
-    if (persistPreference)
-    {
-      saveSelectedColor(String(normalized.c_str()));
-    }
-    if (normalizedOut)
-    {
-      *normalizedOut = normalized;
-    }
-    return true;
+    saveSelectedColor(String(normalized.c_str()));
   }
+  if (normalizedOut)
+  {
+    *normalizedOut = normalized;
+  }
+  return true;
+}
 
 static bool loadStaticColorFromPreferences()
 {
@@ -269,18 +270,18 @@ void ensureStaticColorLoaded()
   }
 }
 
-  CRGB getStaticColorCached()
-  {
-    ensureStaticColorLoaded();
-    return gStaticColorState.color;
-  }
+CRGB getStaticColorCached()
+{
+  ensureStaticColorLoaded();
+  return gStaticColorState.color;
+}
 
-  static String getStaticColorHexString()
-  {
-    ensureStaticColorLoaded();
-    const std::string hex = colorToHexString(toRgbColor(gStaticColorState.color));
-    return String(hex.c_str());
-  }
+static String getStaticColorHexString()
+{
+  ensureStaticColorLoaded();
+  const std::string hex = colorToHexString(toRgbColor(gStaticColorState.color));
+  return String(hex.c_str());
+}
 
 inline void setBlinkProgress(int newValue)
 {
@@ -316,7 +317,6 @@ const int maxBlinkDelay = MAX_BLINK_DELAY;
 int loadingProgress = 0;
 int loadingMax = 100;
 
-
 template <typename Callback>
 inline void runIfElapsed(unsigned long now, unsigned long &last, unsigned long interval, Callback &&callback)
 {
@@ -346,9 +346,14 @@ const unsigned long fadeOutDuration = 2000; // Duration for fade-out (2 seconds)
 // Non-blocking sensor read interval
 unsigned long lastSensorReadTime = 0;
 const unsigned long sensorInterval = 250; // sensor read throttled to reduce I2C pressure
-constexpr uint8_t PROX_TRIGGER_THRESHOLD = 20; // Minimum reading to trigger effects
-constexpr uint8_t PROX_RELEASE_THRESHOLD = 10; // Reading that counts as hand removed
-static bool proximityLatchedHigh = false;      // Prevents retriggering until sensor settles
+constexpr uint8_t PROX_TRIGGER_DELTA = 6; // How far above baseline to trigger
+constexpr uint8_t PROX_RELEASE_DELTA = 2; // How close to baseline to release
+constexpr unsigned long PROX_LATCH_TIMEOUT_MS = 1200;
+constexpr float PROX_BASELINE_ALPHA = 0.05f; // Baseline smoothing factor
+static bool proximityLatchedHigh = false;    // Prevents retriggering until sensor settles
+static unsigned long proximityLatchedAt = 0;
+static float proximityBaseline = 0.0f;
+static bool proximityBaselineValid = false;
 
 // Variables for plasma effect
 uint16_t time_counter = 0, cycles = 0, fps = 0;
@@ -366,7 +371,7 @@ static float lastAccelDeltaX = 0, lastAccelDeltaY = 0, lastAccelDeltaZ = 0;
 static bool accelSampleValid = false;
 static bool lastMotionAboveShake = false;
 static bool lastMotionAboveSleep = false;
-uint8_t preSleepView = 4;                  // Store the view before sleep
+uint8_t preSleepView = VIEW_NORMAL_FACE;   // Store the view before sleep
 uint8_t sleepBrightness = 15;              // Brightness level during sleep (0-255)
 uint8_t normalBrightness = userBrightness; // Normal brightness level
 volatile bool notifyPending = false;
@@ -448,6 +453,24 @@ void maybeUpdateTemperature()
 }
 
 void displayCurrentView(int view);
+static bool viewUsesMic(int view)
+{
+  switch (view)
+  {
+  case VIEW_NORMAL_FACE:
+  case VIEW_BLUSH_FACE:
+  case VIEW_SEMICIRCLE_EYES:
+  case VIEW_X_EYES:
+  case VIEW_SLANT_EYES:
+  case VIEW_SPIRAL_EYES:
+  case VIEW_PLASMA_FACE:
+  case VIEW_UWU_EYES:
+  case VIEW_CIRCLE_EYES:
+    return true;
+  default:
+    return false;
+  }
+}
 
 void wakeFromSleepMode()
 {
@@ -457,6 +480,7 @@ void wakeFromSleepMode()
   Serial.println(">>> Waking from sleep mode <<<");
   sleepModeActive = false;
   currentView = preSleepView; // Restore previous view
+  micSetEnabled(viewUsesMic(currentView));
 
   // Restore normal CPU speed
   restoreNormalCPUSpeed();
@@ -467,6 +491,8 @@ void wakeFromSleepMode()
   // Restore normal brightness
   dma_display->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
+  lastBrightness = userBrightness;
+  currentBrightness = static_cast<float>(userBrightness);
 
   lastActivityTime = millis(); // Reset activity timer
 
@@ -662,6 +688,7 @@ class ConfigCallbacks : public NimBLECharacteristicCallbacks
         // Static color mode takes precedence over aurora mode.
         auroraModeEnabled = false;
       }
+      setAutoBrightness(autoBrightnessEnabled);
       setAuroraMode(auroraModeEnabled);
       setStaticColorMode(staticColorModeEnabled);
       // Log the updated settings.
@@ -688,6 +715,8 @@ class ConfigCallbacks : public NimBLECharacteristicCallbacks
           Serial.println("Auto brightness has been DISABLED. Applying user-set brightness.");
           dma_display->setBrightness8(userBrightness);
           updateGlobalBrightnessScale(userBrightness);
+          lastBrightness = userBrightness;
+          currentBrightness = static_cast<float>(userBrightness);
           Serial.printf("Applied manual brightness: %u\n", userBrightness);
         }
       }
@@ -714,11 +743,14 @@ class BrightnessCallbacks : public NimBLECharacteristicCallbacks
     {
       userBrightness = (uint8_t)val[0]; // Store the app-set brightness
       brightnessChanged = true;         // Flag that brightness was set by user
+      setUserBrightness(userBrightness);
       // ADDED: Apply brightness immediately if auto-brightness is off
       if (!autoBrightnessEnabled)
       {
         dma_display->setBrightness8(userBrightness);
         updateGlobalBrightnessScale(userBrightness);
+        lastBrightness = userBrightness;
+        currentBrightness = static_cast<float>(userBrightness);
         Serial.printf("Applied manual brightness: %u\n", userBrightness);
       }
       Serial.printf("Brightness set to %u\n", userBrightness);
@@ -775,6 +807,7 @@ class DescriptorCallbacks : public NimBLEDescriptorCallbacks
 
 void handleBLEStatusLED()
 {
+  const PairingSnapshot pairingSnapshot = getPairingSnapshot();
   if (deviceConnected != oldDeviceConnected)
   {
     bluetoothStatusChangeMillis = millis();
@@ -794,15 +827,42 @@ void handleBLEStatusLED()
   {
     fadeInAndOutLED(0, 0, 100); // Blue fade when disconnected
   }
-  if (devicePairing)
+  if (pairingSnapshot.pairing)
   {
     fadeInAndOutLED(128, 0, 128); // Blue when pairing
   }
   statusPixel.show();
 }
 
+static void resetBlePairing()
+{
+  if (!pServer)
+  {
+    return;
+  }
+
+  setPairingState(false, false, 0, false);
+  const std::vector<uint16_t> peers = pServer->getPeerDevices();
+  if (!peers.empty())
+  {
+    setPairingResetPending(true);
+    for (uint16_t connHandle : peers)
+    {
+      pServer->disconnect(connHandle);
+    }
+    return;
+  }
+
+  const bool cleared = NimBLEDevice::deleteAllBonds();
+  setPairingResetPending(false);
+  NimBLEDevice::startAdvertising();
+#if DEBUG_BLE
+  Serial.printf("BLE pairing reset: bonds cleared=%s\n", cleared ? "true" : "false");
+#endif
+}
+
 // Bitmap Drawing Functions ------------------------------------------------
-void drawXbm565(int x, int y, int width, int height, const char *xbm, uint16_t color = 0xffff)
+void drawXbm565(int x, int y, int width, int height, const uint8_t *xbm, uint16_t color = 0xffff)
 {
   // Ensure width is padded to the nearest byte boundary
   int byteWidth = (width + 7) / 8;
@@ -941,10 +1001,110 @@ void drawBluetoothStatusIcon()
   }
 
   drawXbm565(iconX, iconY, BLUETOOTH_BACKGROUND_WIDTH, BLUETOOTH_BACKGROUND_HEIGHT, bluetoothBackground, backgroundColor);
+  drawXbm565(iconX + BLUETOOTH_BACKGROUND_WIDTH + 2, iconY, BLUETOOTH_BACKGROUND_WIDTH, BLUETOOTH_BACKGROUND_HEIGHT, bluetoothBackground, backgroundColor);
+
   const int runeX = iconX + static_cast<int>((BLUETOOTH_BACKGROUND_WIDTH - BLUETOOTH_RUNE_WIDTH) / 2);
   const int runeY = iconY + static_cast<int>((BLUETOOTH_BACKGROUND_HEIGHT - BLUETOOTH_RUNE_HEIGHT) / 2);
 
   drawXbm565(runeX, runeY, BLUETOOTH_RUNE_WIDTH, BLUETOOTH_RUNE_HEIGHT, bluetoothRune, runeColor);
+  drawXbm565(runeX + BLUETOOTH_RUNE_WIDTH + 4, runeY, BLUETOOTH_RUNE_WIDTH, BLUETOOTH_RUNE_HEIGHT, bluetoothRune, runeColor);
+}
+
+static void drawPairingPasskeyOverlay()
+{
+  if (!dma_display)
+  {
+    return;
+  }
+
+  const PairingSnapshot pairingSnapshot = getPairingSnapshot();
+  if (!pairingSnapshot.pairing || !pairingSnapshot.passkeyValid)
+  {
+    return;
+  }
+
+  static bool labelMetricsCached = false;
+  static int16_t labelX1 = 0;
+  static int16_t labelY1 = 0;
+  static uint16_t labelW = 0;
+  static uint16_t labelH = 0;
+  static bool keyMetricsCached = false;
+  static uint32_t cachedPasskey = 0;
+  static int16_t keyX1 = 0;
+  static int16_t keyY1 = 0;
+  static uint16_t keyW = 0;
+  static uint16_t keyH = 0;
+
+  const uint32_t passkey = pairingSnapshot.passkey;
+  char passkeyStr[7];
+  snprintf(passkeyStr, sizeof(passkeyStr), "%06lu", static_cast<unsigned long>(passkey));
+
+  const char *label = "PASSKEY";
+
+  if (!labelMetricsCached)
+  {
+    dma_display->setFont(&TomThumb);
+    dma_display->setTextSize(1);
+    dma_display->getTextBounds(label, 0, 0, &labelX1, &labelY1, &labelW, &labelH);
+    labelMetricsCached = true;
+  }
+
+  if (!keyMetricsCached || passkey != cachedPasskey)
+  {
+    dma_display->setFont(&FreeSans9pt7b);
+    dma_display->setTextSize(1);
+    dma_display->getTextBounds(passkeyStr, 0, 0, &keyX1, &keyY1, &keyW, &keyH);
+    cachedPasskey = passkey;
+    keyMetricsCached = true;
+  }
+
+  const int padding = 2;
+  const int gap = 1;
+  const int contentW = (labelW > keyW) ? labelW : keyW;
+  const int boxW = contentW + (padding * 2);
+  const int boxH = labelH + keyH + gap + (padding * 2);
+
+  const int screenW = dma_display->width();
+  const int screenH = dma_display->height();
+  int boxX = (screenW - boxW) / 2;
+  int boxY = (screenH - boxH) / 2;
+
+  if (boxX < 0)
+  {
+    boxX = 0;
+  }
+  if (boxY < 0)
+  {
+    boxY = 0;
+  }
+
+  dma_display->clearScreen();
+  const uint16_t backgroundColor = dma_display->color565(0, 0, 0);
+  const uint16_t borderColor = dma_display->color565(255, 255, 255);
+  dma_display->fillRect(boxX, boxY, boxW, boxH, backgroundColor);
+  dma_display->drawRect(boxX, boxY, boxW, boxH, borderColor);
+
+  const int labelLeft = boxX + (boxW - labelW) / 2;
+  const int labelTop = boxY + padding;
+  const int labelCursorX = labelLeft - labelX1;
+  const int labelCursorY = labelTop - labelY1;
+
+  dma_display->setFont(&TomThumb);
+  dma_display->setTextSize(1);
+  dma_display->setTextColor(borderColor);
+  dma_display->setCursor(labelCursorX, labelCursorY);
+  dma_display->print(label);
+
+  const int keyLeft = boxX + (boxW - keyW) / 2;
+  const int keyTop = labelTop + labelH + gap;
+  const int keyCursorX = keyLeft - keyX1;
+  const int keyCursorY = keyTop - keyY1;
+
+  dma_display->setFont(&FreeSans9pt7b);
+  dma_display->setTextSize(1);
+  dma_display->setTextColor(borderColor);
+  dma_display->setCursor(keyCursorX, keyCursorY);
+  dma_display->print(passkeyStr);
 }
 
 uint16_t colorWheel(uint8_t pos)
@@ -1046,8 +1206,9 @@ static void renderScrollingTextView()
 
 uint16_t plasmaSpeed = 2; // Lower = slower animation
 
-void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
-                   uint8_t time_offset = 0, float scale = 5.0f, float animSpeed = 0.2f)
+void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
+                   uint8_t time_offset = 0, float scale = 5.0f, float animSpeed = 0.2f,
+                   uint8_t brightnessScale = 255)
 {
   const int byteWidth = (width + 7) >> 3;
   if (byteWidth <= 0)
@@ -1056,15 +1217,16 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
   }
 
   const bool useStaticColorMode = staticColorModeEnabled;
+  const uint16_t combinedBrightnessScale = static_cast<uint16_t>(
+      (static_cast<uint32_t>(globalBrightnessScaleFixed) * static_cast<uint16_t>(brightnessScale) + 128u) >> 8);
   uint16_t staticColor565 = 0;
   if (useStaticColorMode)
   {
     ensureStaticColorLoaded();
     CRGB color = gStaticColorState.color;
-    const uint16_t scaleBrightness = globalBrightnessScaleFixed;
-    color.r = static_cast<uint8_t>((static_cast<uint16_t>(color.r) * scaleBrightness + 128) >> 8);
-    color.g = static_cast<uint8_t>((static_cast<uint16_t>(color.g) * scaleBrightness + 128) >> 8);
-    color.b = static_cast<uint8_t>((static_cast<uint16_t>(color.b) * scaleBrightness + 128) >> 8);
+    color.r = static_cast<uint8_t>((static_cast<uint16_t>(color.r) * combinedBrightnessScale + 128) >> 8);
+    color.g = static_cast<uint8_t>((static_cast<uint16_t>(color.g) * combinedBrightnessScale + 128) >> 8);
+    color.b = static_cast<uint8_t>((static_cast<uint16_t>(color.b) * combinedBrightnessScale + 128) >> 8);
     staticColor565 = dma_display->color565(color.r, color.g, color.b);
   }
 
@@ -1082,7 +1244,7 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
   const uint8_t t2 = static_cast<uint8_t>(t >> 1);
   const uint8_t t3 = static_cast<uint8_t>(((effectiveTimeFixed / 3U) >> 8) & 0xFF);
 
-  const uint16_t brightnessScale = globalBrightnessScaleFixed;
+  const uint16_t brightnessScaleFixed = combinedBrightnessScale;
 
   for (int j = 0; j < height; ++j)
   {
@@ -1112,7 +1274,7 @@ void drawPlasmaXbm(int x, int y, int width, int height, const char *xbm,
 
           const uint8_t paletteIndex = static_cast<uint8_t>(v + time_offset);
           CRGB color = ColorFromPalette(currentPalette, paletteIndex);
-          const uint16_t scale = brightnessScale;
+          const uint16_t scale = brightnessScaleFixed;
           color.r = static_cast<uint8_t>((static_cast<uint16_t>(color.r) * scale + 128) >> 8);
           color.g = static_cast<uint8_t>((static_cast<uint16_t>(color.g) * scale + 128) >> 8);
           color.b = static_cast<uint8_t>((static_cast<uint16_t>(color.b) * scale + 128) >> 8);
@@ -1335,7 +1497,7 @@ void updateEyeBounceAnimation()
       newOffset = 0;
       eyeBounceCount = 0;
 
-      if (currentView == 17)
+      if (currentView == VIEW_CIRCLE_EYES)
       {
         currentView = viewBeforeEyeBounce;
         saveLastView(currentView);
@@ -1397,8 +1559,9 @@ void drawPlasmaFace()
   // drawPlasmaXbm(0, 16, 64, 16, maw, 32, 2.0);
   // drawPlasmaXbm(64, 16, 64, 16, mawL, 32, 2.0);
 
-  drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 32, 0.5);
-  drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 32, 0.5);
+  const uint8_t mouthBrightness = micGetMouthBrightness();
+  drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 32, 0.5f, 0.2f, mouthBrightness);
+  drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 32, 0.5f, 0.2f, mouthBrightness);
 }
 
 void updatePlasmaFace()
@@ -1686,8 +1849,8 @@ void blinkingEyes()
   // Select eye assets and properties based on the current view
   switch (currentView)
   {
-  case 4: // Normal
-  case 5: // Blush
+  case VIEW_NORMAL_FACE: // Normal
+  case VIEW_BLUSH_FACE:  // Blush
     rightEyeBitmap = (const uint8_t *)Eye;
     leftEyeBitmap = (const uint8_t *)EyeL;
     eyeWidth = 32;
@@ -1697,7 +1860,7 @@ void blinkingEyes()
     leftEyeX = 96;
     leftEyeY = 0;
     break;
-  case 6: // Semicircle
+  case VIEW_SEMICIRCLE_EYES: // Semicircle
     rightEyeBitmap = (const uint8_t *)semicircleeyes;
     leftEyeBitmap = (const uint8_t *)semicircleeyes; // Same bitmap, different plasma offset
     eyeWidth = 32;
@@ -1707,7 +1870,7 @@ void blinkingEyes()
     leftEyeX = 94;
     leftEyeY = 2;
     break;
-  case 7: // X eyes
+  case VIEW_X_EYES: // X eyes
     rightEyeBitmap = (const uint8_t *)x_eyes;
     leftEyeBitmap = (const uint8_t *)x_eyes; // Same bitmap
     eyeWidth = 31;
@@ -1717,12 +1880,12 @@ void blinkingEyes()
     leftEyeX = 96;
     leftEyeY = 0;
     break;
-  case 8: // Slant eyes (This is also the default)
+  case VIEW_SLANT_EYES: // Slant eyes (This is also the default)
     // Values are already set by default
     break;
-  case 9:   // Spiral eyes
-    return; // Spiral view handles its own drawing, so we exit here.
-  case 17:  // Circle eyes
+  case VIEW_SPIRAL_EYES: // Spiral eyes
+    return;              // Spiral view handles its own drawing, so we exit here.
+  case VIEW_CIRCLE_EYES: // Circle eyes
     rightEyeBitmap = (const uint8_t *)circleeyes;
     leftEyeBitmap = (const uint8_t *)circleeyes; // Same bitmap
     eyeWidth = 25;
@@ -1734,9 +1897,6 @@ void blinkingEyes()
     break;
     // Default case uses the slanteyes defined before the switch
   }
-
-  // Redundant direct draw branches removed — the switch above sets the correct bitmaps/positions
-  // and the subsequent drawBitmapAdvanced calls handle drawing for the selected view.
 
   // Draw the right eye (viewer's perspective)
   drawBitmapAdvanced(rightEyeX + final_x_offset, rightEyeY + final_y_offset,
@@ -1828,16 +1988,23 @@ void drawBlush()
   // Set blush color based on brightness
   uint16_t blushColor = dma_display->color565(blushBrightness, 0, blushBrightness);
 
-  // Clear only the blush area to prevent artifacts
-  dma_display->fillRect(45, 1, 18, 13, 0); // Clear right blush area
-  dma_display->fillRect(72, 1, 18, 13, 0); // Clear left blush area
+  const int blushWidth = 11;
+  const int blushHeight = 13;
+  const int blushCount = 3;
+  const int blushY = 1;
+  const int rightStartX = 23;
+  const int leftStartX = 72;
+  const int totalBlushWidth = blushWidth * blushCount;
 
-  drawXbm565(45, 1, 11, 13, blush, blushColor);
-  drawXbm565(40, 1, 11, 13, blush, blushColor);
-  drawXbm565(35, 1, 11, 13, blush, blushColor);
-  drawXbm565(72, 1, 11, 13, blushL, blushColor);
-  drawXbm565(77, 1, 11, 13, blushL, blushColor);
-  drawXbm565(82, 1, 11, 13, blushL, blushColor);
+  // Clear only the blush area to prevent artifacts
+  dma_display->fillRect(rightStartX, blushY, totalBlushWidth, blushHeight, 0);
+  dma_display->fillRect(leftStartX, blushY, totalBlushWidth, blushHeight, 0);
+
+  for (int i = 0; i < blushCount; ++i)
+  {
+    drawXbm565(rightStartX + (i * blushWidth), blushY, blushWidth, blushHeight, blush, blushColor);
+    drawXbm565(leftStartX + (i * blushWidth), blushY, blushWidth, blushHeight, blushL, blushColor);
+  }
 }
 
 void drawTransFlag()
@@ -1860,6 +2027,28 @@ void drawTransFlag()
   dma_display->fillRect(0, stripeHeight * 4, dma_display->width(), stripeHeight, lightBlue); // Bottom light blue stripe
 }
 
+void drawLGBTFlag()
+{
+  int stripeHeight = dma_display->height() / 6; // Height of each stripe
+
+  // Define colors in RGB565 format with intended values:
+  // red: (255,0,0), orange: (255,127,0), yellow: (255,255,0), green: (0,255,0), blue: (0,0,255), purple: (139,0,255)
+  uint16_t red = dma_display->color565(255, 0, 0);
+  uint16_t orange = dma_display->color565(255, 127, 0);
+  uint16_t yellow = dma_display->color565(255, 255, 0);
+  uint16_t green = dma_display->color565(0, 255, 0);
+  uint16_t blue = dma_display->color565(0, 0, 255);
+  uint16_t purple = dma_display->color565(139, 0, 255);
+
+  // Draw stripes
+  dma_display->fillRect(0, 0, dma_display->width(), stripeHeight, red);                   // Top red stripe
+  dma_display->fillRect(0, stripeHeight, dma_display->width(), stripeHeight, orange);     // Orange stripe
+  dma_display->fillRect(0, stripeHeight * 2, dma_display->width(), stripeHeight, yellow); // Yellow stripe
+  dma_display->fillRect(0, stripeHeight * 3, dma_display->width(), stripeHeight, green);  // Green stripe
+  dma_display->fillRect(0, stripeHeight * 4, dma_display->width(), stripeHeight, blue);   // Blue stripe
+  dma_display->fillRect(0, stripeHeight * 5, dma_display->width(), stripeHeight, purple); // Bottom purple stripe
+}
+
 void baseFace()
 {
   // Update idle hover here so the render task always sees fresh offsets
@@ -1872,27 +2061,21 @@ void baseFace()
 
   blinkingEyes(); // This function now correctly uses the global offsets internally
 
+  const uint8_t mouthBrightness = micGetMouthBrightness();
   if (mouthOpen)
   {
-    drawPlasmaXbm(0, 10, 64, 22, maw2, 0, 1.0);
-    drawPlasmaXbm(64, 10, 64, 22, maw2L, 128, 1.0); // Left eye open (phase offset)
+    drawPlasmaXbm(0, 10, 64, 22, maw2, 0, 1.0f, 0.2f, mouthBrightness);
+    drawPlasmaXbm(64, 10, 64, 22, maw2L, 128, 1.0f, 0.2f, mouthBrightness); // Left eye open (phase offset)
   }
   else
   {
-    drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 0, 1.0);     // Right eye
-    drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0); // Left eye (phase offset)
+    drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 0, 1.0f, 0.2f, mouthBrightness);     // Right eye
+    drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0f, 0.2f, mouthBrightness); // Left eye (phase offset)
   }
 
   drawPlasmaXbm(56, 4 + final_y_offset, 8, 8, nose, 64, 2.0);
   drawPlasmaXbm(64, 4 + final_y_offset, 8, 8, noseL, 64, 2.0);
 
-  if (currentView > 3)
-  { // Only draw blush effect for face views, not utility views
-    if (blushState != BlushState::Inactive)
-    { // Only draw if blush is active
-      drawBlush();
-    }
-  }
   facePlasmaDirty = false;
 }
 
@@ -2057,9 +2240,10 @@ void displaySleepMode()
   /*
   drawXbm565(0, 20, 10, 8, maw2Closed, dma_display->color565(120, 120, 120));
   drawXbm565(64, 20, 10, 8, maw2ClosedL, dma_display->color565(120, 120, 120));
-*/
+  */
   dma_display->drawFastHLine(PANE_WIDTH / 2 - 15, PANE_HEIGHT - 8, 30, dma_display->color565(120, 120, 120));
   drawBluetoothStatusIcon();
+  drawPairingPasskeyOverlay();
   dma_display->flipDMABuffer();
 }
 
@@ -2163,9 +2347,6 @@ static void displayTask(void *pvParameters)
   }
 }
 
-
-const i2s_port_t I2S_PORT = I2S_NUM_0;
-
 static volatile unsigned long softMillis = 0; // our software “millis” counter
 TimerHandle_t softMillisTimer = nullptr;
 
@@ -2238,8 +2419,7 @@ void setupPixelDust()
       dma_display->color565(255, 237, 0),
       dma_display->color565(0, 128, 38),
       dma_display->color565(0, 77, 255),
-      dma_display->color565(117, 7, 135)
-    };
+      dma_display->color565(117, 7, 135)};
 
   const size_t paletteCount = sizeof(defaultPalette) / sizeof(defaultPalette[0]);
   // If N_COLORS exceeds the size of defaultPalette, random colors will be used for the extra entries.
@@ -2247,9 +2427,12 @@ void setupPixelDust()
   {
     // Use default palette color if available, otherwise generate a random color
     uint16_t color;
-    if (i < static_cast<int>(paletteCount)) {
+    if (i < static_cast<int>(paletteCount))
+    {
       color = defaultPalette[i];
-    } else {
+    }
+    else
+    {
       // Use a color wheel to ensure distinct fallback colors
       uint8_t hue = (i * 256 / N_COLORS) % 256;
       CRGB rgb;
@@ -2382,6 +2565,7 @@ void setup()
   initTempSensor(); // Initialize Temperature Sensor
 
   initPreferences(); // Initialize Preferences
+  autoBrightnessEnabled = getAutoBrightness();
   auroraModeEnabled = getAuroraMode();
   staticColorModeEnabled = getStaticColorMode();
   if (staticColorModeEnabled)
@@ -2389,6 +2573,29 @@ void setup()
     auroraModeEnabled = false;
   }
   ensureStaticColorLoaded();
+  {
+    String storedText = getUserText();
+    if (storedText.length() > 0)
+    {
+      size_t copyLen = storedText.length();
+      if (copyLen >= sizeof(txt))
+      {
+        copyLen = sizeof(txt) - 1;
+      }
+      memcpy(txt, storedText.c_str(), copyLen);
+      txt[copyLen] = '\0';
+      auto &scrollState = scroll::state();
+      scrollState.textInitialized = false;
+    }
+    else
+    {
+      txt[0] = '\0';
+    }
+
+    auto &scrollState = scroll::state();
+    scrollState.speedSetting = getScrollSpeed();
+    scroll::updateIntervalFromSpeed();
+  }
 
   // - LOAD LAST VIEW -
   currentView = getLastView();
@@ -2423,8 +2630,9 @@ void setup()
   NimBLEDevice::setPower(ESP_PWR_LVL_P21, NimBLETxPowerType::All); // Power level 21 (highest) for best range
   // NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
   NimBLEDevice::setSecurityAuth(true, true, true);
+  // Keep default passkey so onPassKeyDisplay supplies a dynamic code.
   NimBLEDevice::setSecurityPasskey(123456);
-  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_KEYBOARD_DISPLAY);
+  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY);
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(&serverCallbacks);
 
@@ -2455,6 +2663,7 @@ void setup()
       CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
           NIMBLE_PROPERTY::WRITE |
+          NIMBLE_PROPERTY::WRITE_ENC |
           NIMBLE_PROPERTY::NOTIFY
       // NIMBLE_PROPERTY::READ_ENC  // only allow reading if paired / encrypted
       // NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
@@ -2467,7 +2676,10 @@ void setup()
 
   pCommandCharacteristic = pService->createCharacteristic(
       COMMAND_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::WRITE);
+      NIMBLE_PROPERTY::WRITE |
+      NIMBLE_PROPERTY::WRITE_ENC |
+      NIMBLE_PROPERTY::NOTIFY
+    );
   pCommandCharacteristic->setCallbacks(&cmdCallbacks);
   Serial.print("Command Characteristic created, UUID: ");
   Serial.println(pCommandCharacteristic->getUUID().toString().c_str());
@@ -2478,7 +2690,6 @@ void setup()
   pTemperatureCharacteristic =
       pService->createCharacteristic(
           TEMPERATURE_CHARACTERISTIC_UUID,
-          NIMBLE_PROPERTY::READ |
               NIMBLE_PROPERTY::WRITE |
               NIMBLE_PROPERTY::NOTIFY
           // NIMBLE_PROPERTY::READ_ENC
@@ -2488,9 +2699,10 @@ void setup()
   pConfigCharacteristic = pService->createCharacteristic(
       CONFIG_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
-          NIMBLE_PROPERTY::WRITE |
-          // NIMBLE_PROPERTY::WRITE_NR |
-          NIMBLE_PROPERTY::NOTIFY);
+      NIMBLE_PROPERTY::WRITE |
+      NIMBLE_PROPERTY::WRITE_ENC |
+    //NIMBLE_PROPERTY::WRITE_NR |
+      NIMBLE_PROPERTY::NOTIFY);
 
   // Set the callback to handle writes.
   pConfigCharacteristic->setCallbacks(&configCallbacks);
@@ -2555,6 +2767,7 @@ void setup()
       NIMBLE_PROPERTY::READ |
           // NIMBLE_PROPERTY::NOTIFY |
           NIMBLE_PROPERTY::WRITE |
+          NIMBLE_PROPERTY::WRITE_ENC |
           NIMBLE_PROPERTY::WRITE_NR);
   pBrightnessCharacteristic->setCallbacks(&brightnessCallbacks);
   // initialize with current brightness
@@ -2563,6 +2776,7 @@ void setup()
       OTA_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
           NIMBLE_PROPERTY::WRITE |
+          NIMBLE_PROPERTY::WRITE_ENC |
           NIMBLE_PROPERTY::WRITE_NR |
           NIMBLE_PROPERTY::NOTIFY);
   pOtaCharacteristic->setCallbacks(&otaCallbacks);
@@ -2579,10 +2793,10 @@ void setup()
   pLuxCharacteristic = pService->createCharacteristic(
       LUX_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
-          NIMBLE_PROPERTY::NOTIFY);
+      NIMBLE_PROPERTY::NOTIFY);
 
   // Initialize with current lux value
-  uint16_t initialLux = getRawClearChannelValue();
+  uint16_t initialLux = getAmbientLuxU16();
   uint8_t luxBytes[2] = {
       static_cast<uint8_t>(initialLux & 0xFF),
       static_cast<uint8_t>((initialLux >> 8) & 0xFF)};
@@ -2600,10 +2814,10 @@ void setup()
 
   pScrollTextCharacteristic = pService->createCharacteristic(
       SCROLL_TEXT_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ_ENC |      // Require encryption for reading
-          NIMBLE_PROPERTY::WRITE_ENC | // Require encryption for writing
-          NIMBLE_PROPERTY::WRITE_NR |
-          NIMBLE_PROPERTY::NOTIFY);
+      NIMBLE_PROPERTY::READ |
+      NIMBLE_PROPERTY::WRITE |
+      NIMBLE_PROPERTY::WRITE_ENC |     // Require encryption for writes.
+      NIMBLE_PROPERTY::NOTIFY);
   pScrollTextCharacteristic->setCallbacks(&scrollTextCallbacks);
 
   // Set initial value (current text)
@@ -2621,9 +2835,9 @@ void setup()
   pStaticColorCharacteristic = pService->createCharacteristic(
       STATIC_COLOR_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ_ENC |
-          NIMBLE_PROPERTY::WRITE_ENC |
-          NIMBLE_PROPERTY::WRITE_NR |
-          NIMBLE_PROPERTY::NOTIFY);
+      NIMBLE_PROPERTY::WRITE_ENC |
+      NIMBLE_PROPERTY::WRITE_NR |
+      NIMBLE_PROPERTY::NOTIFY);
   pStaticColorCharacteristic->setCallbacks(&staticColorCallbacks);
   String initialColorHex = getStaticColorHexString();
   pStaticColorCharacteristic->setValue(initialColorHex.c_str());
@@ -2647,9 +2861,6 @@ void setup()
 
   Serial.println("BLE setup complete - advertising started");
 
-  // Spawn BLE task on the pinned core (defined by CONFIG_BT_NIMBLE_PINNED_TO_CORE)
-  xTaskCreatePinnedToCore(bleNotifyTask, "BLE Task", 4096, NULL, 1, NULL, CONFIG_BT_NIMBLE_PINNED_TO_CORE);
-
   // Redefine pins if required
   // HUB75_I2S_CFG::i2s_pins _pins={R1, G1, BL1, R2, G2, BL2, CH_A, CH_B, CH_C, CH_D, CH_E, LAT, OE, CLK};
   // HUB75_I2S_CFG mxconfig(PANEL_WIDTH, PANEL_HEIGHT, PANELS_NUMBER);
@@ -2665,7 +2876,7 @@ void setup()
 
   mxconfig.gpio.e = PIN_E;
   mxconfig.driver = HUB75_I2S_CFG::FM6126A; // for panels using FM6126A chips
- // mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;  // Causes instability if set too high
+                                            // mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;  // Causes instability if set too high
   mxconfig.clkphase = false;
   mxconfig.double_buff = true; // <------------- Turn on double buffer
 
@@ -2674,12 +2885,16 @@ void setup()
   dma_display->begin();
   dma_display->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
+  lastBrightness = userBrightness;
+  currentBrightness = static_cast<float>(userBrightness);
   initFlameEffect(dma_display);
 #else
   chain = new MatrixPanel_I2S_DMA(mxconfig);
   chain->begin();
   chain->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
+  lastBrightness = userBrightness;
+  currentBrightness = static_cast<float>(userBrightness);
   // create VirtualDisplay object based on our newly created dma_display object
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
   initFlameEffect(matrix);
@@ -2737,28 +2952,10 @@ void setup()
   // e.g., currentView = getLastView();
 
   // If the initial view is the fluid effect, call begin()
-  if (currentView == 16 && fluidEffectInstance)
+  if (currentView == VIEW_FLUID_EFFECT && fluidEffectInstance)
   { // Assuming 16 is the fluid effect view
     fluidEffectInstance->begin();
   }
-  /*
-  #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) || defined(ACCEL_AVAILABLE)
-      pixelDustEffectInstance = new PixelDustEffect(dma_display, &accel, &accelerometerEnabled);
-  #else
-      pixelDustEffectInstance = new PixelDustEffect(dma_display, nullptr, &accelerometerEnabled);
-  #endif
-
-  if (!pixelDustEffectInstance) {
-      Serial.println("FATAL: Failed to allocate PixelDustEffect instance!");
-  }
-  // If the initial view is one of the effects, call its begin()
-      if (currentView == 16 && fluidEffectInstance) { // Old fluid effect view number
-          fluidEffectInstance->begin();
-      }
-      if (currentView == 17 && pixelDustEffectInstance) { // <<< NEW: Assuming PixelDust is view 17
-          pixelDustEffectInstance->begin();
-      }
-  */
 
   lastActivityTime = millis(); // Initialize the activity timer for sleep mode
 
@@ -2770,7 +2967,7 @@ void setup()
   // Set initial plasma color palette
   currentPalette = RainbowColors_p;
 
-  snprintf(txt, sizeof(txt), "Stimming right now :3");
+  snprintf(txt, sizeof(txt), "%s", getUserText().c_str());
   initializeScrollingText();
 
   ////////Setup Bouncing Squares////////
@@ -2805,63 +3002,13 @@ void setup()
   and pressing either of them pulls the input low.
   ------------------------------------------------------------------------- */
 
-  /*
-  // start I2S at 16 kHz with 32-bits per sample
-  if (!I2S.begin(I2S_PHILIPS_MODE, 16000, 32)) {
-    Serial.println("Failed to initialize I2S!");
-    while (1); // do nothing
-  }
-  */
+  micInit();
 
-  esp_err_t err_i2s;
-
-  i2s_config_t i2sConfig = {
-      .mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_RX),
-      //.sample_rate = 22050, // Sample rate
-      .sample_rate = 44100, // Sample rate
-      .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-      .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-      .communication_format = (i2s_comm_format_t)(I2S_COMM_FORMAT_STAND_I2S | I2S_COMM_FORMAT_STAND_MSB),
-      .intr_alloc_flags = 0, // Interrupt level
-      .dma_buf_count = 2,    // Number of DMA buffers
-      .dma_buf_len = 32,     // Length of each DMA buffer
-      .use_apll = false,
-  };
-  // Configure I2S pins for microphone input (data in only)
-  i2s_pin_config_t pinConfig = {
-      .bck_io_num = MIC_SCK_PIN,
-      .ws_io_num = MIC_WS_PIN,
-      .data_out_num = I2S_PIN_NO_CHANGE,
-      .data_in_num = MIC_SD_PIN};
-
-  err_i2s = i2s_driver_install(I2S_PORT, &i2sConfig, 0, NULL); // Use renamed variable
-  // REG_SET_BIT(I2S_TIMING_REG(I2S_PORT), BIT(9)); // Set I2S timing register
-  if (err_i2s != ESP_OK)
-  {                                                               // Use renamed variable
-    Serial.printf("Failed installing I2S driver: %d\n", err_i2s); // Use renamed variable
-    while (true)
-      ;
-  }
-  err_i2s = i2s_set_pin(I2S_PORT, &pinConfig); // Use renamed variable
-  if (err_i2s != ESP_OK)
-  {                                                         // Use renamed variable
-    Serial.printf("Failed setting I2S pin: %d\n", err_i2s); // Use renamed variable
-    while (true)
-      ;
-  }
-  Serial.println("I2S driver installed.");
-
-  // if you need to drive a power line:
-  pinMode(MIC_PD_PIN, OUTPUT);
-  digitalWrite(MIC_PD_PIN, HIGH);
-
-#if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
 #ifdef BUTTON_UP
   pinMode(BUTTON_UP, INPUT_PULLUP);
 #endif
 #ifdef BUTTON_DOWN
   pinMode(BUTTON_DOWN, INPUT_PULLUP);
-#endif
 #endif
 
   // uint8_t wheelval = 0; // Wheel value for color cycling
@@ -2904,21 +3051,13 @@ void setup()
   // Now spawn the display task pinned to the other core so rendering never competes with loop():
 
   xTaskCreatePinnedToCore(
-
       displayTask,
-
       "Display Task",
-
       16384, // stack bytes
-
       NULL,
-
       2, // priority
-
       NULL,
-
       0 // pin to core 0
-
   );
 
   // Then return—loop() can be left empty or just do background housekeeping
@@ -3005,15 +3144,11 @@ void updateDVDLogos()
   // Rendering cadence is handled by displayTask; avoid delaying here.
 }
 
-// Define a threshold for microphone amplitude to trigger mouth open/close
-#ifndef MIC_THRESHOLD
-#define MIC_THRESHOLD 450000 // Adjust this value as needed for your microphone sensitivity
-#endif
-
-static uint8_t mawBrightness = 0; // new: scaled 0–255 based on mic level
 void displayCurrentMaw()
 {
-  // build a gray‐scale color from current mic level
+  const uint8_t mawBrightness = micGetMouthBrightness();
+  mouthOpen = micIsMouthOpen();
+  // build a gray-scale color from current mic level
   uint16_t col = dma_display->color565(mawBrightness,
                                        mawBrightness,
                                        mawBrightness);
@@ -3031,202 +3166,8 @@ void displayCurrentMaw()
 #if DEBUG_MODE
     Serial.println("Displaying Closed maw");
 #endif
-    drawXbm565(0, 10, 64, 22, maw2Closed, dma_display->color565(255, 255, 255));
-    drawXbm565(64, 10, 64, 22, maw2ClosedL, dma_display->color565(255, 255, 255));
-  }
-}
-
-// ——————————————————————————————————————————————————————————————————————
-// Optimized mouth‑movement reader
-static int32_t mouthBuf[128]; // static so it lives in .bss, not on the stack
-
-// --- Microphone Processing Parameters ---
-// EMA (Exponential Moving Average) alpha for ambient noise (smaller = slower adaptation)
-#define AMBIENT_EMA_ALPHA 0.01f
-// EMA alpha for signal smoothing (larger = faster response, less smoothing)
-#define SIGNAL_EMA_ALPHA 0.3f
-// How much louder the signal needs to be than ambient to trigger (absolute value)
-#define SENSITIVITY_OFFSET_ABOVE_AMBIENT 340000 // Adjust this based on mic sensitivity and desired responsiveness
-                                                // This effectively replaces your old MIC_THRESHOLD's primary role
-// Minimum signal level to be considered for ambient noise calculation
-#define MIN_SIGNAL_FOR_AMBIENT_CONSIDERATION 500
-// Time in ms of silence before updating ambient noise more aggressively
-#define AMBIENT_UPDATE_QUIET_PERIOD_MS 1000
-// Minimum and maximum clamp for ambient noise estimation
-#define MIN_AMBIENT_LEVEL 200    // Prevents ambient from dropping too low
-#define MAX_AMBIENT_LEVEL 200000 // Prevents ambient from rising too high due to sustained noise
-
-// --- State Variables (static, so they persist between calls) ---
-static float ambientNoiseLevel = (MIN_AMBIENT_LEVEL + MAX_AMBIENT_LEVEL) / 2.0f; // Initial guess
-static float smoothedSignalLevel = 0.0f;
-static unsigned long lastSoundTime = 0; // When the mouth was last considered open or sound was high
-// static unsigned long lastAmbientUpdateTime = 0;
-
-// Original buffer
-// static int32_t mouthBuf[128];
-
-void updateMouthMovement()
-{
-  unsigned long now = millis();
-  const bool initialMouthOpen = mouthOpen;
-  size_t bytesRead = 0;
-
-  esp_err_t err = i2s_read(
-      I2S_PORT,
-      mouthBuf,
-      sizeof(mouthBuf),
-
-      &bytesRead,
-      pdMS_TO_TICKS(1) // Using a small timeout instead of portMAX_DELAY to prevent blocking indefinitely
-  );
-
-  if (err != ESP_OK || bytesRead == 0)
-  {
-    // Handle error or no data: assume silence
-    if (mouthOpen && (now - lastSoundTime > mouthOpenHoldTime))
-    {
-      mouthOpen = false;
-    }
-    // Keep ambient noise decaying slowly if no signal
-    if (now - lastAmbientUpdateTime > 100)
-    { // Update ambient periodically even in silence
-      ambientNoiseLevel = ambientNoiseLevel * (1.0f - AMBIENT_EMA_ALPHA) + MIN_AMBIENT_LEVEL * AMBIENT_EMA_ALPHA;
-      ambientNoiseLevel = constrain(ambientNoiseLevel, MIN_AMBIENT_LEVEL, MAX_AMBIENT_LEVEL);
-      lastAmbientUpdateTime = now;
-    }
-    smoothedSignalLevel *= (1.0f - SIGNAL_EMA_ALPHA); // Decay smoothed signal
-
-    mawBrightness = 20; // Minimum brightness
-
-    // --- TELEPLOT for no data/error ---
-
-#if DEBUG_MICROPHONE
-    Serial.printf(">mic_avg_abs_signal:0\n");
-    Serial.printf(">mic_smoothed_signal:%.0f\n", smoothedSignalLevel);
-    Serial.printf(">mic_ambient_noise:%.0f\n", ambientNoiseLevel);
-    Serial.printf(">mic_trigger_threshold:%.0f\n", ambientNoiseLevel + SENSITIVITY_OFFSET_ABOVE_AMBIENT);
-    Serial.printf(">mic_maw_brightness:%u\n", mawBrightness);
-    Serial.printf(">mic_mouth_open:%d\n", mouthOpen ? 1 : 0);
-#endif
-    if (mouthOpen != initialMouthOpen)
-    {
-      facePlasmaDirty = true;
-    }
-    return;
-  }
-
-  size_t samples = bytesRead / sizeof(mouthBuf[0]);
-  if (samples == 0)
-  { // Should be caught by bytesRead == 0 above, but as a safeguard
-    // (Same logic as above for error/no data)
-    if (mouthOpen && (now - lastSoundTime > mouthOpenHoldTime))
-    {
-      mouthOpen = false;
-    }
-    smoothedSignalLevel *= (1.0f - SIGNAL_EMA_ALPHA);
-    mawBrightness = 20;
-#ifdef DEBUG_MIC
-    Serial.printf(">mic_avg_abs_signal:0\n");
-    Serial.printf(">mic_smoothed_signal:%.0f\n", smoothedSignalLevel);
-#endif
-    // ... (rest of teleplot for no samples)
-    if (mouthOpen != initialMouthOpen)
-    {
-      facePlasmaDirty = true;
-    }
-    return;
-  }
-
-  // 1. Calculate Average Absolute Signal for this frame
-  uint32_t sumAbs = 0;
-  for (size_t i = 0; i < samples; ++i)
-  {
-    // The `>> 8` shift is from your original code.
-    // For a typical 18-bit I2S mic (like SPH0645), data is in the upper bits.
-    // A more accurate shift might be `>> (32 - 18)` or `>> 14` to get the signed 18-bit value.
-    // However, consistency is key for the dynamic threshold.
-    sumAbs += (uint32_t)abs(mouthBuf[i] >> 8);
-  }
-  float currentAvgAbsSignal = (float)sumAbs / samples;
-
-  // 2. Smooth the current signal
-  smoothedSignalLevel = SIGNAL_EMA_ALPHA * currentAvgAbsSignal + (1.0f - SIGNAL_EMA_ALPHA) * smoothedSignalLevel;
-
-  // 3. Update Ambient Noise Level
-  //    Only update ambient if the current sound is not too loud OR if it's been quiet for a while
-  bool isQuietPeriod = (now - lastSoundTime > AMBIENT_UPDATE_QUIET_PERIOD_MS);
-  if (isQuietPeriod || smoothedSignalLevel < (ambientNoiseLevel + SENSITIVITY_OFFSET_ABOVE_AMBIENT * 0.5f))
-  {
-    // If it's truly quiet, adapt faster to the current (low) signal
-    float currentTargetAmbient = (isQuietPeriod) ? currentAvgAbsSignal : smoothedSignalLevel;
-    // Ensure target for ambient isn't excessively high if there was a brief sound
-    currentTargetAmbient = min(currentTargetAmbient, ambientNoiseLevel + SENSITIVITY_OFFSET_ABOVE_AMBIENT * 0.2f);
-
-    ambientNoiseLevel = AMBIENT_EMA_ALPHA * currentTargetAmbient + (1.0f - AMBIENT_EMA_ALPHA) * ambientNoiseLevel;
-    ambientNoiseLevel = constrain(ambientNoiseLevel, MIN_AMBIENT_LEVEL, MAX_AMBIENT_LEVEL);
-    lastAmbientUpdateTime = now;
-  }
-
-  // 4. Determine Trigger Threshold
-  float triggerThreshold = ambientNoiseLevel + SENSITIVITY_OFFSET_ABOVE_AMBIENT;
-
-  // 5. Decide mouthOpen state
-  if (smoothedSignalLevel > triggerThreshold)
-  {
-    if (!mouthOpen)
-    { // Rising edge, mouth was closed and now should open
-      // Optional: add a slightly higher threshold to OPEN than to STAY open (hysteresis)
-      // For now, simple trigger
-    }
-    mouthOpen = true;
-    lastSoundTime = now; // Update last time a significant sound was detected
-  }
-  else
-  {
-    // Signal is below threshold, check hold time
-    if (mouthOpen && (now - lastSoundTime > mouthOpenHoldTime))
-    {
-      mouthOpen = false;
-    }
-  }
-
-  // 6. Calculate Maw Brightness
-  // Scale brightness based on how much the smoothed signal is above the ambient noise
-  float signalAboveAmbient = smoothedSignalLevel - ambientNoiseLevel;
-  if (signalAboveAmbient < 0)
-    signalAboveAmbient = 0;
-
-  // Map [0, SENSITIVITY_OFFSET_ABOVE_AMBIENT * 2] to [20, 255] for brightness
-  // The range for mapping brightness (e.g. SENSITIVITY_OFFSET_ABOVE_AMBIENT * 2 or *3)
-  // determines how "loud" a sound needs to be to reach full brightness.
-  float brightnessMappingRange = SENSITIVITY_OFFSET_ABOVE_AMBIENT * 2.5f;
-  mawBrightness = map((long)(signalAboveAmbient * 100), // Multiply by 100 for map precision
-                      0,
-                      (long)(brightnessMappingRange * 100),
-                      20,   // Min brightness
-                      255); // Max brightness
-  mawBrightness = constrain(mawBrightness, 20, 255);
-
-  // If mouth is forced closed by hold time, ensure brightness reflects that
-  if (!mouthOpen)
-  {
-    mawBrightness = 20; // Or a very dim value
-  }
-
-  // --- TELEPLOT LINES ---
-
-#if DEBUG_MICROPHONE
-  Serial.printf(">mic_avg_abs_signal:%.0f\n", currentAvgAbsSignal);
-  Serial.printf(">mic_smoothed_signal:%.0f\n", smoothedSignalLevel);
-  Serial.printf(">mic_ambient_noise:%.0f\n", ambientNoiseLevel);
-  Serial.printf(">mic_trigger_threshold:%.0f\n", triggerThreshold);
-  Serial.printf(">mic_maw_brightness:%u\n", mawBrightness);
-  Serial.printf(">mic_mouth_open:%d\n", mouthOpen ? 1 : 0);
-#endif
-
-  if (mouthOpen != initialMouthOpen)
-  {
-    facePlasmaDirty = true;
+    drawXbm565(0, 10, 64, 22, maw2Closed, col);
+    drawXbm565(64, 10, 64, 22, maw2ClosedL, col);
   }
 }
 // Runs one frame of the Pixel Dust animation
@@ -3272,19 +3213,26 @@ void PixelDustEffect()
   sand.iterate(ax_scaled, ay_scaled, 0);
 
   dimension_t px, py;
-      int color_index = 0;
-     if (N_COLORS > 0)
-     {
-       color_index = static_cast<int>((static_cast<uint32_t>(px) * N_COLORS) / PANE_WIDTH);
-       if (color_index >= N_COLORS)
-       {
-         color_index = N_COLORS - 1;
-       }
+  for (grain_count_t i = 0; i < N_GRAINS; ++i)
+  {
+    sand.getPosition(i, &px, &py);
+    int color_index = 0;
+    if (N_COLORS > 0)
+    {
+      color_index = static_cast<int>((static_cast<uint32_t>(px) * N_COLORS) / PANE_WIDTH);
+      if (color_index >= N_COLORS)
+      {
+        color_index = N_COLORS - 1;
       }
-      dma_display->drawPixel(px, py, colors[color_index]);
     }
-  
-
+    const int px_i = static_cast<int>(px);
+    const int py_i = static_cast<int>(py);
+    if (px_i >= 0 && py_i >= 0 && px_i < PANE_WIDTH && py_i < PANE_HEIGHT)
+    {
+      dma_display->drawPixel(px_i, py_i, colors[color_index]);
+    }
+  }
+}
 
 using ViewRenderFunc = void (*)();
 
@@ -3408,6 +3356,7 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     renderLoadingBarView,          // VIEW_LOADING_BAR
     patternPlasma,                 // VIEW_PATTERN_PLASMA
     drawTransFlag,                 // VIEW_TRANS_FLAG
+    drawLGBTFlag,                  // VIEW_LGBT_FLAG
     renderFaceWithPlasma,          // VIEW_NORMAL_FACE
     renderFaceWithPlasma,          // VIEW_BLUSH_FACE
     renderFaceWithPlasma,          // VIEW_SEMICIRCLE_EYES
@@ -3425,6 +3374,7 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     renderFullscreenSpiralPalette, // VIEW_FULLSCREEN_SPIRAL_PALETTE
     renderFullscreenSpiralWhite,   // VIEW_FULLSCREEN_SPIRAL_WHITE
     renderScrollingTextView,       // VIEW_SCROLLING_TEXT
+    renderDinoGameView,            // VIEW_DINO_GAME
     renderPixelDustView,           // VIEW_PIXEL_DUST
     staticColor                    // VIEW_STATIC_COLOR
 };
@@ -3441,12 +3391,16 @@ void displayCurrentView(int view)
     displaySleepMode(); // This function handles its own flipDMABuffer or drawing rate
     return;
   }
+
+  mouthOpen = micIsMouthOpen();
+
   dma_display->clearScreen(); // Clear the display
 
   if (view != previousViewLocal)
   { // Check if the view has changed
     facePlasmaDirty = true;
-    if (view == 5)
+    micSetEnabled(viewUsesMic(view));
+    if (view == VIEW_BLUSH_FACE)
     {
       // Reset fade logic when entering the blush view
       blushStateStartTime = millis();
@@ -3456,7 +3410,7 @@ void displayCurrentView(int view)
       Serial.println("Entered blush view, resetting fade logic");
 #endif
     }
-    if (view == 16)
+    if (view == VIEW_FLUID_EFFECT)
     { // If switching to Fluid Animation view
       if (fluidEffectInstance)
       {
@@ -3471,6 +3425,10 @@ void displayCurrentView(int view)
     {
       setupPixelDust();
     }
+    if (view == VIEW_DINO_GAME)
+    {
+      resetDinoGame(millis());
+    }
     previousViewLocal = view;
   }
 
@@ -3482,6 +3440,11 @@ void displayCurrentView(int view)
   if (renderer)
   {
     renderer();
+  }
+
+  if (blushState != BlushState::Inactive)
+  {
+    drawBlush();
   }
 #if DEBUG_MODE
   const uint32_t rendererMicros = micros() - rendererStartMicros;
@@ -3522,6 +3485,7 @@ void displayCurrentView(int view)
 #endif
 
   drawBluetoothStatusIcon();
+  drawPairingPasskeyOverlay();
 
   if (!sleepModeActive || currentView == VIEW_TRANS_FLAG || currentView == VIEW_BSOD)
   {
@@ -3617,6 +3581,7 @@ void enterSleepMode()
     return; // Already sleeping
   Serial.println("Entering sleep mode");
   sleepModeActive = true;
+  micSetEnabled(false);
   preSleepView = currentView;                   // Save current view
   dma_display->setBrightness8(sleepBrightness); // Lower display brightness
   updateGlobalBrightnessScale(sleepBrightness);
@@ -3702,8 +3667,8 @@ void checkSleepMode()
 void loop()
 {
 
-  Serial.println(apds.readProximity());
-  
+  // Serial.println(apds.readProximity());
+
   // unsigned long frameStartTimeMillis = millis(); // Timestamp at frame start
   const unsigned long loopNow = millis();
 
@@ -3725,16 +3690,16 @@ void loop()
     // --- Motion Detection (for shake effect to change view) ---
     {
       PROFILE_SECTION("MotionDetection");
-      if (accelerometerEnabled && g_accelerometer_initialized && currentView != 16)
+      if (accelerometerEnabled && g_accelerometer_initialized && currentView != VIEW_FLUID_EFFECT && currentView != VIEW_DINO_GAME && !isEyeBouncing && !proximityLatchedHigh)
       {
         useShakeSensitivity = true; // Use high threshold for shake detection
         if (detectMotion())
         { // detectMotion uses the current useShakeSensitivity
-          if (currentView != 9)
-          {                              // Prevent re-triggering if already spiral
-            previousView = currentView;  // Save the current view.
-            currentView = 9;             // Switch to spiral eyes view
-            spiralStartMillis = loopNow; // Record the trigger time.
+          if (currentView != VIEW_SPIRAL_EYES)
+          {                                 // Prevent re-triggering if already spiral
+            previousView = currentView;     // Save the current view.
+            currentView = VIEW_SPIRAL_EYES; // Switch to spiral eyes view
+            spiralStartMillis = loopNow;    // Record the trigger time.
             LOG_DEBUG_LN("Shake detected! Switching to Spiral View.");
             notifyBleTask();
             lastActivityTime = loopNow; // Shake is activity
@@ -3745,10 +3710,52 @@ void loop()
     }
 
 // --- Handle button inputs for view changes ---
-#if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) || defined(BUTTONS_AVAILABLE) // Add define if you use external buttons
+#if defined(BUTTON_UP) && defined(BUTTON_DOWN)
+    // Hold both buttons to clear BLE bonds and restart pairing.
+    static bool pairingHoldActive = false;
+    static bool pairingHoldTriggered = false;
+    static unsigned long pairingHoldStartMs = 0;
+    static bool pairingHoldRaw = false;
+    static bool pairingHoldStable = false;
+    static unsigned long pairingHoldLastChangeMs = 0;
+
+    const bool pairingHoldSample = (digitalRead(BUTTON_UP) == LOW) && (digitalRead(BUTTON_DOWN) == LOW);
+
+    if (pairingHoldSample != pairingHoldRaw)
+    {
+      pairingHoldRaw = pairingHoldSample;
+      pairingHoldLastChangeMs = loopNow;
+    }
+    if ((loopNow - pairingHoldLastChangeMs) >= PAIRING_RESET_DEBOUNCE_MS)
+    {
+      pairingHoldStable = pairingHoldRaw;
+    }
+
+    const bool pairingHoldPressed = pairingHoldStable;
+
+    if (pairingHoldPressed)
+    {
+      lastActivityTime = loopNow;
+      if (!pairingHoldActive)
+      {
+        pairingHoldActive = true;
+        pairingHoldStartMs = loopNow;
+      }
+      else if (!pairingHoldTriggered && (loopNow - pairingHoldStartMs >= PAIRING_RESET_HOLD_MS))
+      {
+        pairingHoldTriggered = true;
+        resetBlePairing();
+      }
+    }
+    else
+    {
+      pairingHoldActive = false;
+      pairingHoldTriggered = false;
+    }
+
     bool viewChangedByButton = false;
 
-    if (debounceButton(BUTTON_UP))
+    if (!pairingHoldPressed && debounceButton(BUTTON_UP))
     {
       currentView = (currentView + 1);
       if (currentView >= totalViews)
@@ -3758,7 +3765,7 @@ void loop()
       lastActivityTime = loopNow;
     }
 
-    if (debounceButton(BUTTON_DOWN))
+    if (!pairingHoldPressed && debounceButton(BUTTON_DOWN))
     {
       PROFILE_SECTION("ButtonInputs");
       currentView = (currentView - 1);
@@ -3776,13 +3783,13 @@ void loop()
       LOG_DEBUG("View changed by button: %d\n", currentView);
       notifyBleTask();
       // Reset specific view states if necessary when changing views
-      if (currentView != 5)
+      if (currentView != VIEW_BLUSH_FACE)
       { // If leaving blush view
         blushState = BlushState::Inactive;
         blushBrightness = 0;
         // disableBlush(); // Clears pixels, but displayCurrentView will clear anyway
       }
-      if (currentView != 9)
+      if (currentView != VIEW_SPIRAL_EYES)
       { // Reset spiral timer
         spiralStartMillis = 0;
       }
@@ -3797,7 +3804,7 @@ void loop()
                    PROFILE_SECTION("ProximitySensor");
 #endif
 #if defined(APDS_AVAILABLE) // Ensure sensor is available
-                  const unsigned long sensorNow = loopNow;
+                   const unsigned long sensorNow = loopNow;
 
                    if (!shouldReadProximity(sensorNow))
                    {
@@ -3824,14 +3831,37 @@ void loop()
 
                    bool bounceJustTriggered = false; // Flag to avoid double blush trigger
 
+                   if (!proximityBaselineValid)
+                   {
+                     proximityBaseline = static_cast<float>(proximity);
+                     proximityBaselineValid = true;
+                   }
+
+                   int baselineRounded = static_cast<int>(proximityBaseline + 0.5f);
+                   uint8_t triggerThreshold = static_cast<uint8_t>(
+                       constrain(baselineRounded + PROX_TRIGGER_DELTA, 0, 255));
+                   uint8_t releaseThreshold = static_cast<uint8_t>(
+                       constrain(baselineRounded + PROX_RELEASE_DELTA, 0, 255));
+
+                   if (!proximityLatchedHigh && proximity <= releaseThreshold)
+                   {
+                     proximityBaseline += PROX_BASELINE_ALPHA * (static_cast<float>(proximity) - proximityBaseline);
+                     baselineRounded = static_cast<int>(proximityBaseline + 0.5f);
+                     triggerThreshold = static_cast<uint8_t>(
+                         constrain(baselineRounded + PROX_TRIGGER_DELTA, 0, 255));
+                     releaseThreshold = static_cast<uint8_t>(
+                         constrain(baselineRounded + PROX_RELEASE_DELTA, 0, 255));
+                   }
+
                    // Require the reading to rise above the trigger threshold and then fall below the release threshold before re-triggering
                    if (proximityLatchedHigh)
                    {
-                     if (proximity <= PROX_RELEASE_THRESHOLD)
+                     const bool timeout = (sensorNow - proximityLatchedAt) >= PROX_LATCH_TIMEOUT_MS;
+                     if (proximity <= releaseThreshold || (timeout && proximity < triggerThreshold))
                      {
                        proximityLatchedHigh = false;
 #if DEBUG_PROXIMITY
-                       LOG_PROX("Prox released at %u\n", proximity);
+                       LOG_PROX("Prox released at %u (rel=%u base=%d)\n", proximity, releaseThreshold, baselineRounded);
 #endif
                      }
                      else
@@ -3843,15 +3873,23 @@ void loop()
                      }
                    }
 
-                   if (proximity < PROX_TRIGGER_THRESHOLD)
+                   if (proximity < triggerThreshold)
                    {
                      return;
                    }
 
                    proximityLatchedHigh = true;
+                   proximityLatchedAt = sensorNow;
+
+                   if (currentView == VIEW_DINO_GAME)
+                   {
+                     queueDinoJump();
+                     lastActivityTime = sensorNow;
+                     return;
+                   }
 
                    // Eye Bounce Trigger - Switch to View 17 (Circle Eyes) (MODIFIED)
-                   if (!isEyeBouncing && currentView != 16)
+                   if (!isEyeBouncing)
                    {
                      LOG_DEBUG_LN("Proximity! Starting eye bounce sequence & switching to Circle Eyes (View 17).");
 #if DEBUG_PROXIMITY
@@ -3859,11 +3897,10 @@ void loop()
 #endif
 
                      // Store current view and switch to Circle Eyes (view 17)
-                     if (currentView != 9 && currentView != 17)
-                     {                                    // Avoid conflicting with spiral or re-triggering
-                       viewBeforeEyeBounce = currentView; // <<< MODIFIED: Store current view here
-
-                       currentView = 17; // Switch to "Circle Eyes" view
+                     if (currentView != VIEW_CIRCLE_EYES)
+                     {
+                       viewBeforeEyeBounce = currentView;
+                       currentView = VIEW_CIRCLE_EYES; // Switch to "Circle Eyes" view
                        // saveLastView(currentView); // Optional: save temporary view 17
                        notifyBleTask();
                      }
@@ -3896,7 +3933,7 @@ void loop()
                      // 3. Bounce wasn't *just* triggered (which might have handled its own blush)
                      // 4. Current view is NOT the dedicated blush view (5)
                      //    AND current view is NOT the temporary bounce/circle view (17)
-                     if (currentView != 5 && currentView != 17)
+                     if (currentView != VIEW_BLUSH_FACE && currentView != VIEW_CIRCLE_EYES)
                      {
                        LOG_DEBUG_LN("Proximity! Triggering blush overlay effect.");
 #if DEBUG_PROXIMITY
@@ -3920,8 +3957,7 @@ void loop()
       runIfElapsed(loopNow, lastAutoBrightnessUpdate, AUTO_BRIGHTNESS_INTERVAL_MS, [&]()
                    {
                      PROFILE_SECTION("AutoBrightness");
-                     maybeUpdateBrightness();
-                   });
+                     maybeUpdateBrightness(); });
     }
     if (deviceConnected)
     {
@@ -3950,7 +3986,7 @@ void loop()
     // --- Revert from Spiral View Timer ---
     // Use a local copy to avoid updating spiralStartMillis inside hasElapsedSince
     unsigned long spiralStartMillisCopy = spiralStartMillis;
-    if (currentView == 9 && spiralStartMillisCopy > 0 && hasElapsedSince(loopNow, spiralStartMillisCopy, 5000))
+    if (currentView == VIEW_SPIRAL_EYES && spiralStartMillisCopy > 0 && hasElapsedSince(loopNow, spiralStartMillisCopy, 5000))
     {
       LOG_DEBUG_LN("Spiral timeout, reverting view.");
       currentView = previousView;
@@ -3966,15 +4002,13 @@ void loop()
 #if DEBUG_MODE
                    PROFILE_SECTION("TemperatureUpdate");
 #endif
-                   maybeUpdateTemperature();
-                 });
+                   maybeUpdateTemperature(); });
 
   } // End of (!sleepModeActive) block
 
   // --- Display Rendering ---
   {
     PROFILE_SECTION("MouthMovement");
-    updateMouthMovement(); // Update mouth movement if needed
   }
   // displayCurrentView(currentView); // Draw the appropriate view based on state
 
@@ -3983,8 +4017,7 @@ void loop()
   runIfElapsed(loopNow, lastSleepCheckTime, SLEEP_CHECK_INTERVAL_MS, [&]()
                {
                  PROFILE_SECTION("SleepModeCheck");
-                 checkSleepMode();
-               });
+                 checkSleepMode(); });
 
   // Check for changes in brightness
   // checkBrightness();
@@ -4001,7 +4034,7 @@ void loop()
 
   /*
   // If the current view is one of the plasma views, increase the interval to reduce load
-  if (currentView == 2 || currentView == 10) {
+  if (currentView == VIEW_PATTERN_PLASMA || currentView == VIEW_PLASMA_FACE) {
     baseInterval = 10; // Use 15 ms for plasma view
   }
   */

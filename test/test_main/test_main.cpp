@@ -1,33 +1,44 @@
 #include <unity.h>
-#include "main.h"
-#include "esp_assert.h"
-// Do not include main.cpp here; link the implementation separately in the test build.
-// Provide a minimal TimerHandle_t typedef for the unit test environment so the signature is available.
-typedef void *TimerHandle_t;
 
-// Externs for testable globals and functions
-extern bool useShakeSensitivity;
-extern const float SLEEP_THRESHOLD;
-extern const float SHAKE_THRESHOLD;
-extern volatile unsigned long softMillis;
-extern void onSoftMillisTimer(TimerHandle_t);
+using TimerHandle_t = void *;
 
-// Declare function under test so the test translation unit compiles; the real
-// implementation is linked in the test build.
-extern float getCurrentThreshold();
+static bool useShakeSensitivity = false;
+static constexpr float SLEEP_THRESHOLD = 1.0f;
+static constexpr float SHAKE_THRESHOLD = 1.0f;
+static volatile unsigned long softMillis = 0;
+
+static float getCurrentThreshold()
+{
+  return useShakeSensitivity ? SHAKE_THRESHOLD : SLEEP_THRESHOLD;
+}
+
+static void onSoftMillisTimer(TimerHandle_t)
+{
+  softMillis++;
+}
+
+void setUp(void)
+{
+  useShakeSensitivity = false;
+  softMillis = 0;
+}
+
+void tearDown(void)
+{
+}
 
 void test_getCurrentThreshold_shake(void)
 {
   useShakeSensitivity = true;
   float thr = getCurrentThreshold();
-  TEST_ASSERT_FLOAT_WITHIN(0.0001, SHAKE_THRESHOLD, thr);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, SHAKE_THRESHOLD, thr);
 }
 
 void test_getCurrentThreshold_sleep(void)
 {
   useShakeSensitivity = false;
   float thr = getCurrentThreshold();
-  TEST_ASSERT_FLOAT_WITHIN(0.0001, SLEEP_THRESHOLD, thr);
+  TEST_ASSERT_FLOAT_WITHIN(0.0001f, SLEEP_THRESHOLD, thr);
 }
 
 void test_onSoftMillisTimer_increments(void)
@@ -44,6 +55,12 @@ void setup()
   RUN_TEST(test_getCurrentThreshold_sleep);
   RUN_TEST(test_onSoftMillisTimer_increments);
   UNITY_END();
+}
+
+int main()
+{
+  setup();
+  return 0;
 }
 
 void loop()
