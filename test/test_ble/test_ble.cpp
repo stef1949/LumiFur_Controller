@@ -99,6 +99,18 @@ void test_temperature_history_multiple_entries(void)
     }
 }
 
+void test_temperature_history_pre_wrap_state(void)
+{
+    for (int i = 0; i < HISTORY_BUFFER_SIZE - 1; i++)
+    {
+        storeTemperatureInHistory(static_cast<float>(i));
+    }
+
+    TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE - 1, historyWriteIndex);
+    TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE - 1, validHistoryCount);
+    TEST_ASSERT_FALSE(bufferFull);
+}
+
 void test_temperature_history_buffer_wraparound(void)
 {
     // Fill the buffer completely
@@ -119,6 +131,23 @@ void test_temperature_history_buffer_wraparound(void)
     TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE, validHistoryCount); // Count stays at max
     TEST_ASSERT_TRUE(bufferFull);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, newTemp, temperatureHistory[0]); // Verify overwrite
+}
+
+void test_temperature_history_no_growth_after_full(void)
+{
+    for (int i = 0; i < HISTORY_BUFFER_SIZE; i++)
+    {
+        storeTemperatureInHistory(static_cast<float>(i));
+    }
+
+    TEST_ASSERT_TRUE(bufferFull);
+    TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE, validHistoryCount);
+
+    storeTemperatureInHistory(100.0f);
+    storeTemperatureInHistory(101.0f);
+
+    TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE, validHistoryCount);
+    TEST_ASSERT_TRUE(bufferFull);
 }
 
 void test_temperature_history_circular_buffer_behavior(void)
@@ -146,6 +175,40 @@ void test_temperature_history_circular_buffer_behavior(void)
     }
 }
 
+void test_temperature_history_overwrite_preserves_tail(void)
+{
+    for (int i = 0; i < HISTORY_BUFFER_SIZE; i++)
+    {
+        storeTemperatureInHistory(static_cast<float>(i));
+    }
+
+    storeTemperatureInHistory(200.0f);
+    storeTemperatureInHistory(201.0f);
+    storeTemperatureInHistory(202.0f);
+
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 200.0f, temperatureHistory[0]);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 201.0f, temperatureHistory[1]);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 202.0f, temperatureHistory[2]);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, 3.0f, temperatureHistory[3]);
+}
+
+void test_temperature_history_multiple_wrap_cycles(void)
+{
+    int totalWrites = HISTORY_BUFFER_SIZE * 2 + 3;
+    for (int i = 0; i < totalWrites; i++)
+    {
+        storeTemperatureInHistory(static_cast<float>(i));
+    }
+
+    TEST_ASSERT_TRUE(bufferFull);
+    TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE, validHistoryCount);
+    TEST_ASSERT_EQUAL_INT(3, historyWriteIndex);
+
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, static_cast<float>(totalWrites - 3), temperatureHistory[0]);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, static_cast<float>(totalWrites - 2), temperatureHistory[1]);
+    TEST_ASSERT_FLOAT_WITHIN(0.01f, static_cast<float>(totalWrites - 1), temperatureHistory[2]);
+}
+
 void test_clear_history_buffer(void)
 {
     // Add some entries
@@ -157,6 +220,46 @@ void test_clear_history_buffer(void)
     // Clear the buffer
     clearHistoryBuffer();
     
+    TEST_ASSERT_EQUAL_INT(0, historyWriteIndex);
+    TEST_ASSERT_EQUAL_INT(0, validHistoryCount);
+    TEST_ASSERT_FALSE(bufferFull);
+}
+
+void test_clear_history_zeroes_contents(void)
+{
+    for (int i = 0; i < 5; i++)
+    {
+        storeTemperatureInHistory(static_cast<float>(i + 1));
+    }
+
+    clearHistoryBuffer();
+
+    for (int i = 0; i < 5; i++)
+    {
+        TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, temperatureHistory[i]);
+    }
+}
+
+void test_clear_history_is_idempotent(void)
+{
+    clearHistoryBuffer();
+    clearHistoryBuffer();
+
+    TEST_ASSERT_EQUAL_INT(0, historyWriteIndex);
+    TEST_ASSERT_EQUAL_INT(0, validHistoryCount);
+    TEST_ASSERT_FALSE(bufferFull);
+}
+
+void test_clear_history_after_wrap(void)
+{
+    for (int i = 0; i < HISTORY_BUFFER_SIZE + 5; i++)
+    {
+        storeTemperatureInHistory(static_cast<float>(i));
+    }
+
+    TEST_ASSERT_TRUE(bufferFull);
+    clearHistoryBuffer();
+
     TEST_ASSERT_EQUAL_INT(0, historyWriteIndex);
     TEST_ASSERT_EQUAL_INT(0, validHistoryCount);
     TEST_ASSERT_FALSE(bufferFull);
@@ -217,6 +320,16 @@ void test_temperature_values_precision(void)
     }
 }
 
+void test_temperature_values_negative(void)
+{
+    float temps[] = {-40.0f, -5.75f, -0.01f};
+    for (size_t i = 0; i < sizeof(temps) / sizeof(temps[0]); i++)
+    {
+        storeTemperatureInHistory(temps[i]);
+        TEST_ASSERT_FLOAT_WITHIN(0.01f, temps[i], temperatureHistory[i]);
+    }
+}
+
 void test_chunk_calculation_logic(void)
 {
     // Test chunk calculation for different history sizes
@@ -249,15 +362,23 @@ void setup()
     RUN_TEST(test_temperature_history_initialization);
     RUN_TEST(test_temperature_history_single_entry);
     RUN_TEST(test_temperature_history_multiple_entries);
+    RUN_TEST(test_temperature_history_pre_wrap_state);
     RUN_TEST(test_temperature_history_buffer_wraparound);
+    RUN_TEST(test_temperature_history_no_growth_after_full);
     RUN_TEST(test_temperature_history_circular_buffer_behavior);
+    RUN_TEST(test_temperature_history_overwrite_preserves_tail);
+    RUN_TEST(test_temperature_history_multiple_wrap_cycles);
     RUN_TEST(test_clear_history_buffer);
+    RUN_TEST(test_clear_history_zeroes_contents);
+    RUN_TEST(test_clear_history_is_idempotent);
+    RUN_TEST(test_clear_history_after_wrap);
     RUN_TEST(test_scroll_speed_clamping_valid_range);
     RUN_TEST(test_scroll_speed_clamping_below_minimum);
     RUN_TEST(test_scroll_speed_clamping_above_maximum);
     RUN_TEST(test_ble_packet_constants);
     RUN_TEST(test_temperature_history_capacity);
     RUN_TEST(test_temperature_values_precision);
+    RUN_TEST(test_temperature_values_negative);
     RUN_TEST(test_chunk_calculation_logic);
     
     UNITY_END();
