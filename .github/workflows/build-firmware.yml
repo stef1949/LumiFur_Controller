@@ -261,13 +261,38 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: lumifur-firmware-release-${{ env.RELEASE_REF_NAME }}
-          
+
+      - name: Download raw firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-raw/
+          pattern: firmware-*
+
+      # NEW: Flatten + prefix raw files by environment
+      - name: Prefix raw firmware files
+        run: |
+          mkdir -p release-raw-prefixed
+          for env_dir in release-raw/firmware-*; do
+            if [ -d "$env_dir" ]; then
+              env_name=$(basename "$env_dir" | sed 's/firmware-//')
+              for file in "$env_dir"/*; do
+                if [ -f "$file" ]; then
+                  base=$(basename "$file")
+                  cp "$file" "release-raw-prefixed/${env_name}-${base}"
+                fi
+              done
+            fi
+          done
+          echo "Prefixed raw files:"
+          ls -la release-raw-prefixed
+
       - name: Attach to release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: |
             lumifur-firmware-*.tar.gz
             lumifur-firmware-*.zip
+            release-raw-prefixed/*
           body: |
             ## Firmware Artifacts
             
