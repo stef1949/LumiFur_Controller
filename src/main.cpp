@@ -997,7 +997,7 @@ void drawBluetoothStatusIcon()
   }
   if (clearW > 0 && clearH > 0)
   {
-    dma_display->fillRect(clearX, clearY, clearW, clearH, 0);
+    //dma_display->fillRect(clearX, clearY, clearW, clearH, 0);
   }
 
   drawXbm565(iconX, iconY, BLUETOOTH_BACKGROUND_WIDTH, BLUETOOTH_BACKGROUND_HEIGHT, bluetoothBackground, backgroundColor);
@@ -1991,19 +1991,20 @@ void drawBlush()
   const int blushWidth = 11;
   const int blushHeight = 13;
   const int blushCount = 3;
+  const int blushSpacing = blushWidth - 4;
   const int blushY = 1;
-  const int rightStartX = 23;
-  const int leftStartX = 72;
-  const int totalBlushWidth = blushWidth * blushCount;
+  const int rightStartX = 33;
+  const int leftStartX = 70;
+  const int totalBlushWidth = blushWidth + (blushCount - 1) * blushSpacing;
 
   // Clear only the blush area to prevent artifacts
-  dma_display->fillRect(rightStartX, blushY, totalBlushWidth, blushHeight, 0);
-  dma_display->fillRect(leftStartX, blushY, totalBlushWidth, blushHeight, 0);
+  // dma_display->fillRect(rightStartX, blushY, totalBlushWidth, blushHeight, 0);
+  // dma_display->fillRect(leftStartX, blushY, totalBlushWidth, blushHeight, 0);
 
   for (int i = 0; i < blushCount; ++i)
   {
-    drawXbm565(rightStartX + (i * blushWidth), blushY, blushWidth, blushHeight, blush, blushColor);
-    drawXbm565(leftStartX + (i * blushWidth), blushY, blushWidth, blushHeight, blushL, blushColor);
+    drawXbm565(rightStartX + (i * blushSpacing), blushY, blushWidth, blushHeight, blush, blushColor);
+    drawXbm565(leftStartX + (i * blushSpacing), blushY, blushWidth, blushHeight, blushL, blushColor);
   }
 }
 
