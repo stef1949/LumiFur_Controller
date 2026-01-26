@@ -361,9 +361,9 @@ unsigned long fps_timer;
 
 // Sleep mode variables
 // Define both timeout values and select the appropriate one in setup()
-const unsigned long SLEEP_TIMEOUT_MS_DEBUG = 600000;  // 15 seconds (15,000 ms)
-const unsigned long SLEEP_TIMEOUT_MS_NORMAL = 600000; // 10 minutes (300,000 ms)
-unsigned long SLEEP_TIMEOUT_MS;                       // Will be set in setup() based on debugMode
+const unsigned long SLEEP_TIMEOUT_MS_DEBUG = 600000; // 15 seconds (15,000 ms)
+const unsigned long SLEEP_TIMEOUT_MS_NORMAL = 600000;  // 10 minutes (300,000 ms)
+unsigned long SLEEP_TIMEOUT_MS;                      // Will be set in setup() based on debugMode
 bool sleepModeActive = false;
 unsigned long lastActivityTime = 0;
 float prevAccelX = 0, prevAccelY = 0, prevAccelZ = 0;
@@ -975,6 +975,12 @@ void drawBluetoothStatusIcon()
       scaleColorComponent(90, intensity),
       scaleColorComponent(180, intensity));
 
+  // NEW: Brighter constant for ble pixel color
+  const uint16_t blePixelColor = dma_display->color565(
+      scaleColorComponent(5, intensity + 0.8f),
+      scaleColorComponent(90, intensity + 0.8f),
+      scaleColorComponent(180, intensity + 0.8f));
+
   const uint16_t runeColor = dma_display->color565(
       scaleColorComponent(255, intensity),
       scaleColorComponent(255, intensity),
@@ -997,17 +1003,24 @@ void drawBluetoothStatusIcon()
   }
   if (clearW > 0 && clearH > 0)
   {
-    //dma_display->fillRect(clearX, clearY, clearW, clearH, 0);
+    // dma_display->fillRect(clearX, clearY, clearW, clearH, 0);
   }
+  if (!sleepModeActive)
+  {
+    drawXbm565(iconX, iconY, BLUETOOTH_BACKGROUND_WIDTH, BLUETOOTH_BACKGROUND_HEIGHT, bluetoothBackground, backgroundColor);
+    drawXbm565(iconX + BLUETOOTH_BACKGROUND_WIDTH + 2, iconY, BLUETOOTH_BACKGROUND_WIDTH, BLUETOOTH_BACKGROUND_HEIGHT, bluetoothBackground, backgroundColor);
 
-  drawXbm565(iconX, iconY, BLUETOOTH_BACKGROUND_WIDTH, BLUETOOTH_BACKGROUND_HEIGHT, bluetoothBackground, backgroundColor);
-  drawXbm565(iconX + BLUETOOTH_BACKGROUND_WIDTH + 2, iconY, BLUETOOTH_BACKGROUND_WIDTH, BLUETOOTH_BACKGROUND_HEIGHT, bluetoothBackground, backgroundColor);
+    const int runeX = iconX + static_cast<int>((BLUETOOTH_BACKGROUND_WIDTH - BLUETOOTH_RUNE_WIDTH) / 2);
+    const int runeY = iconY + static_cast<int>((BLUETOOTH_BACKGROUND_HEIGHT - BLUETOOTH_RUNE_HEIGHT) / 2);
 
-  const int runeX = iconX + static_cast<int>((BLUETOOTH_BACKGROUND_WIDTH - BLUETOOTH_RUNE_WIDTH) / 2);
-  const int runeY = iconY + static_cast<int>((BLUETOOTH_BACKGROUND_HEIGHT - BLUETOOTH_RUNE_HEIGHT) / 2);
-
-  drawXbm565(runeX, runeY, BLUETOOTH_RUNE_WIDTH, BLUETOOTH_RUNE_HEIGHT, bluetoothRune, runeColor);
-  drawXbm565(runeX + BLUETOOTH_RUNE_WIDTH + 4, runeY, BLUETOOTH_RUNE_WIDTH, BLUETOOTH_RUNE_HEIGHT, bluetoothRune, runeColor);
+    drawXbm565(runeX, runeY, BLUETOOTH_RUNE_WIDTH, BLUETOOTH_RUNE_HEIGHT, bluetoothRune, runeColor);
+    drawXbm565(runeX + BLUETOOTH_RUNE_WIDTH + 4, runeY, BLUETOOTH_RUNE_WIDTH, BLUETOOTH_RUNE_HEIGHT, bluetoothRune, runeColor);
+  }
+  else
+  {
+    dma_display->drawPixel(63, 0, blePixelColor);
+    dma_display->drawPixel(64, 0, blePixelColor);
+  }
 }
 
 static void drawPairingPasskeyOverlay()
@@ -1982,9 +1995,10 @@ void updateBlush()
 
 void drawBlush()
 {
-  // Serial.print("Blush brightness: ");
-  // Serial.println(blushBrightness);
-
+// MARK: Debug: Print blush brightness
+#if DEBUG_VIEWS
+  Serial.print("Blush brightness: ");
+#endif
   // Set blush color based on brightness
   uint16_t blushColor = dma_display->color565(blushBrightness, 0, blushBrightness);
 
@@ -1997,7 +2011,7 @@ void drawBlush()
   const int leftStartX = 70;
   const int totalBlushWidth = blushWidth + (blushCount - 1) * blushSpacing;
 
-  // Clear only the blush area to prevent artifacts
+  // MARK: Clear only the blush area to prevent artifacts
   // dma_display->fillRect(rightStartX, blushY, totalBlushWidth, blushHeight, 0);
   // dma_display->fillRect(leftStartX, blushY, totalBlushWidth, blushHeight, 0);
 
@@ -2204,13 +2218,13 @@ void displaySleepMode()
   int offset2 = sin8((animationPhase + 0.3) * 20) / 16;
   int offset3 = sin8((animationPhase + 0.6) * 20) / 16;
 
-  drawXbm565(27, 2 + offset1, 8, 8, sleepZ1, dma_display->color565(150, 150, 150));
-  drawXbm565(37, 0 + offset2, 8, 8, sleepZ2, dma_display->color565(100, 100, 100));
-  drawXbm565(47, 1 + offset3, 8, 8, sleepZ3, dma_display->color565(50, 50, 50));
+  drawXbm565(22, 2 + offset1, 8, 8, sleepZ1, dma_display->color565(150, 150, 150));
+  drawXbm565(32, 0 + offset2, 8, 8, sleepZ2, dma_display->color565(100, 100, 100));
+  drawXbm565(42, 1 + offset3, 8, 8, sleepZ3, dma_display->color565(50, 50, 50));
 
-  drawXbm565(71, 2 + offset1, 8, 8, sleepZ1, dma_display->color565(50, 50, 50));
-  drawXbm565(81, 0 + offset2, 8, 8, sleepZ2, dma_display->color565(100, 100, 100));
-  drawXbm565(91, 1 + offset3, 8, 8, sleepZ3, dma_display->color565(150, 150, 150));
+  drawXbm565(76, 2 + offset1, 8, 8, sleepZ1, dma_display->color565(50, 50, 50));
+  drawXbm565(86, 0 + offset2, 8, 8, sleepZ2, dma_display->color565(100, 100, 100));
+  drawXbm565(96, 1 + offset3, 8, 8, sleepZ3, dma_display->color565(150, 150, 150));
 
   /*
   // Draw closed or slightly open eyes
@@ -2227,22 +2241,22 @@ void displaySleepMode()
   if (eyesOpen)
   {
     // Draw slightly open eyes - just a small slit
-    dma_display->fillRect(5, 5, 20, 2, dma_display->color565(150, 150, 150));
-    dma_display->fillRect(103, 5, 20, 2, dma_display->color565(150, 150, 150));
+    // dma_display->fillRect(5, 5, 20, 2, dma_display->color565(150, 150, 150));
+    // dma_display->fillRect(103, 5, 20, 2, dma_display->color565(150, 150, 150));
   }
   else
   {
     // Draw closed eyes
-    dma_display->drawLine(5, 10, 40, 12, dma_display->color565(150, 150, 150));
+    // dma_display->drawLine(5, 10, 40, 12, dma_display->color565(150, 150, 150));
     // dma_display->drawLine(83, 10, 40, 12, dma_display->color565(150, 150, 150));
-    dma_display->drawLine(88, 12, 123, 10, dma_display->color565(150, 150, 150));
+    // dma_display->drawLine(88, 12, 123, 10, dma_display->color565(150, 150, 150));
   }
   // Draw sleeping mouth (slight curve)
   /*
   drawXbm565(0, 20, 10, 8, maw2Closed, dma_display->color565(120, 120, 120));
   drawXbm565(64, 20, 10, 8, maw2ClosedL, dma_display->color565(120, 120, 120));
   */
-  dma_display->drawFastHLine(PANE_WIDTH / 2 - 15, PANE_HEIGHT - 8, 30, dma_display->color565(120, 120, 120));
+  // dma_display->drawFastHLine(PANE_WIDTH / 2 - 15, PANE_HEIGHT - 8, 30, dma_display->color565(120, 120, 120));
   drawBluetoothStatusIcon();
   drawPairingPasskeyOverlay();
   dma_display->flipDMABuffer();
@@ -2678,9 +2692,8 @@ void setup()
   pCommandCharacteristic = pService->createCharacteristic(
       COMMAND_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::WRITE |
-      NIMBLE_PROPERTY::WRITE_ENC |
-      NIMBLE_PROPERTY::NOTIFY
-    );
+          NIMBLE_PROPERTY::WRITE_ENC |
+          NIMBLE_PROPERTY::NOTIFY);
   pCommandCharacteristic->setCallbacks(&cmdCallbacks);
   Serial.print("Command Characteristic created, UUID: ");
   Serial.println(pCommandCharacteristic->getUUID().toString().c_str());
@@ -2691,7 +2704,7 @@ void setup()
   pTemperatureCharacteristic =
       pService->createCharacteristic(
           TEMPERATURE_CHARACTERISTIC_UUID,
-              NIMBLE_PROPERTY::WRITE |
+          NIMBLE_PROPERTY::WRITE |
               NIMBLE_PROPERTY::NOTIFY
           // NIMBLE_PROPERTY::READ_ENC
       );
@@ -2700,10 +2713,10 @@ void setup()
   pConfigCharacteristic = pService->createCharacteristic(
       CONFIG_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
-      NIMBLE_PROPERTY::WRITE |
-      NIMBLE_PROPERTY::WRITE_ENC |
-    //NIMBLE_PROPERTY::WRITE_NR |
-      NIMBLE_PROPERTY::NOTIFY);
+          NIMBLE_PROPERTY::WRITE |
+          NIMBLE_PROPERTY::WRITE_ENC |
+          // NIMBLE_PROPERTY::WRITE_NR |
+          NIMBLE_PROPERTY::NOTIFY);
 
   // Set the callback to handle writes.
   pConfigCharacteristic->setCallbacks(&configCallbacks);
@@ -2794,7 +2807,7 @@ void setup()
   pLuxCharacteristic = pService->createCharacteristic(
       LUX_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
-      NIMBLE_PROPERTY::NOTIFY);
+          NIMBLE_PROPERTY::NOTIFY);
 
   // Initialize with current lux value
   uint16_t initialLux = getAmbientLuxU16();
@@ -2816,9 +2829,9 @@ void setup()
   pScrollTextCharacteristic = pService->createCharacteristic(
       SCROLL_TEXT_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
-      NIMBLE_PROPERTY::WRITE |
-      NIMBLE_PROPERTY::WRITE_ENC |     // Require encryption for writes.
-      NIMBLE_PROPERTY::NOTIFY);
+          NIMBLE_PROPERTY::WRITE |
+          NIMBLE_PROPERTY::WRITE_ENC | // Require encryption for writes.
+          NIMBLE_PROPERTY::NOTIFY);
   pScrollTextCharacteristic->setCallbacks(&scrollTextCallbacks);
 
   // Set initial value (current text)
@@ -2836,9 +2849,9 @@ void setup()
   pStaticColorCharacteristic = pService->createCharacteristic(
       STATIC_COLOR_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ_ENC |
-      NIMBLE_PROPERTY::WRITE_ENC |
-      NIMBLE_PROPERTY::WRITE_NR |
-      NIMBLE_PROPERTY::NOTIFY);
+          NIMBLE_PROPERTY::WRITE_ENC |
+          NIMBLE_PROPERTY::WRITE_NR |
+          NIMBLE_PROPERTY::NOTIFY);
   pStaticColorCharacteristic->setCallbacks(&staticColorCallbacks);
   String initialColorHex = getStaticColorHexString();
   pStaticColorCharacteristic->setValue(initialColorHex.c_str());
@@ -3974,8 +3987,8 @@ void loop()
     {
       PROFILE_SECTION("AnimationUpdates");
       updateBlinkAnimation();     // Update blink animation once per loop
-      updateEyeBounceAnimation(); // NEW: Update eye bounce animation progress
-      updateIdleHoverAnimation(); // NEW: Update idle eye hover animation progress
+      updateEyeBounceAnimation(); // Update eye bounce animation progress
+      updateIdleHoverAnimation(); // Update idle eye hover animation progress
     }
 
     if (blushState != BlushState::Inactive)

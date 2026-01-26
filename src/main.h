@@ -161,14 +161,14 @@ void fadeInAndOutLED(uint8_t r, uint8_t g, uint8_t b)
   static int brightness = 0;
   static int step = 5;
   static unsigned long lastUpdate = 0;
-  const uint8_t delayTime = 5;
+  const uint8_t delayTime = 15;
 
   if (millis() - lastUpdate < delayTime)
     return;
   lastUpdate = millis();
 
   brightness += step;
-  if (brightness >= 255 || brightness <= 0)
+  if (brightness >= 128 || brightness <= 0)
     step *= -1;
 
   statusPixel.setPixelColor(0,
