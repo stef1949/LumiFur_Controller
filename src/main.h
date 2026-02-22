@@ -54,6 +54,7 @@ enum View
   VIEW_DINO_GAME,
   VIEW_PIXEL_DUST,
   VIEW_STATIC_COLOR,
+  VIEW_RAINBOW_GRADIENT,
   //VIEW_LGBT_FLAG
 
   TOTAL_VIEWS // Special entry will automatically hold the total number of views.
@@ -90,11 +91,11 @@ bool downloadFlag = false;
 #define DEBUG_MODE 0          // Set to 1 to enable debug outputs
 #define DEBUG_MICROPHONE 0    // Set to 1 to enable microphone debug outputs
 #define DEBUG_ACCELEROMETER 0 // Set to 1 to enable accelerometer debug outputs
-#define DEBUG_BRIGHTNESS 0    // Set to 1 to enable brightness debug outputs
+#define DEBUG_BRIGHTNESS 1    // Set to 1 to enable brightness debug outputs
 #define DEBUG_VIEWS 0         // Set to 1 to enable views debug outputs
 #define DEBUG_VIEW_TIMING 0   // Set to 1 to enable views debug outputs
 #define DEBUG_FPS_COUNTER 0   // Set to 1 to enable FPS counter debug outputs
-#define DEBUG_PROXIMITY 1     // Set to 1 to enable proximity sensor debug logs
+#define DEBUG_PROXIMITY 0     // Set to 1 to enable proximity sensor debug logs
 #define TEXT_DEBUG 1          // Set to 1 to enable text debug outputs
 #define DEBUG_FLUID_EFFECT 0  // Set to 1 to enable fluid effect debug outputs
 #if DEBUG_MODE
@@ -185,7 +186,7 @@ void fadeBlueLED()
 
 // FastLED functions
 CRGB currentColor;
-CRGBPalette16 palettes[] = {ForestColors_p, LavaColors_p, HeatColors_p, RainbowColors_p, CloudColors_p};
+CRGBPalette16 palettes[] = {ForestColors_p, LavaColors_p, HeatColors_p, RainbowColors_p, CloudColors_p, PartyColors_p};
 CRGBPalette16 currentPalette = palettes[0];
 
 CRGB ColorFromCurrentPalette(uint8_t index = 0, uint8_t brightness = 255, TBlendType blendType = LINEARBLEND)
@@ -272,8 +273,10 @@ bool apdsInitialized = false;
 bool apdsFaulted = false;
 volatile bool apdsProximityInterruptFlag = false;
 unsigned long lastApdsProximityCheck = 0;
+unsigned long lastApdsInitRetry = 0;
 constexpr unsigned long APDS_PROX_FALLBACK_MS = 750; // Slow fallback poll when no interrupt
 constexpr unsigned long APDS_PROX_CACHE_MS = 50;     // Minimum spacing between proximity fetches
+constexpr unsigned long APDS_INIT_RETRY_MS = 2000;   // Retry sensor init if it temporarily faults
 
 // float ambientLux = 0.0;
 static uint16_t lastKnownClearValue = 0; // Initialize to a sensible default
@@ -286,13 +289,14 @@ static uint16_t apdsIntegrationTimeMs = 10;
 constexpr uint16_t APDS_LUX_INTEGRATION_MIN_MS = 3;
 constexpr uint16_t APDS_LUX_INTEGRATION_MAX_MS = 100;
 constexpr uint16_t APDS_CLEAR_LOW_COUNT = 200;
-constexpr uint16_t APDS_CLEAR_HIGH_COUNT = 60000;
+constexpr uint16_t APDS_CLEAR_HIGH_COUNT = 8000;
 constexpr float APDS_LUX_REFERENCE_INTEGRATION_MS = 10.0f;
 constexpr float APDS_LUX_REFERENCE_GAIN = 4.0f;
 float smoothedLux = 50.0f;
-const float luxSmoothingFactor = 0.15f;        // Adjust between 0.05 - 0.3
+const float luxSmoothingFactor = 0.35f;        // Adjust between 0.05 - 0.3
 float currentBrightness = 128.0f;              // NEW: Current brightness as a float for smoothing
-const float brightnessSmoothingFactor = 0.90f; // NEW: How quickly brightness adapts (0.01-0.1)
+const float brightnessSmoothingFactor = 0.95f; // NEW: How quickly brightness adapts (0.01-0.1)
+const float manualBrightnessSmoothingFactor = 0.04f; // Smooth target changes from manual brightness commands
 int lastBrightness = 0;
 const int brightnessThreshold = 1; // Only update if change > X
 unsigned long lastLuxUpdate = 0;
@@ -319,7 +323,6 @@ void setupAdaptiveBrightness()
     LOG_PROX_LN("APDS init: begin() failed");
     apdsFaulted = true;
     apdsInitialized = false;
-    autoBrightnessEnabled = false; // Fail gracefully: keep rendering with manual brightness
     return;
   }
 
@@ -457,17 +460,22 @@ static void adjustApdsColorRange(uint16_t clear)
 static void updateAmbientLightSample()
 {
   static unsigned long lastLogTime = 0;
+  static unsigned long lastForcedReadTime = 0;
   const unsigned long logInterval = 500; // Log 2 times per second
 
-  if (!apdsInitialized)
+  if (!apdsInitialized || apdsFaulted)
   {
     return;
   }
 
-  if (apds.colorDataReady())
+  const unsigned long now = millis();
+  const bool ready = apds.colorDataReady();
+  const bool forceRead = (now - lastForcedReadTime) >= APDS_PROX_FALLBACK_MS;
+  if (ready || forceRead)
   {
     uint16_t r, g, b, c;
     apds.getColorData(&r, &g, &b, &c);
+    lastForcedReadTime = now;
 
     lastKnownRedValue = r;
     lastKnownGreenValue = g;
@@ -479,7 +487,6 @@ static void updateAmbientLightSample()
     adjustApdsColorRange(c);
 
 #if DEBUG_BRIGHTNESS
-    unsigned long now = millis();
     if (now - lastLogTime >= logInterval)
     {
       lastLogTime = now;
@@ -524,34 +531,59 @@ void updateAdaptiveBrightness()
   // If auto brightness is disabled, just apply the manual user brightness and exit.
   if (!autoBrightnessEnabled)
   {
-    // Only set brightness if it has changed to avoid unnecessary calls
-    if (lastBrightness != userBrightness)
+    // Manual mode still eases toward the requested brightness instead of stepping instantly.
+    const float targetManualBrightness = static_cast<float>(userBrightness);
+    currentBrightness += manualBrightnessSmoothingFactor * (targetManualBrightness - currentBrightness);
+    int smoothedBrightness = static_cast<int>(currentBrightness + 0.5f);
+    smoothedBrightness = constrain(smoothedBrightness, 0, 255);
+
+    if (abs(smoothedBrightness - lastBrightness) >= brightnessThreshold)
     {
-      dma_display->setBrightness8(userBrightness);
-      updateGlobalBrightnessScale(userBrightness);
-      lastBrightness = userBrightness;
-#ifdef DEBUG_BRIGHTNESS
-      Serial.printf(">>>> MANUAL: BRIGHTNESS SET TO %d <<<<\n", userBrightness);
+      const uint8_t brightnessToApply = static_cast<uint8_t>(smoothedBrightness);
+      dma_display->setBrightness8(brightnessToApply);
+      updateGlobalBrightnessScale(brightnessToApply);
+      lastBrightness = smoothedBrightness;
+#if DEBUG_BRIGHTNESS
+      Serial.printf(">>>> MANUAL: BRIGHTNESS SET TO %d (target=%u) <<<<\n", smoothedBrightness, userBrightness);
 #endif
     }
-    currentBrightness = static_cast<float>(userBrightness);
     return;
   }
 
   if (!apdsInitialized || apdsFaulted)
   {
-    // Sensor unavailable: fall back to manual brightness without blocking FPS
-    autoBrightnessEnabled = false;
-    dma_display->setBrightness8(userBrightness);
-    updateGlobalBrightnessScale(userBrightness);
-    lastBrightness = userBrightness;
+    // Sensor unavailable this cycle: use manual brightness and retry init periodically.
+    const unsigned long now = millis();
+    if ((now - lastApdsInitRetry) >= APDS_INIT_RETRY_MS)
+    {
+      lastApdsInitRetry = now;
+      apdsFaulted = false; // Allow re-attempt.
+      setupAdaptiveBrightness();
+    }
+    if (lastBrightness != userBrightness)
+    {
+      dma_display->setBrightness8(userBrightness);
+      updateGlobalBrightnessScale(userBrightness);
+      lastBrightness = userBrightness;
+    }
     currentBrightness = static_cast<float>(userBrightness);
     return;
   }
 
-  float currentLux = getAmbientLux();
+  static float cachedLux = 0.0f;
+  static bool hasCachedLux = false;
+  const unsigned long now = millis();
 
-  smoothedLux = (luxSmoothingFactor * currentLux) + ((1.0f - luxSmoothingFactor) * smoothedLux);
+  // Sample ambient light only at the configured lux interval.
+  if (!hasCachedLux || (now - lastLuxUpdate) >= luxUpdateInterval)
+  {
+    cachedLux = getAmbientLux();
+    smoothedLux = (luxSmoothingFactor * cachedLux) + ((1.0f - luxSmoothingFactor) * smoothedLux);
+    lastLuxUpdate = now;
+    hasCachedLux = true;
+  }
+
+  const float currentLux = cachedLux;
 
   // --- CRITICAL CALIBRATION SECTION ---
 
@@ -634,13 +666,8 @@ void updateAdaptiveBrightness()
 
 void maybeUpdateBrightness()
 {
-  // Always call updateAdaptiveBrightness to handle both manual and auto modes.
-  // The function itself will decide what to do based on autoBrightnessEnabled.
-  if (millis() - lastLuxUpdate >= luxUpdateInterval)
-  {
-    updateAdaptiveBrightness();
-    lastLuxUpdate = millis();
-  }
+  // Always update brightness smoothing; updateAdaptiveBrightness handles lux sampling cadence internally.
+  updateAdaptiveBrightness();
 }
 
 inline bool hasElapsedSince(unsigned long now, unsigned long last, unsigned long interval)

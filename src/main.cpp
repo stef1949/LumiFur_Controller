@@ -72,7 +72,7 @@ constexpr unsigned long MOTION_SAMPLE_INTERVAL_FAST = 15; // ms between accel re
 
 // --- Performance Tuning ---
 // Target ~50-60 FPS. Adjust as needed based on view complexity.
-const unsigned long targetFrameIntervalMillis = 12; // ~100 FPS pacing
+const unsigned long targetFrameIntervalMillis = 16; // ~100 FPS pacing
 constexpr uint32_t SLOW_FRAME_THRESHOLD_US = targetFrameIntervalMillis * 1000UL;
 
 #if DEBUG_MODE
@@ -108,13 +108,11 @@ volatile uint32_t gWorstFrameDurationMicros = 0;
 
 bool brightnessChanged = false;
 
-constexpr unsigned long AUTO_BRIGHTNESS_INTERVAL_MS = 250;
 constexpr unsigned long LUX_UPDATE_INTERVAL_MS = 500;
 constexpr unsigned long SLEEP_CHECK_INTERVAL_MS = 60;
 constexpr unsigned long PAIRING_RESET_HOLD_MS = 3000;
 constexpr unsigned long PAIRING_RESET_DEBOUNCE_MS = 50;
 
-static unsigned long lastAutoBrightnessUpdate = 0;
 static unsigned long lastLuxUpdateTime = 0;
 static unsigned long lastSleepCheckTime = 0;
 
@@ -744,16 +742,8 @@ class BrightnessCallbacks : public NimBLECharacteristicCallbacks
       userBrightness = (uint8_t)val[0]; // Store the app-set brightness
       brightnessChanged = true;         // Flag that brightness was set by user
       setUserBrightness(userBrightness);
-      // ADDED: Apply brightness immediately if auto-brightness is off
-      if (!autoBrightnessEnabled)
-      {
-        dma_display->setBrightness8(userBrightness);
-        updateGlobalBrightnessScale(userBrightness);
-        lastBrightness = userBrightness;
-        currentBrightness = static_cast<float>(userBrightness);
-        Serial.printf("Applied manual brightness: %u\n", userBrightness);
-      }
-      Serial.printf("Brightness set to %u\n", userBrightness);
+      // Always store target; manual mode easing applies the change in updateAdaptiveBrightness().
+      Serial.printf("Brightness target set to %u\n", userBrightness);
     }
   }
 };
@@ -841,7 +831,7 @@ static void resetBlePairing()
     return;
   }
 
-  setPairingState(false, false, 0, false);
+  setPairingState(false, false, 0, true);
   const std::vector<uint16_t> peers = pServer->getPeerDevices();
   if (!peers.empty())
   {
@@ -913,7 +903,7 @@ constexpr uint8_t BLUETOOTH_RUNE_WIDTH = 5;
 constexpr uint8_t BLUETOOTH_RUNE_HEIGHT = 7;
 constexpr uint8_t BLUETOOTH_ICON_MARGIN = 1;
 constexpr unsigned long BLUETOOTH_FADE_PERIOD_MS = 1600UL;
-constexpr unsigned long BLUETOOTH_CONNECTED_FADE_DELAY_MS = 5000UL;
+constexpr unsigned long BLUETOOTH_CONNECTED_FADE_DELAY_MS = 2000UL;
 constexpr unsigned long BLUETOOTH_CONNECTED_FADE_DURATION_MS = 1500UL;
 
 static uint8_t scaleColorComponent(uint8_t value, float intensity)
@@ -970,6 +960,12 @@ void drawBluetoothStatusIcon()
     }
   }
 
+  // After fade-out completes, stop drawing the connected icon in normal mode.
+  if (deviceConnected && !sleepModeActive && intensity <= 0.0f)
+  {
+    return;
+  }
+
   const uint16_t backgroundColor = dma_display->color565(
       scaleColorComponent(5, intensity),
       scaleColorComponent(90, intensity),
@@ -1023,15 +1019,9 @@ void drawBluetoothStatusIcon()
   }
 }
 
-static void drawPairingPasskeyOverlay()
+static void drawPairingPasskeyOverlay(uint32_t passkey)
 {
   if (!dma_display)
-  {
-    return;
-  }
-
-  const PairingSnapshot pairingSnapshot = getPairingSnapshot();
-  if (!pairingSnapshot.pairing || !pairingSnapshot.passkeyValid)
   {
     return;
   }
@@ -1048,7 +1038,6 @@ static void drawPairingPasskeyOverlay()
   static uint16_t keyW = 0;
   static uint16_t keyH = 0;
 
-  const uint32_t passkey = pairingSnapshot.passkey;
   char passkeyStr[7];
   snprintf(passkeyStr, sizeof(passkeyStr), "%06lu", static_cast<unsigned long>(passkey));
 
@@ -1091,9 +1080,9 @@ static void drawPairingPasskeyOverlay()
     boxY = 0;
   }
 
-  dma_display->clearScreen();
   const uint16_t backgroundColor = dma_display->color565(0, 0, 0);
   const uint16_t borderColor = dma_display->color565(255, 255, 255);
+
   dma_display->fillRect(boxX, boxY, boxW, boxH, backgroundColor);
   dma_display->drawRect(boxX, boxY, boxW, boxH, borderColor);
 
@@ -1118,6 +1107,7 @@ static void drawPairingPasskeyOverlay()
   dma_display->setTextColor(borderColor);
   dma_display->setCursor(keyCursorX, keyCursorY);
   dma_display->print(passkeyStr);
+
 }
 
 uint16_t colorWheel(uint8_t pos)
@@ -2102,6 +2092,77 @@ void staticColor()
   dma_display->fillScreen(encodedColor);
 }
 
+void patternRainbowGradient()
+{
+  static uint8_t angleHueMap[PANE_WIDTH * PANE_HEIGHT];
+  static int cachedWidth = 0;
+  static int cachedHeight = 0;
+  static uint16_t hueTo565[256];
+  static uint16_t cachedBrightnessScale = 0;
+
+  const int displayWidth = dma_display->width();
+  const int displayHeight = dma_display->height();
+
+  if (displayWidth <= 0 || displayHeight <= 0)
+  {
+    return;
+  }
+
+  if (cachedWidth != displayWidth || cachedHeight != displayHeight)
+  {
+    const float centerX = (displayWidth - 1) * 0.5f;
+    const float centerY = (displayHeight - 1) * 0.5f;
+    const float angleToHue = 255.0f / TWO_PI;
+
+    size_t index = 0;
+    for (int y = 0; y < displayHeight; ++y)
+    {
+      const float dy = static_cast<float>(y) - centerY;
+      for (int x = 0; x < displayWidth; ++x)
+      {
+        const float dx = static_cast<float>(x) - centerX;
+        float angle = atan2f(dy, dx);
+        if (angle < 0.0f)
+        {
+          angle += TWO_PI;
+        }
+        angleHueMap[index++] = static_cast<uint8_t>(angle * angleToHue);
+      }
+    }
+
+    cachedWidth = displayWidth;
+    cachedHeight = displayHeight;
+  }
+
+  if (cachedBrightnessScale != globalBrightnessScaleFixed)
+  {
+    const uint16_t scale = globalBrightnessScaleFixed;
+    for (int i = 0; i < 256; ++i)
+    {
+      CRGB rgb;
+      hsv2rgb_rainbow(CHSV(static_cast<uint8_t>(i), 255, 255), rgb);
+      rgb.r = static_cast<uint8_t>((static_cast<uint16_t>(rgb.r) * scale + 128) >> 8);
+      rgb.g = static_cast<uint8_t>((static_cast<uint16_t>(rgb.g) * scale + 128) >> 8);
+      rgb.b = static_cast<uint8_t>((static_cast<uint16_t>(rgb.b) * scale + 128) >> 8);
+      hueTo565[i] = dma_display->color565(rgb.r, rgb.g, rgb.b);
+    }
+    cachedBrightnessScale = scale;
+  }
+
+  // One full hue cycle roughly every 2.8 seconds.
+  const uint8_t spinOffset = static_cast<uint8_t>((millis() * 256UL) / 2800UL);
+
+  size_t index = 0;
+  for (int y = 0; y < displayHeight; ++y)
+  {
+    for (int x = 0; x < displayWidth; ++x)
+    {
+      const uint8_t hue = static_cast<uint8_t>(angleHueMap[index++] + spinOffset);
+      dma_display->drawPixel(x, y, hueTo565[hue]);
+    }
+  }
+}
+
 void patternPlasma()
 {
   // Advance plasma animation timing + palette cycling reused by all plasma-based views
@@ -2258,7 +2319,11 @@ void displaySleepMode()
   */
   // dma_display->drawFastHLine(PANE_WIDTH / 2 - 15, PANE_HEIGHT - 8, 30, dma_display->color565(120, 120, 120));
   drawBluetoothStatusIcon();
-  drawPairingPasskeyOverlay();
+  const PairingSnapshot pairingSnapshot = getPairingSnapshot();
+  if (pairingSnapshot.pairing && pairingSnapshot.passkeyValid)
+  {
+    drawPairingPasskeyOverlay(pairingSnapshot.passkey);
+  }
   dma_display->flipDMABuffer();
 }
 
@@ -2642,7 +2707,7 @@ void setup()
   NimBLEDevice::init("LF-052618");
   // NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
   // NimBLEDevice::setPower(ESP_PWR_LVL_P21, NimBLETxPowerType::All); // Power level 21 (highest) for best range
-  NimBLEDevice::setPower(ESP_PWR_LVL_P21, NimBLETxPowerType::All); // Power level 21 (highest) for best range
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9, NimBLETxPowerType::All); // Power level 21 (highest) for best range
   // NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
   NimBLEDevice::setSecurityAuth(true, true, true);
   // Keep default passkey so onPassKeyDisplay supplies a dynamic code.
@@ -3390,7 +3455,8 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     renderScrollingTextView,       // VIEW_SCROLLING_TEXT
     renderDinoGameView,            // VIEW_DINO_GAME
     renderPixelDustView,           // VIEW_PIXEL_DUST
-    staticColor                    // VIEW_STATIC_COLOR
+    staticColor,                   // VIEW_STATIC_COLOR
+    patternRainbowGradient         // VIEW_RAINBOW_GRADIENT
 };
 
 static_assert(sizeof(VIEW_RENDERERS) / sizeof(ViewRenderFunc) == TOTAL_VIEWS, "View renderer table mismatch");
@@ -3406,10 +3472,18 @@ void displayCurrentView(int view)
     return;
   }
 
+
+  const PairingSnapshot pairingSnapshot = getPairingSnapshot();
+  if (pairingSnapshot.pairing && pairingSnapshot.passkeyValid)
+  {
+    dma_display->clearScreen();
+    drawPairingPasskeyOverlay(pairingSnapshot.passkey);
+    dma_display->flipDMABuffer();
+    return;
+  }
   mouthOpen = micIsMouthOpen();
 
   dma_display->clearScreen(); // Clear the display
-
   if (view != previousViewLocal)
   { // Check if the view has changed
     facePlasmaDirty = true;
@@ -3499,7 +3573,10 @@ void displayCurrentView(int view)
 #endif
 
   drawBluetoothStatusIcon();
-  drawPairingPasskeyOverlay();
+  if (pairingSnapshot.pairing && pairingSnapshot.passkeyValid)
+  {
+    drawPairingPasskeyOverlay(pairingSnapshot.passkey);
+  }
 
   if (!sleepModeActive || currentView == VIEW_TRANS_FLAG || currentView == VIEW_BSOD)
   {
@@ -3704,7 +3781,7 @@ void loop()
     // --- Motion Detection (for shake effect to change view) ---
     {
       PROFILE_SECTION("MotionDetection");
-      if (accelerometerEnabled && g_accelerometer_initialized && currentView != VIEW_FLUID_EFFECT && currentView != VIEW_DINO_GAME && !isEyeBouncing && !proximityLatchedHigh)
+      if (accelerometerEnabled && g_accelerometer_initialized && currentView != VIEW_FLUID_EFFECT && currentView != VIEW_DINO_GAME && currentView != VIEW_RAINBOW_GRADIENT && !isEyeBouncing && !proximityLatchedHigh)
       {
         useShakeSensitivity = true; // Use high threshold for shake detection
         if (detectMotion())
@@ -3819,6 +3896,11 @@ void loop()
 #endif
 #if defined(APDS_AVAILABLE) // Ensure sensor is available
                    const unsigned long sensorNow = loopNow;
+                   if (currentView == VIEW_RAINBOW_GRADIENT)
+                   {
+                     proximityLatchedHigh = false;
+                     return;
+                   }
 
                    if (!shouldReadProximity(sensorNow))
                    {
@@ -3966,12 +4048,10 @@ void loop()
                  });
 
     // --- Update Adaptive Brightness ---
-    if (autoBrightnessEnabled)
+    // Brightness smoothing runs continuously; lux sampling cadence is enforced inside updateAdaptiveBrightness().
     {
-      runIfElapsed(loopNow, lastAutoBrightnessUpdate, AUTO_BRIGHTNESS_INTERVAL_MS, [&]()
-                   {
-                     PROFILE_SECTION("AutoBrightness");
-                     maybeUpdateBrightness(); });
+      PROFILE_SECTION("AutoBrightness");
+      maybeUpdateBrightness();
     }
     if (deviceConnected)
     {
