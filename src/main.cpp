@@ -72,8 +72,9 @@ constexpr unsigned long MOTION_SAMPLE_INTERVAL_FAST = 15; // ms between accel re
 
 // --- Performance Tuning ---
 // Target ~50-60 FPS. Adjust as needed based on view complexity.
-const unsigned long targetFrameIntervalMillis = 16; // ~100 FPS pacing
+const unsigned long targetFrameIntervalMillis = 14; // ~100 FPS pacing
 constexpr uint32_t SLOW_FRAME_THRESHOLD_US = targetFrameIntervalMillis * 1000UL;
+constexpr uint8_t VIEW_TRANSITION_FADE_STEPS = 8;
 
 #if DEBUG_MODE
 constexpr uint32_t SLOW_SECTION_THRESHOLD_US = 2000; // Flag non-render work that takes >2ms
@@ -112,9 +113,12 @@ constexpr unsigned long LUX_UPDATE_INTERVAL_MS = 500;
 constexpr unsigned long SLEEP_CHECK_INTERVAL_MS = 60;
 constexpr unsigned long PAIRING_RESET_HOLD_MS = 3000;
 constexpr unsigned long PAIRING_RESET_DEBOUNCE_MS = 50;
+constexpr unsigned long BLE_STATUS_LED_INTERVAL_MS = 25;
+constexpr unsigned long PROX_LUX_READ_GUARD_MS = 20;
 
 static unsigned long lastLuxUpdateTime = 0;
 static unsigned long lastSleepCheckTime = 0;
+static unsigned long lastBleStatusLedUpdateTime = 0;
 
 // View switching
 volatile uint8_t currentView = VIEW_FLAME_EFFECT; // Current view (volatile so the display task sees updates)
@@ -798,6 +802,7 @@ class DescriptorCallbacks : public NimBLEDescriptorCallbacks
 void handleBLEStatusLED()
 {
   const PairingSnapshot pairingSnapshot = getPairingSnapshot();
+  bool pixelShown = false;
   if (deviceConnected != oldDeviceConnected)
   {
     bluetoothStatusChangeMillis = millis();
@@ -813,15 +818,21 @@ void handleBLEStatusLED()
     // statusPixel.show();
     oldDeviceConnected = deviceConnected;
   }
-  if (!deviceConnected)
-  {
-    fadeInAndOutLED(0, 0, 100); // Blue fade when disconnected
-  }
   if (pairingSnapshot.pairing)
   {
-    fadeInAndOutLED(128, 0, 128); // Blue when pairing
+    fadeInAndOutLED(128, 0, 128); // Purple fade when pairing
+    pixelShown = true;
   }
-  statusPixel.show();
+  else if (!deviceConnected)
+  {
+    fadeInAndOutLED(0, 0, 100); // Blue fade when disconnected
+    pixelShown = true;
+  }
+
+  if (!pixelShown)
+  {
+    statusPixel.show();
+  }
 }
 
 static void resetBlePairing()
@@ -2396,16 +2407,107 @@ static void displayTask(void *pvParameters)
   (void)pvParameters;
   const TickType_t frameTicks = pdMS_TO_TICKS(targetFrameIntervalMillis);
   TickType_t lastWake = xTaskGetTickCount();
+  enum class ViewTransitionPhase : uint8_t
+  {
+    Idle,
+    FadeOut,
+    FadeIn
+  };
+  auto getBaseBrightness = []() -> uint8_t
+  {
+    const int constrainedBrightness = constrain(lastBrightness, 0, 255);
+    return static_cast<uint8_t>(constrainedBrightness);
+  };
+  auto applyTransitionBrightness = [](uint8_t brightness)
+  {
+    dma_display->setBrightness8(brightness);
+    updateGlobalBrightnessScale(brightness);
+  };
+  auto scaleTransitionBrightness = [](uint8_t baseBrightness, uint8_t level) -> uint8_t
+  {
+    const uint16_t scaled = static_cast<uint16_t>(baseBrightness) * static_cast<uint16_t>(level);
+    return static_cast<uint8_t>(scaled / VIEW_TRANSITION_FADE_STEPS);
+  };
+
+  ViewTransitionPhase transitionPhase = ViewTransitionPhase::Idle;
+  uint8_t transitionLevel = VIEW_TRANSITION_FADE_STEPS;
+  int displayedView = static_cast<int>(currentView);
+  int pendingView = displayedView;
 #if DEBUG_MODE
   static unsigned long lastSlowFrameLogMs = 0;
 #endif
 
   for (;;)
   {
+    const int requestedView = static_cast<int>(currentView);
+
+    if (sleepModeActive)
+    {
+      transitionPhase = ViewTransitionPhase::Idle;
+      transitionLevel = VIEW_TRANSITION_FADE_STEPS;
+      displayedView = requestedView;
+      pendingView = requestedView;
+      displayCurrentView(requestedView);
+      vTaskDelayUntil(&lastWake, frameTicks);
+      continue;
+    }
+
+    if (transitionPhase == ViewTransitionPhase::Idle && requestedView != displayedView)
+    {
+      pendingView = requestedView;
+      transitionPhase = ViewTransitionPhase::FadeOut;
+      transitionLevel = VIEW_TRANSITION_FADE_STEPS;
+    }
+    else if (transitionPhase == ViewTransitionPhase::FadeOut)
+    {
+      // Follow the most recent request while fading out.
+      pendingView = requestedView;
+    }
+
+    int viewToRender = displayedView;
+    if (transitionPhase == ViewTransitionPhase::FadeOut || transitionPhase == ViewTransitionPhase::FadeIn)
+    {
+      const uint8_t baseBrightness = getBaseBrightness();
+      const uint8_t fadedBrightness = scaleTransitionBrightness(baseBrightness, transitionLevel);
+      applyTransitionBrightness(fadedBrightness);
+    }
+    else
+    {
+      displayedView = requestedView;
+      viewToRender = displayedView;
+    }
+
 #if DEBUG_MODE
     const uint32_t frameStartMicros = micros();
 #endif
-    displayCurrentView(currentView);
+    displayCurrentView(viewToRender);
+
+    if (transitionPhase == ViewTransitionPhase::FadeOut)
+    {
+      if (transitionLevel == 0)
+      {
+        displayedView = pendingView;
+        transitionPhase = ViewTransitionPhase::FadeIn;
+        transitionLevel = 0;
+      }
+      else
+      {
+        --transitionLevel;
+      }
+    }
+    else if (transitionPhase == ViewTransitionPhase::FadeIn)
+    {
+      if (transitionLevel >= VIEW_TRANSITION_FADE_STEPS)
+      {
+        transitionPhase = ViewTransitionPhase::Idle;
+        transitionLevel = VIEW_TRANSITION_FADE_STEPS;
+        applyTransitionBrightness(getBaseBrightness());
+      }
+      else
+      {
+        ++transitionLevel;
+      }
+    }
 #if DEBUG_MODE
     const uint32_t frameMicros = micros() - frameStartMicros;
     gLastFrameDurationMicros = frameMicros;
@@ -2955,7 +3057,7 @@ void setup()
 
   mxconfig.gpio.e = PIN_E;
   mxconfig.driver = HUB75_I2S_CFG::FM6126A; // for panels using FM6126A chips
-                                            // mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;  // Causes instability if set too high
+  // mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;  // Causes instability if set too high
   mxconfig.clkphase = false;
   mxconfig.double_buff = true; // <------------- Turn on double buffer
 
@@ -3134,7 +3236,7 @@ void setup()
       "Display Task",
       16384, // stack bytes
       NULL,
-      2, // priority
+      3, // priority
       NULL,
       0 // pin to core 0
   );
@@ -3763,13 +3865,6 @@ void loop()
   // unsigned long frameStartTimeMillis = millis(); // Timestamp at frame start
   const unsigned long loopNow = millis();
 
-  // Check BLE connection status (low frequency check is fine)
-  // bool isConnected = NimBLEDevice::getServer()->getConnectedCount() > 0;
-  {
-    PROFILE_SECTION("BLEStatusLED");
-    handleBLEStatusLED(); // Update status LED based on connection
-  }
-
   // --- Handle Inputs and State Updates ---
 
   // Check for motion and handle sleep/wake state
@@ -3778,6 +3873,20 @@ void loop()
   // Only process inputs/updates if NOT in sleep mode
   if (!sleepModeActive)
   {
+    // Update animation state first so the display task can render with the freshest values.
+    {
+      PROFILE_SECTION("AnimationUpdates");
+      updateBlinkAnimation();     // Update blink animation once per loop
+      updateEyeBounceAnimation(); // Update eye bounce animation progress
+      updateIdleHoverAnimation(); // Update idle eye hover animation progress
+    }
+
+    if (blushState != BlushState::Inactive)
+    {
+      PROFILE_SECTION("BlushUpdate");
+      updateBlush();
+    }
+
     // --- Motion Detection (for shake effect to change view) ---
     {
       PROFILE_SECTION("MotionDetection");
@@ -3889,8 +3998,11 @@ void loop()
 
     // --- Proximity Sensor Logic: Blush Trigger AND Eye Bounce Trigger ---
     // static unsigned long lastSensorReadTime = 0; // Already global
-    runIfElapsed(loopNow, lastSensorReadTime, sensorInterval, [&]()
-                 {
+    const bool deferProximityRead = autoBrightnessEnabled && !hasElapsedSince(loopNow, lastLuxUpdate, PROX_LUX_READ_GUARD_MS);
+    if (!deferProximityRead)
+    {
+      runIfElapsed(loopNow, lastSensorReadTime, sensorInterval, [&]()
+                   {
 #if DEBUG_MODE
                    PROFILE_SECTION("ProximitySensor");
 #endif
@@ -4045,7 +4157,19 @@ void loop()
                      }
                    }
 #endif
-                 });
+                   });
+    }
+
+    // --- Revert from Spiral View Timer ---
+    // Use a local copy to avoid updating spiralStartMillis inside hasElapsedSince
+    unsigned long spiralStartMillisCopy = spiralStartMillis;
+    if (currentView == VIEW_SPIRAL_EYES && spiralStartMillisCopy > 0 && hasElapsedSince(loopNow, spiralStartMillisCopy, 5000))
+    {
+      LOG_DEBUG_LN("Spiral timeout, reverting view.");
+      currentView = previousView;
+      spiralStartMillis = 0;
+      notifyBleTask();
+    }
 
     // --- Update Adaptive Brightness ---
     // Brightness smoothing runs continuously; lux sampling cadence is enforced inside updateAdaptiveBrightness().
@@ -4061,31 +4185,6 @@ void loop()
                      // Manual brightness is applied immediately on BLE write if autoBrightness is off.
                      updateLux(); // Update lux values
                    });
-    }
-
-    // --- Update Animation States ---
-    {
-      PROFILE_SECTION("AnimationUpdates");
-      updateBlinkAnimation();     // Update blink animation once per loop
-      updateEyeBounceAnimation(); // Update eye bounce animation progress
-      updateIdleHoverAnimation(); // Update idle eye hover animation progress
-    }
-
-    if (blushState != BlushState::Inactive)
-    {
-      PROFILE_SECTION("BlushUpdate");
-      updateBlush();
-    }
-
-    // --- Revert from Spiral View Timer ---
-    // Use a local copy to avoid updating spiralStartMillis inside hasElapsedSince
-    unsigned long spiralStartMillisCopy = spiralStartMillis;
-    if (currentView == VIEW_SPIRAL_EYES && spiralStartMillisCopy > 0 && hasElapsedSince(loopNow, spiralStartMillisCopy, 5000))
-    {
-      LOG_DEBUG_LN("Spiral timeout, reverting view.");
-      currentView = previousView;
-      spiralStartMillis = 0;
-      notifyBleTask();
     }
 
     // --- Update Temperature Sensor Periodically ---
@@ -4112,6 +4211,14 @@ void loop()
                {
                  PROFILE_SECTION("SleepModeCheck");
                  checkSleepMode(); });
+
+  // Check BLE connection status (low frequency check is fine)
+  // bool isConnected = NimBLEDevice::getServer()->getConnectedCount() > 0;
+  runIfElapsed(loopNow, lastBleStatusLedUpdateTime, BLE_STATUS_LED_INTERVAL_MS, [&]()
+               {
+                 PROFILE_SECTION("BLEStatusLED");
+                 handleBLEStatusLED(); // Update status LED based on connection
+               });
 
   // Check for changes in brightness
   // checkBrightness();
