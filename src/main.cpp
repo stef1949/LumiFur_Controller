@@ -19,7 +19,9 @@
 
 #include <Adafruit_PixelDust.h> // For sand simulation
 #include "main.h"
-#include "dino_game.h"
+#include "customEffects/dinoGame.h"
+#include "customEffects/basicRainbow.h"
+#include "customEffects/strobeEffect.h"
 #include "core/mic/mic.h"
 #include "core/ColorParser.h"
 #include "customEffects/flameEffect.h"
@@ -785,6 +787,80 @@ class StaticColorCallbacks : public NimBLECharacteristicCallbacks
   }
 };
 static StaticColorCallbacks staticColorCallbacks;
+
+static std::string buildStrobeSettingsPayload()
+{
+  String hexString = getStrobeColorHexString();
+  return std::string("{") +
+         "\"color\":\"" + std::string(hexString.c_str()) + "\"," +
+         "\"speedMs\":" + std::to_string(static_cast<unsigned int>(getStrobeSpeedMs())) +
+         "}";
+}
+
+class StrobeSettingsCallbacks : public NimBLECharacteristicCallbacks
+{
+  void onWrite(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
+  {
+    const std::string &val = pChr->getValue();
+    if (val.empty())
+    {
+      return;
+    }
+
+    constexpr uint8_t kOpcodeColor = 0x01;
+    constexpr uint8_t kOpcodeSpeed = 0x02;
+
+    const uint8_t opcode = static_cast<uint8_t>(val[0]);
+    const uint8_t *payload = reinterpret_cast<const uint8_t *>(val.data() + 1);
+    const size_t payloadLength = val.size() - 1;
+
+    if (payloadLength == 0)
+    {
+      return;
+    }
+
+    if (opcode == kOpcodeColor)
+    {
+      std::string normalized;
+      if (!applyStrobeColorBytes(payload, payloadLength, true, &normalized))
+      {
+        Serial.println("Invalid strobe color payload received over BLE.");
+        return;
+      }
+#if DEBUG_MODE
+      Serial.printf("Strobe color updated to #%s\n", normalized.c_str());
+#endif
+    }
+    else if (opcode == kOpcodeSpeed)
+    {
+      uint16_t speedMs = 0;
+      if (!applyStrobeSpeedBytes(payload, payloadLength, true, &speedMs))
+      {
+        Serial.println("Invalid strobe speed payload received over BLE.");
+        return;
+      }
+#if DEBUG_MODE
+      Serial.printf("Strobe speed updated to %u ms\n", static_cast<unsigned int>(speedMs));
+#endif
+    }
+    else
+    {
+      Serial.printf("Invalid strobe settings opcode received over BLE: 0x%02X\n", opcode);
+      return;
+    }
+
+    const std::string response = buildStrobeSettingsPayload();
+    pChr->setValue(response);
+    pChr->notify();
+  }
+
+  void onRead(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
+  {
+    const std::string value = buildStrobeSettingsPayload();
+    pChr->setValue(value);
+  }
+};
+static StrobeSettingsCallbacks strobeSettingsCallbacks;
 
 class DescriptorCallbacks : public NimBLEDescriptorCallbacks
 {
@@ -2103,77 +2179,6 @@ void staticColor()
   dma_display->fillScreen(encodedColor);
 }
 
-void patternRainbowGradient()
-{
-  static uint8_t angleHueMap[PANE_WIDTH * PANE_HEIGHT];
-  static int cachedWidth = 0;
-  static int cachedHeight = 0;
-  static uint16_t hueTo565[256];
-  static uint16_t cachedBrightnessScale = 0;
-
-  const int displayWidth = dma_display->width();
-  const int displayHeight = dma_display->height();
-
-  if (displayWidth <= 0 || displayHeight <= 0)
-  {
-    return;
-  }
-
-  if (cachedWidth != displayWidth || cachedHeight != displayHeight)
-  {
-    const float centerX = (displayWidth - 1) * 0.5f;
-    const float centerY = (displayHeight - 1) * 0.5f;
-    const float angleToHue = 255.0f / TWO_PI;
-
-    size_t index = 0;
-    for (int y = 0; y < displayHeight; ++y)
-    {
-      const float dy = static_cast<float>(y) - centerY;
-      for (int x = 0; x < displayWidth; ++x)
-      {
-        const float dx = static_cast<float>(x) - centerX;
-        float angle = atan2f(dy, dx);
-        if (angle < 0.0f)
-        {
-          angle += TWO_PI;
-        }
-        angleHueMap[index++] = static_cast<uint8_t>(angle * angleToHue);
-      }
-    }
-
-    cachedWidth = displayWidth;
-    cachedHeight = displayHeight;
-  }
-
-  if (cachedBrightnessScale != globalBrightnessScaleFixed)
-  {
-    const uint16_t scale = globalBrightnessScaleFixed;
-    for (int i = 0; i < 256; ++i)
-    {
-      CRGB rgb;
-      hsv2rgb_rainbow(CHSV(static_cast<uint8_t>(i), 255, 255), rgb);
-      rgb.r = static_cast<uint8_t>((static_cast<uint16_t>(rgb.r) * scale + 128) >> 8);
-      rgb.g = static_cast<uint8_t>((static_cast<uint16_t>(rgb.g) * scale + 128) >> 8);
-      rgb.b = static_cast<uint8_t>((static_cast<uint16_t>(rgb.b) * scale + 128) >> 8);
-      hueTo565[i] = dma_display->color565(rgb.r, rgb.g, rgb.b);
-    }
-    cachedBrightnessScale = scale;
-  }
-
-  // One full hue cycle roughly every 2.8 seconds.
-  const uint8_t spinOffset = static_cast<uint8_t>((millis() * 256UL) / 2800UL);
-
-  size_t index = 0;
-  for (int y = 0; y < displayHeight; ++y)
-  {
-    for (int x = 0; x < displayWidth; ++x)
-    {
-      const uint8_t hue = static_cast<uint8_t>(angleHueMap[index++] + spinOffset);
-      dma_display->drawPixel(x, y, hueTo565[hue]);
-    }
-  }
-}
-
 void patternPlasma()
 {
   // Advance plasma animation timing + palette cycling reused by all plasma-based views
@@ -2783,6 +2788,7 @@ void setup()
   currentView = getLastView();
   previousView = currentView;
   Serial.printf("Loaded last view: %d\n", currentView);
+  ensureStrobeSettingsLoaded();
 
   // Retrieve and print stored brightness value.
   // int userBrightness = getUserBrightness();
@@ -3015,7 +3021,9 @@ void setup()
 
   pStaticColorCharacteristic = pService->createCharacteristic(
       STATIC_COLOR_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ_ENC |
+      NIMBLE_PROPERTY::READ |
+          NIMBLE_PROPERTY::READ_ENC |
+          NIMBLE_PROPERTY::WRITE |
           NIMBLE_PROPERTY::WRITE_ENC |
           NIMBLE_PROPERTY::WRITE_NR |
           NIMBLE_PROPERTY::NOTIFY);
@@ -3028,6 +3036,24 @@ void setup()
       20);
   staticColorDesc->setValue("Static Color");
   Serial.println("Static Color Characteristic created");
+
+  pStrobeSettingsCharacteristic = pService->createCharacteristic(
+      STROBE_SETTINGS_CHARACTERISTIC_UUID,
+      NIMBLE_PROPERTY::READ |
+          NIMBLE_PROPERTY::READ_ENC |
+          NIMBLE_PROPERTY::WRITE |
+          NIMBLE_PROPERTY::WRITE_ENC |
+          NIMBLE_PROPERTY::WRITE_NR |
+          NIMBLE_PROPERTY::NOTIFY);
+  pStrobeSettingsCharacteristic->setCallbacks(&strobeSettingsCallbacks);
+  const std::string initialStrobeSettings = buildStrobeSettingsPayload();
+  pStrobeSettingsCharacteristic->setValue(initialStrobeSettings);
+  NimBLEDescriptor *strobeSettingsDesc = pStrobeSettingsCharacteristic->createDescriptor(
+      "2901",
+      NIMBLE_PROPERTY::READ,
+      20);
+  strobeSettingsDesc->setValue("Strobe Settings");
+  Serial.println("Strobe Settings Characteristic created");
 
   // nimBLEService* pBaadService = pServer->createService("BAAD");
   pService->start();
@@ -3556,9 +3582,10 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     renderFullscreenSpiralWhite,   // VIEW_FULLSCREEN_SPIRAL_WHITE
     renderScrollingTextView,       // VIEW_SCROLLING_TEXT
     renderDinoGameView,            // VIEW_DINO_GAME
+    strobeEffect,                  // VIEW_STROBE_EFFECT
     renderPixelDustView,           // VIEW_PIXEL_DUST
     staticColor,                   // VIEW_STATIC_COLOR
-    patternRainbowGradient         // VIEW_RAINBOW_GRADIENT
+    patternRainbowGradient,        // VIEW_RAINBOW_GRADIENT
 };
 
 static_assert(sizeof(VIEW_RENDERERS) / sizeof(ViewRenderFunc) == TOTAL_VIEWS, "View renderer table mismatch");

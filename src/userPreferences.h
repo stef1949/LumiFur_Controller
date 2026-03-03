@@ -137,6 +137,26 @@ inline uint16_t getScrollSpeed()
   return getPrefs().getUShort("scrollSpeed", 4);
 }
 
+inline void saveStrobeColorPreference(const String &text)
+{
+  getPrefs().putString("strobeColor", text);
+}
+
+inline String getStrobeColorPreference()
+{
+  return getPrefs().getString("strobeColor", "FFFFFF");
+}
+
+inline void saveStrobeSpeedPreference(uint16_t speedMs)
+{
+  getPrefs().putUShort("strobeSpeed", speedMs);
+}
+
+inline uint16_t getStrobeSpeedPreference()
+{
+  return getPrefs().getUShort("strobeSpeed", 120);
+}
+
 inline void saveSelectedColor(const String &text)
 {
   getPrefs().putString("selectedColor", text);

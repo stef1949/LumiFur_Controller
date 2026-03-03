@@ -52,6 +52,7 @@ enum View
   VIEW_FULLSCREEN_SPIRAL_WHITE,
   VIEW_SCROLLING_TEXT,
   VIEW_DINO_GAME,
+  VIEW_STROBE_EFFECT,
   VIEW_PIXEL_DUST,
   VIEW_STATIC_COLOR,
   VIEW_RAINBOW_GRADIENT,
@@ -655,8 +656,6 @@ void updateAdaptiveBrightness()
   }
   else
   {
-    // Change is below threshold: keep the previously applied brightness (no-op)
-    // No action needed; brightness remains unchanged.
     // lastBrightness remains unchanged because we didn't apply a new value
 #if DEBUG_BRIGHTNESS
     Serial.printf(">>>> ADAPT: BRIGHTNESS KEPT AT %d <<<<\n", lastBrightness);

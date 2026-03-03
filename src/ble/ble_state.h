@@ -39,6 +39,7 @@ extern NimBLECharacteristic *pBrightnessCharacteristic;
 extern NimBLECharacteristic *pLuxCharacteristic;
 extern NimBLECharacteristic *pScrollTextCharacteristic;
 extern NimBLECharacteristic *pStaticColorCharacteristic;
+extern NimBLECharacteristic *pStrobeSettingsCharacteristic;
 extern NimBLECharacteristic *pOtaCharacteristic;
 extern NimBLECharacteristic *pInfoCharacteristic;
 

@@ -1,4 +1,4 @@
-#include "dino_game.h"
+#include "dinoGame.h"
 
 #include <Arduino.h>
 #include <Fonts/TomThumb.h>
