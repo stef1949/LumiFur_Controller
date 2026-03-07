@@ -24,6 +24,7 @@ NimBLECharacteristic *pBrightnessCharacteristic = nullptr;
 NimBLECharacteristic *pLuxCharacteristic = nullptr;
 NimBLECharacteristic *pScrollTextCharacteristic = nullptr;
 NimBLECharacteristic *pStaticColorCharacteristic = nullptr;
+NimBLECharacteristic *pStrobeSettingsCharacteristic = nullptr;
 NimBLECharacteristic *pOtaCharacteristic = nullptr;
 NimBLECharacteristic *pInfoCharacteristic = nullptr;
 

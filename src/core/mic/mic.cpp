@@ -303,10 +303,10 @@ void micInit()
       nullptr,
       1,
       &s_micTaskHandle,
-#if defined(CONFIG_ARDUINO_RUNNING_CORE)
-      CONFIG_ARDUINO_RUNNING_CORE
-#else
+#if portNUM_PROCESSORS > 1
       1
+#else
+      0
 #endif
   );
 

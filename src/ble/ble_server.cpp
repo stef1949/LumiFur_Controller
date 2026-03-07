@@ -33,7 +33,7 @@ void ServerCallbacks::onPairingRequest(NimBLEServer *pServer, NimBLEConnInfo &co
 void ServerCallbacks::onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason)
 {
     deviceConnected = false;
-    setPairingState(false, false, 0, false);
+    setPairingState(false, false, 0, true);
     const bool resetPending = isPairingResetPending();
     if (resetPending && pServer->getConnectedCount() == 0)
     {
@@ -62,7 +62,8 @@ uint32_t ServerCallbacks::onPassKeyDisplay()
      * This should return a random 6 digit number for security
      *  or make your own static passkey as done here.
      */
-    const uint32_t passkey = esp_random() % 1000000;
+    const PairingSnapshot snapshot = getPairingSnapshot();
+    const uint32_t passkey = snapshot.passkeyValid ? snapshot.passkey : (esp_random() % 1000000);
     setPairingState(true, true, passkey, true);
 #if DEBUG_BLE
     Serial.printf("Server Passkey Display: %06" PRIu32 "\n", passkey);
@@ -87,9 +88,9 @@ void ServerCallbacks::onAuthenticationComplete(NimBLEConnInfo &connInfo)
         Serial.printf("Encryption not established for: %s\n", connInfo.getAddress().toString().c_str());
         // Instead of disconnecting, you might choose to leave the connection or handle it gracefully.
         // For production use you can decide to force disconnect once you’re sure your client supports pairing.
-        setPairingState(false, false, 0, false);
+        setPairingState(false, false, 0, true);
         return;
     }
-    setPairingState(false, false, 0, false);
+    setPairingState(false, false, 0, true);
     Serial.printf("Secured connection to: %s\n", connInfo.getAddress().toString().c_str());
 }

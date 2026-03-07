@@ -30,6 +30,24 @@ FluidEffect::~FluidEffect() {
     // Nothing specific to clean up with this simple struct array
 }
 
+void FluidEffect::resetParticle(int index) {
+    if (index < 0 || index >= num_active_particles) return;
+
+    const int panel_width = (pane_width >= 2) ? (pane_width / 2) : pane_width;
+    const bool use_right_panel = (panel_width > 0) && (index >= (num_active_particles / 2));
+    particles[index].panel_index = use_right_panel ? 1 : 0;
+
+    const int x_min = use_right_panel ? panel_width : 0;
+    const int x_max = use_right_panel ? (pane_width - 1) : ((panel_width > 0) ? (panel_width - 1) : (pane_width - 1));
+    const int y_min = pane_height / 4;
+    const int y_max = (pane_height / 2 > y_min) ? (pane_height / 2) : (y_min + 1);
+
+    particles[index].x = random(x_min, x_max + 1);
+    particles[index].y = random(y_min, y_max);
+    particles[index].xv = ((float)random(-50, 51) / 100.0f) * 0.5f;
+    particles[index].yv = ((float)random(-50, 51) / 100.0f) * 0.5f;
+}
+
 // Called when the effect starts
 void FluidEffect::begin() {
     if (!dma_display) return;
@@ -48,24 +66,14 @@ void FluidEffect::begin() {
 }
 
 void FluidEffect::initializeParticles() {
-    num_active_particles = MAX_PARTICLES_FLUID; // Use all particles
+    num_active_particles = DEFAULT_ACTIVE_PARTICLES_FLUID;
+    if (num_active_particles > MAX_PARTICLES_FLUID) {
+        num_active_particles = MAX_PARTICLES_FLUID;
+    }
     if (!dma_display) return; // Should not happen if setup correctly
 
-    const int panel_width = (pane_width >= 2) ? (pane_width / 2) : pane_width;
-
     for (int i = 0; i < num_active_particles; ++i) {
-        const bool use_right_panel = (panel_width > 0) && (i >= (num_active_particles / 2));
-        particles[i].panel_index = use_right_panel ? 1 : 0;
-        const int x_min = use_right_panel ? panel_width : 0;
-        const int x_max = use_right_panel ? (pane_width - 1) : (panel_width - 1);
-
-        // Initial position: a block of particles in the upper middle part of the screen.
-        particles[i].x = random(x_min, x_max + 1);
-        particles[i].y = random(pane_height / 4, pane_height / 2);
-
-        // Initial velocity: small random velocities.
-        particles[i].xv = ((float)random(-50, 51) / 100.0f) * 0.5f; // Random between -0.25 and +0.25
-        particles[i].yv = ((float)random(-50, 51) / 100.0f) * 0.5f; // Random between -0.25 and +0.25
+        resetParticle(i);
     }
 }
 
@@ -201,9 +209,22 @@ void FluidEffect::applyParticleInteractions() {
 
 void FluidEffect::updateParticlePositions() {
     for (int i = 0; i < num_active_particles; ++i) {
+        if (!isfinite(particles[i].x) || !isfinite(particles[i].y) ||
+            !isfinite(particles[i].xv) || !isfinite(particles[i].yv)) {
+            resetParticle(i);
+            continue;
+        }
+
         // Apply drag to damp velocity over time.
         particles[i].xv *= PARTICLE_DRAG;
         particles[i].yv *= PARTICLE_DRAG;
+
+        const float speed_sq = particles[i].xv * particles[i].xv + particles[i].yv * particles[i].yv;
+        if (speed_sq > MAX_PARTICLE_SPEED_SQ) {
+            const float scale = sqrtf(MAX_PARTICLE_SPEED_SQ / speed_sq);
+            particles[i].xv *= scale;
+            particles[i].yv *= scale;
+        }
 
         // Update positions (Euler integration).
         particles[i].x += particles[i].xv * DT_FLUID;
@@ -249,6 +270,7 @@ void FluidEffect::drawParticles() {
     if (!dma_display) return;
 
     const int panel_width = (pane_width >= 2) ? (pane_width / 2) : pane_width;
+    const uint16_t fast_particle_color = dma_display->color565(255, 255, 255);
 
     // dma_display->clearScreen(); // This is typically handled by the main display loop before calling updateAndDraw()
 
@@ -260,11 +282,13 @@ void FluidEffect::drawParticles() {
         float t = speed_sq / MAX_SPEED_SQ;
         if (t < 0.0f) t = 0.0f;
         if (t > 1.0f) t = 1.0f;
-        const int red_intensity = static_cast<int>(20.0f + t * (255.0f - 20.0f));
-        const int green_intensity = static_cast<int>(60.0f + (1.0f - t) * (120.0f - 60.0f));
-        const int blue_intensity = static_cast<int>(180.0f + (1.0f - t) * (220.0f - 180.0f));
-
-        uint16_t particle_color = dma_display->color565(red_intensity, green_intensity, blue_intensity);
+        uint16_t particle_color = fast_particle_color;
+        if (t < FAST_PARTICLE_WHITE_T) {
+            const int red_intensity = static_cast<int>(20.0f + t * (255.0f - 20.0f));
+            const int green_intensity = static_cast<int>(60.0f + (1.0f - t) * (120.0f - 60.0f));
+            const int blue_intensity = static_cast<int>(180.0f + (1.0f - t) * (220.0f - 180.0f));
+            particle_color = dma_display->color565(red_intensity, green_intensity, blue_intensity);
+        }
 
         // Draw the particle. Ensure coordinates are integers and within bounds before drawing.
         int px = static_cast<int>(particles[i].x);
@@ -273,7 +297,7 @@ void FluidEffect::drawParticles() {
         if (particles[i].panel_index == 1 && panel_width > 0) {
             const int x_min = panel_width;
             const int x_max = pane_width - 1;
-            px = x_min + (x_max - (px - x_min)); // Mirror X within the right panel.
+            px = x_min + (x_max - px); // Mirror X within the right panel.
         }
 
         if (px >= 0 && px < pane_width && py >= 0 && py < pane_height) {

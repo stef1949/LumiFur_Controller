@@ -35,7 +35,8 @@ class Adafruit_LIS3DH;
 #endif
 
 
-#define MAX_PARTICLES_FLUID 1000 // Number of particles. Adjust for performance/look. (Was 80)
+#define MAX_PARTICLES_FLUID 4000 // Number of particles. Adjust for performance/look. (Was 80)
+#define DEFAULT_ACTIVE_PARTICLES_FLUID 480 // Stable default active count; storage remains larger for tuning.
 
 // Simple particle used by FluidEffect. Units are in screen pixels.
 struct FluidParticle {
@@ -80,10 +81,12 @@ private:
     static constexpr float PARTICLE_REPEL_FACTOR = 0.07f; // (was 0.08)
     static constexpr float PARTICLE_DRAG = 0.99f;         // (was 0.985)
     static constexpr float WALL_DAMPING = -0.35f;         // (was -0.4)
-    static constexpr float ACCEL_SENSITIVITY_MULTIPLIER = 0.018f; // (was 0.015)
+    static constexpr float ACCEL_SENSITIVITY_MULTIPLIER = 0.072f; // (was 0.015)
     static constexpr float DT_FLUID = 1.0f;              
-    static constexpr float MAX_SPEED_SQ = 0.4f;          // Color mapping upper bound for speed^2
-    static constexpr int GRID_CELL_SIZE = 2;             // Spatial bin size in pixels
+    static constexpr float MAX_SPEED_SQ = 3.2f;          // Color mapping upper bound for speed^2
+    static constexpr float FAST_PARTICLE_WHITE_T = 0.36f; // Fast particles switch to white in the top end of the speed ramp.
+    static constexpr float MAX_PARTICLE_SPEED_SQ = 9.0f; // Clamp runaway velocities before they destabilize the sim.
+    static constexpr int GRID_CELL_SIZE = 3;             // Spatial bin size in pixels
     static constexpr int GRID_COLS_MAX = (PANE_WIDTH_DEFAULT_FLUID + GRID_CELL_SIZE - 1) / GRID_CELL_SIZE;
     static constexpr int GRID_ROWS_MAX = (PANE_HEIGHT_DEFAULT_FLUID + GRID_CELL_SIZE - 1) / GRID_CELL_SIZE;
     static constexpr int GRID_MAX_CELLS = GRID_COLS_MAX * GRID_ROWS_MAX;
@@ -94,6 +97,7 @@ private:
     int16_t grid_head[GRID_MAX_CELLS];
     int16_t grid_next[MAX_PARTICLES_FLUID];
 
+    void resetParticle(int index);
     // Reset particle positions and velocities to a starting cluster.
     void initializeParticles();
     // Apply base gravity plus accelerometer-based tilt (if enabled).

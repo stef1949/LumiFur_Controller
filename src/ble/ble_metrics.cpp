@@ -9,7 +9,6 @@
 #include <cstring>
 #include <cstdio>
 #include <string>
-#include <vector>
 
 extern uint8_t userBrightness;
 extern bool brightnessChanged;
@@ -46,6 +45,8 @@ static const uint8_t HIST_VERSION   = 0x01;
 // Keep modest; BLE notify payload depends on MTU.
 // Header is 4 bytes; 16 samples = 32 bytes payload; total 36 bytes.
 static const uint8_t HIST_SAMPLES_PER_CHUNK = 16;
+static constexpr size_t HIST_DATA_PACKET_MAX_LEN = 4u + (static_cast<size_t>(HIST_SAMPLES_PER_CHUNK) * sizeof(int16_t));
+static_assert(HIST_DATA_PACKET_MAX_LEN <= 255u, "History packet must remain within a single BLE notification payload");
 
 static inline void write_u16_le(uint8_t* out, uint16_t v) {
     out[0] = (uint8_t)(v & 0xFF);
@@ -163,9 +164,8 @@ void triggerHistoryTransfer()
     int readIndex = bufferFull ? historyWriteIndex : 0;
     int pointsSent = 0;
 
-    // Each DATA packet max size: 4-byte header + (HIST_SAMPLES_PER_CHUNK * 2)
-    const size_t maxDataLen = 4 + (size_t)HIST_SAMPLES_PER_CHUNK * sizeof(int16_t);
-    std::vector<uint8_t> pkt(maxDataLen);
+    // Fixed-size stack buffer avoids heap churn during repeated history transfers.
+    uint8_t pkt[HIST_DATA_PACKET_MAX_LEN];
 
     for (uint8_t chunkIndex = 0; chunkIndex < totalChunks; ++chunkIndex)
     {
@@ -193,7 +193,7 @@ void triggerHistoryTransfer()
         }
 
         const size_t pktLen = 4 + (size_t)pointsInChunk * 2;
-        pTemperatureLogsCharacteristic->setValue(pkt.data(), pktLen);
+        pTemperatureLogsCharacteristic->setValue(pkt, pktLen);
         pTemperatureLogsCharacteristic->notify();
 
         pointsSent += pointsInChunk;
@@ -304,7 +304,9 @@ void checkBrightness()
             uint8_t v = userBrightness;
             pBrightnessCharacteristic->setValue(&v, 1);
             pBrightnessCharacteristic->notify();
+            #if DEBUG_BRIGHTNESS
             Serial.printf("Manual brightness change (from ESP32) notified to app: %u\n", v);
+            #endif
         }
     }
 }
