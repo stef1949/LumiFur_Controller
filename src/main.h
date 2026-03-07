@@ -56,6 +56,7 @@ enum View
   VIEW_PIXEL_DUST,
   VIEW_STATIC_COLOR,
   VIEW_RAINBOW_GRADIENT,
+  VIEW_RAINBOW_LINEAR_BAND,
   //VIEW_LGBT_FLAG
 
   TOTAL_VIEWS // Special entry will automatically hold the total number of views.
@@ -99,6 +100,18 @@ bool downloadFlag = false;
 #define DEBUG_PROXIMITY 0     // Set to 1 to enable proximity sensor debug logs
 #define TEXT_DEBUG 1          // Set to 1 to enable text debug outputs
 #define DEBUG_FLUID_EFFECT 0  // Set to 1 to enable fluid effect debug outputs
+#ifndef PERF_MONITORING
+#define PERF_MONITORING 1     // Set to 1 to collect runtime timing/heap metrics
+#endif
+#ifndef PERF_LOGGING
+#define PERF_LOGGING PERF_MONITORING // Set to 0 to collect counters without serial output
+#endif
+#ifndef PERF_REPORT_INTERVAL_MS
+#define PERF_REPORT_INTERVAL_MS 1000UL
+#endif
+#ifndef PERF_SELF_TEST
+#define PERF_SELF_TEST 0
+#endif
 #if DEBUG_MODE
 #define DEBUG_BLE
 // #define DEBUG_VIEWS
@@ -206,13 +219,17 @@ void drawText(int colorWheelOffset);
 void reduceCPUSpeed()
 {
   setCpuFrequencyMhz(80); // Set CPU frequency to lowest setting (80MHz vs 240MHz default)
+  #if DEBUG_MODE
   Serial.println("CPU frequency reduced to 80MHz for power saving");
+  #endif
 }
 
 void restoreNormalCPUSpeed()
 {
   setCpuFrequencyMhz(240); // Set CPU frequency back to default (240MHz)
+  #if DEBUG_MODE
   Serial.println("CPU frequency restored to 240MHz");
+  #endif
 }
 
 #include "driver/temp_sensor.h"
@@ -320,7 +337,9 @@ void setupAdaptiveBrightness()
 
   if (!apds.begin())
   {
+    #if DEBUG_MODE
     Serial.println("failed to initialize proximity sensor! Please check your wiring.");
+    #endif
     LOG_PROX_LN("APDS init: begin() failed");
     apdsFaulted = true;
     apdsInitialized = false;
@@ -329,7 +348,9 @@ void setupAdaptiveBrightness()
 
   apdsInitialized = true;
   apdsFaulted = false;
+  #if DEBUG_MODE
   Serial.println("Proximity sensor initialized!");
+  #endif
   LOG_PROX_LN("APDS init: begin() succeeded");
   // Boost sensitivity for proximity and color for auto-brightness
   apds.setProxGain(APDS9960_PGAIN_8X);
@@ -745,53 +766,70 @@ Square Squares[numSquares];
 // Add the new helper function after the ConfigCallbacks class definition:
 void applyConfigOptions()
 {
+  #if DEBUG_MODE
   Serial.println("Applying configuration options...");
-
+#endif
   if (autoBrightnessEnabled)
   {
+    #if DEBUG_MODE
     Serial.println("Auto Brightness enabled: adjusting brightness automatically.");
+    #endif
     // Example: call a function to update auto brightness (if implemented)
     // updateAutoBrightness();
     configApplyAutoBrightness = true;
   }
   else
   {
+    #if DEBUG_MODE
     Serial.println("Auto brightness disabled. Applying user-set brightness.");
+    #endif
     dma_display->setBrightness8(userBrightness);
     updateGlobalBrightnessScale(userBrightness);
     lastBrightness = userBrightness;
     currentBrightness = static_cast<float>(userBrightness);
+    #if DEBUG_MODE
     Serial.printf("Applied manual brightness: %u\n", userBrightness);
+    #endif
   }
 
   if (accelerometerEnabled)
   {
+    #if DEBUG_MODE
     Serial.println("Accelerometer enabled.");
+    #endif
     // Insert code to enable accelerometer-driven actions here.
     configApplyAccelerometer = true;
   }
   else
   {
+    #if DEBUG_MODE
     Serial.println("Accelerometer disabled.");
+    #endif
     // Optionally disable or ignore accelerometer actions.
     configApplyAccelerometer = false;
   }
 
   if (sleepModeEnabled)
   {
+    #if DEBUG_MODE
     Serial.println("Sleep mode enabled: device can enter sleep mode.");
+    #endif
     // Update sleep-related thresholds or enable sleep mode triggers.
     configApplySleepMode = true;
   }
   else
   {
+    #if DEBUG_MODE
     Serial.println("Sleep mode disabled: forcing device to remain awake.");
+    #endif
     configApplySleepMode = false; // Ensure the device remains awake when sleep mode is disabled.
   }
 
   if (staticColorModeEnabled)
   {
+    #if DEBUG_MODE
     Serial.println("Static color mode enabled: using user-selected color.");
+    #endif
     constantColor = getStaticColorCached();
     constantColorConfig = true;
     configApplyConstantColor = true;
@@ -803,14 +841,18 @@ void applyConfigOptions()
     configApplyConstantColor = false;
     if (auroraModeEnabled)
     {
+      #if DEBUG_MODE
       Serial.println("Aurora mode enabled: switching to aurora palette.");
+      #endif
       // Assume auroraPalette and defaultPalette are defined globally.
       // currentPalette = auroraPalette;
       configApplyAuroraMode = true;
     }
     else
     {
+      #if DEBUG_MODE
       Serial.println("Aurora mode disabled: using default palette.");
+      #endif
       // currentPalette = defaultPalette;
       configApplyAuroraMode = false;
     }
@@ -850,7 +892,7 @@ const int dvdWidth = 23; // Width of the DVD logo
 const int dvdHeight = 10;
 
 unsigned long lastDvdUpdate = 0;
-const unsigned long dvdUpdateInterval = 20;
+const unsigned long dvdUpdateInterval = 40;
 
 // First logo (left panel)
 int dvdX1 = 0, dvdY1 = 0;
