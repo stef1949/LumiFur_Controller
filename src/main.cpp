@@ -3505,7 +3505,7 @@ void setup()
   mxconfig.driver = HUB75_I2S_CFG::FM6126A; // for panels using FM6126A chips
   mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_16M; // 20 MHz proved unstable on this panel; keep the highest stable clock.
   mxconfig.min_refresh_rate = 120;           // Ask the DMA driver to favor a faster panel refresh over color depth.
-  mxconfig.clkphase = true;                  // Match the library's positive-edge default for better HUB75 timing margin.
+  mxconfig.clkphase = false;                  // Match the library's positive-edge default for better HUB75 timing margin.
   mxconfig.double_buff = true; // <------------- Turn on double buffer
 
 #ifndef VIRTUAL_PANE

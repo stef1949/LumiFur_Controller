@@ -303,6 +303,8 @@ void renderDinoGameView()
   const int scoreY = static_cast<int>(h) + 1;
   dma_display->setCursor(scoreX, scoreY);
   dma_display->print(scoreText);
+  dma_display->setCursor(0, scoreY);
+  dma_display->print(scoreText);
 
   if (gDinoGame.gameOver)
   {
@@ -321,9 +323,9 @@ void renderDinoGameView()
     {
       textY = static_cast<int>(msgH);
     }
-    dma_display->setCursor(textX - msgX1, textY);
+    dma_display->setCursor(textX - msgX1 - 22, textY);
     dma_display->print(message);
-    dma_display->setCursor(textX + msgX1, textY);
+    dma_display->setCursor(textX + msgX1 + 22, textY);
     dma_display->print(message);
   }
 }
