@@ -1,10 +1,72 @@
 #include "ble/ble_server.h"
 #include "ble/ble_state.h"
 
+#include <algorithm>
+#include <vector>
+
 #include "esp_system.h"
+
+namespace
+{
+bool isBondedPeer(const NimBLEConnInfo &connInfo)
+{
+    if (connInfo.isBonded())
+    {
+        return true;
+    }
+
+    const NimBLEAddress peerId = connInfo.getIdAddress();
+    if (!peerId.isNull() && NimBLEDevice::isBonded(peerId))
+    {
+        return true;
+    }
+
+    const NimBLEAddress peerAddr = connInfo.getAddress();
+    return !peerAddr.isNull() && NimBLEDevice::isBonded(peerAddr);
+}
+
+std::vector<uint16_t> pairingCandidateHandles;
+
+void addPairingCandidate(uint16_t connHandle)
+{
+    if (std::find(pairingCandidateHandles.begin(), pairingCandidateHandles.end(), connHandle) != pairingCandidateHandles.end())
+    {
+        return;
+    }
+
+    pairingCandidateHandles.push_back(connHandle);
+}
+
+bool removePairingCandidate(uint16_t connHandle)
+{
+    const auto it = std::find(pairingCandidateHandles.begin(), pairingCandidateHandles.end(), connHandle);
+    if (it == pairingCandidateHandles.end())
+    {
+        return false;
+    }
+
+    pairingCandidateHandles.erase(it);
+    return true;
+}
+} // namespace
 
 void ServerCallbacks::onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo)
 {
+    const bool bondedPeer = isBondedPeer(connInfo);
+    if (!bondedPeer && !isPairingModeActive())
+    {
+#if DEBUG_BLE
+        Serial.printf("Rejecting BLE connection from unpaired device: %s\n", connInfo.getAddress().toString().c_str());
+#endif
+        pServer->disconnect(connInfo.getConnHandle());
+        return;
+    }
+
+    if (!bondedPeer)
+    {
+        addPairingCandidate(connInfo.getConnHandle());
+    }
+
     deviceConnected = true;
 
     /**
@@ -22,17 +84,10 @@ void ServerCallbacks::onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo)
 #endif
 }
 
-void ServerCallbacks::onPairingRequest(NimBLEServer *pServer, NimBLEConnInfo &connInfo)
-{
-    setPairingState(true, false, 0, false);
-#if DEBUG_BLE
-    Serial.printf("Pairing request from: %s\n", connInfo.getAddress().toString().c_str());
-#endif
-}
-
 void ServerCallbacks::onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason)
 {
-    deviceConnected = false;
+    removePairingCandidate(connInfo.getConnHandle());
+    deviceConnected = pServer->getConnectedCount() > 0;
     setPairingState(false, false, 0, true);
     const bool resetPending = isPairingResetPending();
     if (resetPending && pServer->getConnectedCount() == 0)
@@ -43,7 +98,7 @@ void ServerCallbacks::onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connIn
         Serial.printf("BLE pairing reset: bonds cleared=%s\n", cleared ? "true" : "false");
 #endif
     }
-    NimBLEDevice::startAdvertising();
+    refreshBleAdvertising();
 #if DEBUG_BLE
     Serial.println("Client disconnected - advertising");
 #endif
@@ -83,14 +138,24 @@ void ServerCallbacks::onConfirmPassKey(NimBLEConnInfo &connInfo, uint32_t pass_k
 
 void ServerCallbacks::onAuthenticationComplete(NimBLEConnInfo &connInfo)
 {
+    const bool pairedDuringThisSession = removePairingCandidate(connInfo.getConnHandle());
+
     if (!connInfo.isEncrypted())
     {
         Serial.printf("Encryption not established for: %s\n", connInfo.getAddress().toString().c_str());
-        // Instead of disconnecting, you might choose to leave the connection or handle it gracefully.
-        // For production use you can decide to force disconnect once you’re sure your client supports pairing.
         setPairingState(false, false, 0, true);
+        if (pServer != nullptr)
+        {
+            pServer->disconnect(connInfo.getConnHandle());
+        }
         return;
     }
+
+    if (pairedDuringThisSession)
+    {
+        stopPairingMode(true);
+    }
+
     setPairingState(false, false, 0, true);
     Serial.printf("Secured connection to: %s\n", connInfo.getAddress().toString().c_str());
 }

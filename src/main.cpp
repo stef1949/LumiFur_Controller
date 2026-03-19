@@ -293,8 +293,10 @@ bool brightnessChanged = false;
 
 constexpr unsigned long LUX_UPDATE_INTERVAL_MS = 500;
 constexpr unsigned long SLEEP_CHECK_INTERVAL_MS = 60;
+constexpr unsigned long BUTTON_DEBOUNCE_MS = 50;
+constexpr unsigned long PAIRING_MODE_HOLD_MS = 3000;
+constexpr unsigned long PAIRING_MODE_WINDOW_MS = 60000;
 constexpr unsigned long PAIRING_RESET_HOLD_MS = 3000;
-constexpr unsigned long PAIRING_RESET_DEBOUNCE_MS = 50;
 constexpr unsigned long BLE_STATUS_LED_INTERVAL_MS = 25;
 constexpr unsigned long PROX_LUX_READ_GUARD_MS = 20;
 constexpr unsigned long ANIMATION_UPDATE_INTERVAL_MS = 8;
@@ -307,6 +309,102 @@ static unsigned long lastBleStatusLedUpdateTime = 0;
 static unsigned long lastAnimationUpdateTime = 0;
 static unsigned long lastMotionCheckTime = 0;
 static unsigned long lastBrightnessUpdateTime = 0;
+
+namespace
+{
+struct ButtonState
+{
+  bool rawPressed = false;
+  bool stablePressed = false;
+  bool longPressHandled = false;
+  bool shortPressPending = false;
+  unsigned long lastChangeMs = 0;
+  unsigned long pressedAtMs = 0;
+};
+
+void updateButtonState(ButtonState &button, bool pressedSample, unsigned long nowMs, unsigned long debounceMs)
+{
+  if (pressedSample != button.rawPressed)
+  {
+    button.rawPressed = pressedSample;
+    button.lastChangeMs = nowMs;
+  }
+
+  if ((nowMs - button.lastChangeMs) < debounceMs || button.stablePressed == button.rawPressed)
+  {
+    return;
+  }
+
+  button.stablePressed = button.rawPressed;
+  if (button.stablePressed)
+  {
+    button.pressedAtMs = nowMs;
+    button.longPressHandled = false;
+    button.shortPressPending = false;
+    return;
+  }
+
+  if (!button.longPressHandled)
+  {
+    button.shortPressPending = true;
+  }
+}
+
+void suppressButtonPress(ButtonState &button)
+{
+  button.shortPressPending = false;
+  if (button.stablePressed)
+  {
+    button.longPressHandled = true;
+  }
+}
+
+bool consumeButtonShortPress(ButtonState &button)
+{
+  const bool pending = button.shortPressPending;
+  button.shortPressPending = false;
+  return pending;
+}
+
+bool consumeButtonLongPress(ButtonState &button, unsigned long nowMs, unsigned long holdMs)
+{
+  if (!button.stablePressed || button.longPressHandled)
+  {
+    return false;
+  }
+
+  if ((nowMs - button.pressedAtMs) < holdMs)
+  {
+    return false;
+  }
+
+  button.longPressHandled = true;
+  button.shortPressPending = false;
+  return true;
+}
+
+// Derived from the Alt_ bitmap exports with the source XBM bit order/background normalized.
+static const uint8_t AltFaceNose[] PROGMEM = {
+    0xb0, 0xf8, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
+static const uint8_t AltFaceBlushL[] PROGMEM = {
+    0x80, 0x8c, 0x00, 0x9a, 0xc0, 0xb6, 0x80, 0xec, 0x00, 0x80};
+static const uint8_t AltFaceBrowL[] PROGMEM = {
+    0xc0, 0x80, 0xc0, 0x86, 0x80, 0x8e, 0x00, 0x9e, 0x00, 0xbe, 0x00, 0xfc, 0x00, 0xf0};
+static const uint8_t AltFaceScleraL[] PROGMEM = {
+    0x7f, 0x00, 0x80, 0xff, 0x01, 0x80, 0xff, 0x0f, 0x80, 0xff, 0x3f, 0x80, 0xff, 0xff, 0x80, 0xfe,
+    0xff, 0x82, 0xfc, 0xff, 0x86, 0xfc, 0xff, 0x8e, 0xf8, 0xff, 0x9e, 0xf0, 0xff, 0xfe, 0xe0, 0xff,
+    0xbe, 0xc0, 0xff, 0x86, 0x80, 0x3f, 0x80};
+static const uint8_t AltFaceBlushR[] PROGMEM = {
+    0xd8, 0x80, 0x6c, 0x80, 0xb6, 0x80, 0xdb, 0x80, 0x40, 0x80};
+static const uint8_t AltFaceBrowR[] PROGMEM = {
+    0xc0, 0x80, 0xf0, 0x80, 0xf8, 0x80, 0x7c, 0x80, 0x3e, 0x80, 0x1f, 0x80, 0x07, 0x80};
+static const uint8_t AltFaceScleraR[] PROGMEM = {
+    0x00, 0x00, 0xfe, 0x00, 0xc0, 0xfe, 0x00, 0xf8, 0xfe, 0x00, 0xfe, 0xfe, 0x80, 0xff, 0xfe, 0xe0,
+    0xff, 0xbe, 0xf0, 0xff, 0x9e, 0xf8, 0xff, 0x9e, 0xfc, 0xff, 0x8e, 0xff, 0xff, 0x86, 0xfe, 0xff,
+    0x82, 0xf0, 0xff, 0x80, 0x00, 0xfe, 0x80};
+static const uint8_t AltFacePupil[] PROGMEM = {
+    0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0};
+} // namespace
 
 // View switching
 volatile uint8_t currentView = VIEW_FLAME_EFFECT; // Current view (volatile so the display task sees updates)
@@ -561,8 +659,8 @@ constexpr unsigned long EYE_BOUNCE_DURATION = 400;
 constexpr int EYE_BOUNCE_AMPLITUDE = 5;
 constexpr int MAX_EYE_BOUNCES = 10;
 
-const int IDLE_HOVER_AMPLITUDE_Y = 1;
-const int IDLE_HOVER_AMPLITUDE_X = 1;
+const int IDLE_HOVER_AMPLITUDE_Y = 2.5;
+const int IDLE_HOVER_AMPLITUDE_X = 2.5;
 const unsigned long IDLE_HOVER_PERIOD_MS_Y = 3000;
 const unsigned long IDLE_HOVER_PERIOD_MS_X = 4200;
 
@@ -731,6 +829,7 @@ static bool viewUsesMic(int view)
   case VIEW_PLASMA_FACE:
   case VIEW_UWU_EYES:
   case VIEW_CIRCLE_EYES:
+  case VIEW_ALT_FACE:
     return true;
   default:
     return false;
@@ -793,7 +892,7 @@ void wakeFromSleepMode()
   {
     NimBLEDevice::getAdvertising()->setMinInterval(160); // 100 ms (default)
     NimBLEDevice::getAdvertising()->setMaxInterval(240); // 150 ms (default)
-    NimBLEDevice::startAdvertising();
+    refreshBleAdvertising();
   }
 }
 
@@ -1170,7 +1269,7 @@ void handleBLEStatusLED()
     else
     {
       statusPixel.setPixelColor(0, 0, 0, 0); // Off when disconnected
-      NimBLEDevice::startAdvertising();
+      refreshBleAdvertising();
     }
     // statusPixel.show();
     oldDeviceConnected = deviceConnected;
@@ -1189,7 +1288,7 @@ void handleBLEStatusLED()
     fadeInAndOutLED(128, 0, 128); // Purple fade when pairing
     pixelShown = true;
   }
-  else if (!deviceConnected)
+  else if (shouldBleAdvertise())
   {
     fadeInAndOutLED(0, 0, 100); // Blue fade when disconnected
     pixelShown = true;
@@ -1208,7 +1307,7 @@ static void resetBlePairing()
     return;
   }
 
-  setPairingState(false, false, 0, true);
+  startPairingMode(PAIRING_MODE_WINDOW_MS);
   const std::vector<uint16_t> peers = pServer->getPeerDevices();
   if (!peers.empty())
   {
@@ -1222,7 +1321,7 @@ static void resetBlePairing()
 
   const bool cleared = NimBLEDevice::deleteAllBonds();
   setPairingResetPending(false);
-  NimBLEDevice::startAdvertising();
+  refreshBleAdvertising();
 #if DEBUG_BLE
   Serial.printf("BLE pairing reset: bonds cleared=%s\n", cleared ? "true" : "false");
 #endif
@@ -1313,6 +1412,7 @@ static unsigned long viewFrameIntervalMillis(int view)
   case VIEW_PLASMA_FACE:
   case VIEW_UWU_EYES:
   case VIEW_CIRCLE_EYES:
+  case VIEW_ALT_FACE:
     return PATTERN_PLASMA_FRAME_INTERVAL_MS;
   case VIEW_DVD_LOGO:
     return dvdUpdateInterval;
@@ -2398,6 +2498,22 @@ void blinkingEyes()
     leftEyeX = 93;
     leftEyeY = 2;
     break;
+  case VIEW_ALT_FACE:
+  {
+    const uint16_t pupilColor = dma_display->color565(0, 0, 0);
+    constexpr uint8_t kAltEyeTimeOffsetRight = 80;
+    constexpr uint8_t kAltEyeTimeOffsetLeft = 208;
+
+    drawBitmapAdvanced(10 + final_x_offset, 4 + final_y_offset, 23, 13, Alt_scleraR,
+                       solidColor, blinkProgress, true, kAltEyeTimeOffsetRight);
+    drawBitmapAdvanced(95 + final_x_offset, 4 + final_y_offset, 23, 13, Alt_scleraL,
+                       solidColor, blinkProgress, true, kAltEyeTimeOffsetLeft);
+    drawBitmapWithBlink(19 + final_x_offset, 5 + final_y_offset, 3, 11, AltFacePupil,
+                        pupilColor, blinkProgress);
+    drawBitmapWithBlink(106 + final_x_offset, 5 + final_y_offset, 3, 11, AltFacePupil,
+                        pupilColor, blinkProgress);
+    return;
+  }
     // Default case uses the slanteyes defined before the switch
   }
 
@@ -2565,6 +2681,15 @@ void baseFace()
   int final_y_offset = currentEyeYOffset + idleEyeYOffset;
   int final_x_offset = idleEyeXOffset;
 
+  if (currentView == VIEW_ALT_FACE)
+  {
+    const uint16_t blushColor = dma_display->color565(255, 110, 150);
+    drawPlasmaXbm(22 + final_x_offset, 0 + final_y_offset, 9, 7, Alt_BrowR, 16, 2.0f);
+    drawPlasmaXbm(96 + final_x_offset, 0 + final_y_offset, 9, 7, Alt_BrowL, 144, 2.0f);
+    drawXbm565(8 + final_x_offset, 16 + final_y_offset, 9, 5, Alt_BlushR, blushColor);
+    drawXbm565(110 + final_x_offset, 16 + final_y_offset, 9, 5, Alt_BlushL, blushColor);
+  }
+
   blinkingEyes(); // This function now correctly uses the global offsets internally
 
   const uint8_t mouthBrightness = micGetMouthBrightness();
@@ -2579,8 +2704,16 @@ void baseFace()
     drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0f, 0.2f, mouthBrightness); // Left eye (phase offset)
   }
 
-  drawPlasmaXbm(56, 4 + final_y_offset, 8, 8, nose, 64, 2.0);
-  drawPlasmaXbm(64, 4 + final_y_offset, 8, 8, noseL, 64, 2.0);
+  if (currentView == VIEW_ALT_FACE)
+  {
+    drawPlasmaXbm(58 + final_x_offset, 7 + final_y_offset, 4, 2, Alt_Nose, 96, 2.0f);
+    drawPlasmaXbm(68 + final_x_offset, 7 + final_y_offset, 4, 2, Alt_Nose, 96, 2.0f);
+  }
+  else
+  {
+    drawPlasmaXbm(56, 4 + final_y_offset, 8, 8, nose, 64, 2.0);
+    drawPlasmaXbm(64, 4 + final_y_offset, 8, 8, noseL, 64, 2.0);
+  }
 
   facePlasmaDirty = false;
 }
@@ -3270,6 +3403,7 @@ void setup()
   NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY);
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(&serverCallbacks);
+  pServer->advertiseOnDisconnect(false);
 
   NimBLEService *pService = pServer->createService(SERVICE_UUID);
 
@@ -3511,9 +3645,10 @@ void setup()
   // pAdvertising->setAppearance(0);         // Appearance value (0 is generic)
   pAdvertising->enableScanResponse(true); // Enable scan response to include more data
   pAdvertising->addServiceUUID(pService->getUUID());
-  pAdvertising->start();
+  refreshBleAdvertising();
 
-  Serial.println("BLE setup complete - advertising started");
+  Serial.println(shouldBleAdvertise() ? "BLE setup complete - advertising started"
+                                      : "BLE setup complete - waiting for pairing mode");
 
   // Redefine pins if required
   // HUB75_I2S_CFG::i2s_pins _pins={R1, G1, BL1, R2, G2, BL2, CH_A, CH_B, CH_C, CH_D, CH_E, LAT, OE, CLK};
@@ -4190,6 +4325,7 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     staticColor,                   // VIEW_STATIC_COLOR
     patternRainbowGradient,        // VIEW_RAINBOW_GRADIENT
     patternRainbowLinearBand,      // VIEW_RAINBOW_LINEAR_BAND
+    renderFaceWithPlasma,          // VIEW_ALT_FACE
     renderVideoPlayerView,         // VIEW_VIDEO_PLAYER
 };
 
@@ -4429,7 +4565,7 @@ void enterSleepMode()
     vTaskDelay(pdMS_TO_TICKS(10));                        // Short delay
     NimBLEDevice::getAdvertising()->setMinInterval(2400); // 1500 ms
     NimBLEDevice::getAdvertising()->setMaxInterval(4800); // 3000 ms
-    NimBLEDevice::startAdvertising();
+    refreshBleAdvertising();
     #if DEBUG_MODE
     Serial.println("Reduced BLE Adv interval for sleep.");
     #endif
@@ -4511,6 +4647,12 @@ void loop()
   // unsigned long frameStartTimeMillis = millis(); // Timestamp at frame start
   const unsigned long loopNow = millis();
 
+  if (expirePairingModeIfNeeded())
+  {
+    refreshBleAdvertising();
+    requestDisplayRefresh();
+  }
+
   // --- Handle Inputs and State Updates ---
 
   // Check for motion and handle sleep/wake state
@@ -4563,30 +4705,23 @@ void loop()
 // --- Handle button inputs for view changes ---
 #if defined(BUTTON_UP) && defined(BUTTON_DOWN)
     PERF_SCOPE(PerfBucket::Io);
-    // Hold both buttons to clear BLE bonds and restart pairing.
+    static ButtonState upButtonState;
+    static ButtonState downButtonState;
     static bool pairingHoldActive = false;
     static bool pairingHoldTriggered = false;
     static unsigned long pairingHoldStartMs = 0;
-    static bool pairingHoldRaw = false;
-    static bool pairingHoldStable = false;
-    static unsigned long pairingHoldLastChangeMs = 0;
 
-    const bool pairingHoldSample = (digitalRead(BUTTON_UP) == LOW) && (digitalRead(BUTTON_DOWN) == LOW);
+    updateButtonState(upButtonState, digitalRead(BUTTON_UP) == LOW, loopNow, BUTTON_DEBOUNCE_MS);
+    updateButtonState(downButtonState, digitalRead(BUTTON_DOWN) == LOW, loopNow, BUTTON_DEBOUNCE_MS);
 
-    if (pairingHoldSample != pairingHoldRaw)
-    {
-      pairingHoldRaw = pairingHoldSample;
-      pairingHoldLastChangeMs = loopNow;
-    }
-    if ((loopNow - pairingHoldLastChangeMs) >= PAIRING_RESET_DEBOUNCE_MS)
-    {
-      pairingHoldStable = pairingHoldRaw;
-    }
-
-    const bool pairingHoldPressed = pairingHoldStable;
+    const bool upPressed = upButtonState.stablePressed;
+    const bool downPressed = downButtonState.stablePressed;
+    const bool pairingHoldPressed = upPressed && downPressed;
 
     if (pairingHoldPressed)
     {
+      suppressButtonPress(upButtonState);
+      suppressButtonPress(downButtonState);
       lastActivityTime = loopNow;
       if (!pairingHoldActive)
       {
@@ -4606,8 +4741,29 @@ void loop()
     }
 
     bool viewChangedByButton = false;
+    bool pairingModeTriggered = false;
 
-    if (!pairingHoldPressed && debounceButton(BUTTON_UP))
+    if (!pairingHoldPressed && upPressed && !downPressed &&
+        consumeButtonLongPress(upButtonState, loopNow, PAIRING_MODE_HOLD_MS))
+    {
+      startPairingMode(PAIRING_MODE_WINDOW_MS);
+      refreshBleAdvertising();
+      lastActivityTime = loopNow;
+      pairingModeTriggered = true;
+      requestDisplayRefresh();
+    }
+
+    if (!pairingHoldPressed && downPressed && !upPressed &&
+        consumeButtonLongPress(downButtonState, loopNow, PAIRING_MODE_HOLD_MS))
+    {
+      startPairingMode(PAIRING_MODE_WINDOW_MS);
+      refreshBleAdvertising();
+      lastActivityTime = loopNow;
+      pairingModeTriggered = true;
+      requestDisplayRefresh();
+    }
+
+    if (!pairingHoldPressed && consumeButtonShortPress(upButtonState))
     {
       currentView = (currentView + 1);
       if (currentView >= totalViews)
@@ -4618,7 +4774,7 @@ void loop()
       requestDisplayRefresh();
     }
 
-    if (!pairingHoldPressed && debounceButton(BUTTON_DOWN))
+    if (!pairingHoldPressed && consumeButtonShortPress(downButtonState))
     {
       PROFILE_SECTION("ButtonInputs");
       currentView = (currentView - 1);
@@ -4630,6 +4786,11 @@ void loop()
       saveLastView(currentView);
       lastActivityTime = loopNow;
       requestDisplayRefresh();
+    }
+
+    if (pairingModeTriggered)
+    {
+      LOG_DEBUG_LN("BLE pairing mode enabled by long button press.");
     }
 
     if (viewChangedByButton)

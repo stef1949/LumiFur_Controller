@@ -57,6 +57,7 @@ enum View
   VIEW_STATIC_COLOR,
   VIEW_RAINBOW_GRADIENT,
   VIEW_RAINBOW_LINEAR_BAND,
+  VIEW_ALT_FACE,
   VIEW_VIDEO_PLAYER,
   //VIEW_LGBT_FLAG
 
@@ -97,7 +98,7 @@ bool downloadFlag = false;
 #define DEBUG_BRIGHTNESS 0    // Set to 1 to enable brightness debug outputs
 #define DEBUG_VIEWS 0         // Set to 1 to enable views debug outputs
 #define DEBUG_VIEW_TIMING 0   // Set to 1 to enable views debug outputs
-#define DEBUG_FPS_COUNTER 1   // Set to 1 to enable FPS counter debug outputs
+#define DEBUG_FPS_COUNTER 0   // Set to 1 to enable FPS counter debug outputs
 #define DEBUG_PROXIMITY 0     // Set to 1 to enable proximity sensor debug logs
 #define TEXT_DEBUG 0          // Set to 1 to enable text debug outputs
 #define DEBUG_FLUID_EFFECT 0  // Set to 1 to enable fluid effect debug outputs
@@ -133,20 +134,6 @@ bool downloadFlag = false;
   {                      \
   } while (0)
 #endif
-
-// Button config --------------------------------------------------------------
-bool debounceButton(int pin)
-{
-  static uint32_t lastPressTime = 0;
-  uint32_t currentTime = millis();
-
-  if (digitalRead(pin) == LOW && (currentTime - lastPressTime) > 200)
-  {
-    lastPressTime = currentTime;
-    return true;
-  }
-  return false;
-}
 
 // Helper function for ease-in-out quadratic easing
 float easeInOutQuad(float t)
