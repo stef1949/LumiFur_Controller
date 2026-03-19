@@ -57,6 +57,7 @@ enum View
   VIEW_STATIC_COLOR,
   VIEW_RAINBOW_GRADIENT,
   VIEW_RAINBOW_LINEAR_BAND,
+  VIEW_VIDEO_PLAYER,
   //VIEW_LGBT_FLAG
 
   TOTAL_VIEWS // Special entry will automatically hold the total number of views.
@@ -93,18 +94,19 @@ bool downloadFlag = false;
 #define DEBUG_MODE 0          // Set to 1 to enable debug outputs
 #define DEBUG_MICROPHONE 0    // Set to 1 to enable microphone debug outputs
 #define DEBUG_ACCELEROMETER 0 // Set to 1 to enable accelerometer debug outputs
-#define DEBUG_BRIGHTNESS 1    // Set to 1 to enable brightness debug outputs
+#define DEBUG_BRIGHTNESS 0    // Set to 1 to enable brightness debug outputs
 #define DEBUG_VIEWS 0         // Set to 1 to enable views debug outputs
 #define DEBUG_VIEW_TIMING 0   // Set to 1 to enable views debug outputs
 #define DEBUG_FPS_COUNTER 1   // Set to 1 to enable FPS counter debug outputs
 #define DEBUG_PROXIMITY 0     // Set to 1 to enable proximity sensor debug logs
-#define TEXT_DEBUG 1          // Set to 1 to enable text debug outputs
+#define TEXT_DEBUG 0          // Set to 1 to enable text debug outputs
 #define DEBUG_FLUID_EFFECT 0  // Set to 1 to enable fluid effect debug outputs
+#define DEBUG_VIDEO_PLAYER 1  // Set to 1 to enable video player debug logs and overlay
 #ifndef PERF_MONITORING
-#define PERF_MONITORING 1     // Set to 1 to collect runtime timing/heap metrics
+#define PERF_MONITORING 0     // Set to 1 to collect runtime timing/heap metrics
 #endif
 #ifndef PERF_LOGGING
-#define PERF_LOGGING PERF_MONITORING // Set to 0 to collect counters without serial output
+#define PERF_LOGGING PERF_MONITORING 0 // Set to 0 to collect counters without serial output
 #endif
 #ifndef PERF_REPORT_INTERVAL_MS
 #define PERF_REPORT_INTERVAL_MS 1000UL

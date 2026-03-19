@@ -3,4 +3,8 @@
 .DS_Store
 compile_commands.json
 .vscode/settings.json
+__pycache__/
+data/videos/*.lfv
+video_sources/*
+!video_sources/README.md
 
