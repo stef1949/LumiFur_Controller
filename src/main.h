@@ -132,20 +132,6 @@ bool downloadFlag = false;
   } while (0)
 #endif
 
-// Button config --------------------------------------------------------------
-bool debounceButton(int pin)
-{
-  static uint32_t lastPressTime = 0;
-  uint32_t currentTime = millis();
-
-  if (digitalRead(pin) == LOW && (currentTime - lastPressTime) > 200)
-  {
-    lastPressTime = currentTime;
-    return true;
-  }
-  return false;
-}
-
 // Helper function for ease-in-out quadratic easing
 float easeInOutQuad(float t)
 {

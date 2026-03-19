@@ -27,6 +27,12 @@ PairingSnapshot getPairingSnapshot();
 void setPairingState(bool pairing, bool passkeyValid, uint32_t passkey, bool updatePasskey);
 void setPairingResetPending(bool pending);
 bool isPairingResetPending();
+void startPairingMode(unsigned long durationMs);
+void stopPairingMode(bool clearPasskey = true);
+bool isPairingModeActive();
+bool expirePairingModeIfNeeded();
+bool shouldBleAdvertise();
+void refreshBleAdvertising();
 
 extern NimBLEServer *pServer;
 extern NimBLECharacteristic *pCharacteristic;
