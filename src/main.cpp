@@ -4190,6 +4190,7 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     staticColor,                   // VIEW_STATIC_COLOR
     patternRainbowGradient,        // VIEW_RAINBOW_GRADIENT
     patternRainbowLinearBand,      // VIEW_RAINBOW_LINEAR_BAND
+    renderFaceWithPlasma,          // VIEW_ALT_FACE
     renderVideoPlayerView,         // VIEW_VIDEO_PLAYER
 };
 
