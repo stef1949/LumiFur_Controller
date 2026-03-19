@@ -32,6 +32,7 @@ A real-time firmware for animating a HUB75 LED matrix Protogen mask with sensor-
 - Wireless firmware delivery through a dedicated OTA characteristic plus runtime build metadata advertisement for companion apps.
 - Power-aware runtime with wake-on-motion, sleep dimming, ambient light scaling, and persistent user preferences stored in ESP32 NVS.
 - Optimized HUB75 pipeline using DMA double buffering, optional virtual panel simulation, and extensible C++ effect modules under `src/customEffects/`.
+- File-backed monochrome video playback from onboard FATFS storage, including GIF/video conversion into a compact `LFV1` format for the new `VIEW_VIDEO_PLAYER`.
 
 ## Hardware
 - **Controller:** Adafruit MatrixPortal ESP32-S3 (default target) with built-in APDS9960, LIS3DH, status NeoPixel, and onboard microphone used by the firmware.
@@ -54,6 +55,10 @@ pio run -e adafruit_matrixportal_esp32s3 --target upload
 
 # Optional: open the serial monitor at 115200 baud
 pio device monitor -b 115200
+
+# Optional: build and upload the FATFS image used for video assets
+pio run -e adafruit_matrixportal_esp32s3 -t buildfs
+pio run -e adafruit_matrixportal_esp32s3 -t uploadfs
 ```
 
 Additional PlatformIO environments are defined in `platformio.ini`, including a `dev` flavor with extra instrumentation and native test environments (`codeql`, `native`, `native2`).
@@ -62,6 +67,7 @@ Additional PlatformIO environments are defined in `platformio.ini`, including a 
 - **Persistent preferences:** `src/userPreferences.h` manages stored defaults for brightness, auto-blink, accelerometer usage, sleep mode, and other controller behaviors.
 - **Hardware mapping:** Modify `src/deviceConfig.h` to adjust HUB75 pinouts, panel chains, button inputs, or to enable the virtual panel simulator (`VIRTUAL_PANE`).
 - **Effects & assets:** Custom scenes live in `src/customEffects/` and bitmap assets in `src/bitmaps.h`; add new animations or alter existing ones there.
+- **Video assets:** Put `bad_apple.gif` or another supported source file in `video_sources/` or `data/videos/` for automatic conversion during `buildfs`/`uploadfs`; generated assets are written as lowercase `.lfv` files such as `data/videos/bad_apple.lfv`, using a `64x32` per-panel `cover` layout by default so each panel is filled without distorting aspect ratio.
 - **Build metadata:** `platformio.ini` sets `FIRMWARE_VERSION`, device model tags, and compiler flags shared across environments.
 
 ## BLE Control
@@ -78,7 +84,7 @@ Additional PlatformIO environments are defined in `platformio.ini`, including a 
 
 [![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=main)](https://coveralls.io/github/stef1949/LumiFur_Controller?branch=main)
 
-- **77 Unity tests** covering core functionality: Run with `pio test -e native2`
+- **80+ Unity tests** covering core functionality: Run with `pio test -e native2`
 - **Code coverage** tracked via [Coveralls](https://coveralls.io/github/stef1949/LumiFur_Controller) - see [docs/COVERAGE.md](docs/COVERAGE.md) for details
 - Run the GoogleTest suite with coverage via `pio test -e codeql`
 - Coverage reports and additional tooling scripts are located under `test/`

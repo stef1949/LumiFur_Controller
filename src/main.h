@@ -58,6 +58,7 @@ enum View
   VIEW_RAINBOW_GRADIENT,
   VIEW_RAINBOW_LINEAR_BAND,
   VIEW_ALT_FACE,
+  VIEW_VIDEO_PLAYER,
   //VIEW_LGBT_FLAG
 
   TOTAL_VIEWS // Special entry will automatically hold the total number of views.
@@ -101,11 +102,12 @@ bool downloadFlag = false;
 #define DEBUG_PROXIMITY 0     // Set to 1 to enable proximity sensor debug logs
 #define TEXT_DEBUG 0          // Set to 1 to enable text debug outputs
 #define DEBUG_FLUID_EFFECT 0  // Set to 1 to enable fluid effect debug outputs
+#define DEBUG_VIDEO_PLAYER 1  // Set to 1 to enable video player debug logs and overlay
 #ifndef PERF_MONITORING
 #define PERF_MONITORING 0     // Set to 1 to collect runtime timing/heap metrics
 #endif
 #ifndef PERF_LOGGING
-#define PERF_LOGGING PERF_MONITORING // Set to 0 to collect counters without serial output
+#define PERF_LOGGING PERF_MONITORING 0 // Set to 0 to collect counters without serial output
 #endif
 #ifndef PERF_REPORT_INTERVAL_MS
 #define PERF_REPORT_INTERVAL_MS 1000UL

@@ -10,6 +10,7 @@
 
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
+#include <FFat.h>
 #include <Wire.h> // For I2C sensors
 #ifdef VIRTUAL_PANE
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
@@ -26,6 +27,7 @@
 #include "core/ColorParser.h"
 #include "customEffects/flameEffect.h"
 #include "customEffects/fluidEffect.h"
+#include "customEffects/monoVideoPlayer.h"
 #include "core/AnimationState.h"
 #include "core/ScrollState.h"
 // #include "customEffects/pixelDustEffect.h" // New effect
@@ -218,11 +220,14 @@ inline void perfMaybeReport(unsigned long nowMs)
 // ----------------------------------------------------------------
 // ----------------------------------------------------------------
 FluidEffect *fluidEffectInstance = nullptr; // Global pointer for our fluid effect object
+MonoVideoPlayer *videoPlayerInstance = nullptr;
 // FluidEffect* fluidEffectInstance = nullptr; // Keep or remove if replacing
 // PixelDustEffect* pixelDustEffectInstance = nullptr; // Add this
 // Brightness control
 //  Retrieve the brightness value from preferences
 bool g_accelerometer_initialized = false;
+static constexpr char BAD_APPLE_VIDEO_PATH[] = "/videos/bad_apple.lfv";
+static bool gVideoStorageReady = false;
 
 constexpr unsigned long MOTION_SAMPLE_INTERVAL_FAST = 15; // ms between accel reads when looking for shakes
 
@@ -232,6 +237,26 @@ const unsigned long targetFrameIntervalMillis = 16; // ~60 FPS pacing on 1 kHz t
 constexpr unsigned long PATTERN_PLASMA_FRAME_INTERVAL_MS = 9; // ~111 FPS target on 1 kHz ticks
 constexpr uint32_t SLOW_FRAME_THRESHOLD_US = targetFrameIntervalMillis * 1000UL;
 constexpr uint8_t VIEW_TRANSITION_FADE_STEPS = 8;
+
+static bool initializeVideoStorage()
+{
+  if (FFat.begin(true))
+  {
+    if (!FFat.exists("/videos"))
+    {
+      FFat.mkdir("/videos");
+    }
+
+    Serial.printf("FFat mounted: total=%lu used=%lu free=%lu\n",
+                  static_cast<unsigned long>(FFat.totalBytes()),
+                  static_cast<unsigned long>(FFat.usedBytes()),
+                  static_cast<unsigned long>(FFat.freeBytes()));
+    return true;
+  }
+
+  Serial.println("FFat mount failed; video playback disabled until storage is available.");
+  return false;
+}
 
 #if DEBUG_MODE
 constexpr uint32_t SLOW_SECTION_THRESHOLD_US = 2000; // Flag non-render work that takes >2ms
@@ -3302,6 +3327,8 @@ void setup()
   Serial.printf("Build: %s %s\n", BUILD_DATE, BUILD_TIME);
 #endif
 
+  gVideoStorageReady = initializeVideoStorage();
+
   initTempSensor(); // Initialize Temperature Sensor
 
   initPreferences(); // Initialize Preferences
@@ -3711,6 +3738,16 @@ void setup()
     // For now, it will just print "Fluid Error" in displayCurrentView if null.
   }
 
+  videoPlayerInstance = new MonoVideoPlayer(FFat, BAD_APPLE_VIDEO_PATH, PANE_WIDTH, PANE_HEIGHT, PANEL_WIDTH, DEBUG_VIDEO_PLAYER != 0);
+  if (!videoPlayerInstance)
+  {
+    Serial.println("FATAL: Failed to allocate MonoVideoPlayer instance!");
+  }
+  else if (!gVideoStorageReady)
+  {
+    Serial.println("Video player created; waiting for FFat storage to become available.");
+  }
+
   // ... rest of your setup() code ...
   // e.g., currentView = getLastView();
 
@@ -3718,6 +3755,10 @@ void setup()
   if (currentView == VIEW_FLUID_EFFECT && fluidEffectInstance)
   { // Assuming 16 is the fluid effect view
     fluidEffectInstance->begin();
+  }
+  if (currentView == VIEW_VIDEO_PLAYER && videoPlayerInstance)
+  {
+    videoPlayerInstance->begin();
   }
 
   lastActivityTime = millis(); // Initialize the activity timer for sleep mode
@@ -4182,6 +4223,79 @@ static void renderFullscreenSpiralWhite()
   updateAndDrawFullScreenSpiral(SPIRAL_COLOR_WHITE);
 }
 
+static void renderVideoPlayerView()
+{
+  if (videoPlayerInstance)
+  {
+    videoPlayerInstance->updateAndDraw(dma_display, micros());
+#if DEBUG_VIDEO_PLAYER
+    static unsigned long lastVideoDebugLogMs = 0;
+    const MonoVideoDebugInfo info = videoPlayerInstance->debugInfo();
+    const unsigned long displayedFrame = (info.frameCount > 0U) ? (info.currentFrameIndex + 1U) : 0U;
+    const unsigned long nowMs = millis();
+    if ((nowMs - lastVideoDebugLogMs) >= 1000UL)
+    {
+      Serial.printf(
+          "Video dbg ready=%u open=%u frame=%lu/%lu interval=%luus rew=%lu fail=%lu catch=%u max=%u decode=%luus offset=%lu err=%s\n",
+          static_cast<unsigned int>(videoPlayerInstance->ready()),
+          static_cast<unsigned int>(info.fileOpen),
+          displayedFrame,
+          static_cast<unsigned long>(info.frameCount),
+          static_cast<unsigned long>(info.frameIntervalMicros),
+          static_cast<unsigned long>(info.rewindCount),
+          static_cast<unsigned long>(info.decodeFailureCount),
+          static_cast<unsigned int>(info.lastCatchupFrames),
+          static_cast<unsigned int>(info.maxCatchupFrames),
+          static_cast<unsigned long>(info.lastDecodeMicros),
+          static_cast<unsigned long>(info.currentFileOffset),
+          videoPlayerInstance->error());
+      lastVideoDebugLogMs = nowMs;
+    }
+
+    dma_display->setFont(&TomThumb);
+    dma_display->setTextSize(1);
+    dma_display->setTextColor(dma_display->color565(255, 255, 0));
+
+    char line1[24];
+    char line2[24];
+    char line3[24];
+    snprintf(line1,
+             sizeof(line1),
+             "fr %lu/%lu %lums",
+             displayedFrame,
+             static_cast<unsigned long>(info.frameCount),
+             static_cast<unsigned long>((info.frameIntervalMicros + 500U) / 1000U));
+    snprintf(line2,
+             sizeof(line2),
+             "rw %lu de %lu c%u",
+             static_cast<unsigned long>(info.rewindCount),
+             static_cast<unsigned long>(info.decodeFailureCount),
+             static_cast<unsigned int>(info.lastCatchupFrames));
+    snprintf(line3,
+             sizeof(line3),
+             "dc %luus of %lu",
+             static_cast<unsigned long>(info.lastDecodeMicros),
+             static_cast<unsigned long>(info.currentFileOffset));
+
+    dma_display->setCursor(1, 9);
+    dma_display->print(line1);
+    dma_display->setCursor(1, 17);
+    dma_display->print(line2);
+    dma_display->setCursor(1, 25);
+    dma_display->print(line3);
+#endif
+    return;
+  }
+
+  dma_display->setFont(&TomThumb);
+  dma_display->setTextSize(1);
+  dma_display->setTextColor(dma_display->color565(255, 0, 0));
+  dma_display->setCursor(3, 12);
+  dma_display->print("Video Err");
+  dma_display->setCursor(3, 22);
+  dma_display->print("Init fail");
+}
+
 static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     renderDebugSquaresView,        // VIEW_DEBUG_SQUARES
     renderLoadingBarView,          // VIEW_LOADING_BAR
@@ -4212,6 +4326,7 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     patternRainbowGradient,        // VIEW_RAINBOW_GRADIENT
     patternRainbowLinearBand,      // VIEW_RAINBOW_LINEAR_BAND
     renderFaceWithPlasma,          // VIEW_ALT_FACE
+    renderVideoPlayerView,         // VIEW_VIDEO_PLAYER
 };
 
 static_assert(sizeof(VIEW_RENDERERS) / sizeof(ViewRenderFunc) == TOTAL_VIEWS, "View renderer table mismatch");
@@ -4271,6 +4386,10 @@ void displayCurrentView(int view)
     if (view == VIEW_DINO_GAME)
     {
       resetDinoGame(millis());
+    }
+    if (view == VIEW_VIDEO_PLAYER && videoPlayerInstance)
+    {
+      videoPlayerInstance->begin();
     }
     previousViewLocal = view;
   }
