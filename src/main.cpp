@@ -357,6 +357,28 @@ bool consumeButtonLongPress(ButtonState &button, unsigned long nowMs, unsigned l
   button.shortPressPending = false;
   return true;
 }
+
+// Derived from the Alt_ bitmap exports with the source XBM bit order/background normalized.
+static const uint8_t AltFaceNose[] PROGMEM = {
+    0xb0, 0xf8, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
+static const uint8_t AltFaceBlushL[] PROGMEM = {
+    0x80, 0x8c, 0x00, 0x9a, 0xc0, 0xb6, 0x80, 0xec, 0x00, 0x80};
+static const uint8_t AltFaceBrowL[] PROGMEM = {
+    0xc0, 0x80, 0xc0, 0x86, 0x80, 0x8e, 0x00, 0x9e, 0x00, 0xbe, 0x00, 0xfc, 0x00, 0xf0};
+static const uint8_t AltFaceScleraL[] PROGMEM = {
+    0x7f, 0x00, 0x80, 0xff, 0x01, 0x80, 0xff, 0x0f, 0x80, 0xff, 0x3f, 0x80, 0xff, 0xff, 0x80, 0xfe,
+    0xff, 0x82, 0xfc, 0xff, 0x86, 0xfc, 0xff, 0x8e, 0xf8, 0xff, 0x9e, 0xf0, 0xff, 0xfe, 0xe0, 0xff,
+    0xbe, 0xc0, 0xff, 0x86, 0x80, 0x3f, 0x80};
+static const uint8_t AltFaceBlushR[] PROGMEM = {
+    0xd8, 0x80, 0x6c, 0x80, 0xb6, 0x80, 0xdb, 0x80, 0x40, 0x80};
+static const uint8_t AltFaceBrowR[] PROGMEM = {
+    0xc0, 0x80, 0xf0, 0x80, 0xf8, 0x80, 0x7c, 0x80, 0x3e, 0x80, 0x1f, 0x80, 0x07, 0x80};
+static const uint8_t AltFaceScleraR[] PROGMEM = {
+    0x00, 0x00, 0xfe, 0x00, 0xc0, 0xfe, 0x00, 0xf8, 0xfe, 0x00, 0xfe, 0xfe, 0x80, 0xff, 0xfe, 0xe0,
+    0xff, 0xbe, 0xf0, 0xff, 0x9e, 0xf8, 0xff, 0x9e, 0xfc, 0xff, 0x8e, 0xff, 0xff, 0x86, 0xfe, 0xff,
+    0x82, 0xf0, 0xff, 0x80, 0x00, 0xfe, 0x80};
+static const uint8_t AltFacePupil[] PROGMEM = {
+    0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0};
 } // namespace
 
 // View switching
@@ -612,8 +634,8 @@ constexpr unsigned long EYE_BOUNCE_DURATION = 400;
 constexpr int EYE_BOUNCE_AMPLITUDE = 5;
 constexpr int MAX_EYE_BOUNCES = 10;
 
-const int IDLE_HOVER_AMPLITUDE_Y = 1;
-const int IDLE_HOVER_AMPLITUDE_X = 1;
+const int IDLE_HOVER_AMPLITUDE_Y = 2.5;
+const int IDLE_HOVER_AMPLITUDE_X = 2.5;
 const unsigned long IDLE_HOVER_PERIOD_MS_Y = 3000;
 const unsigned long IDLE_HOVER_PERIOD_MS_X = 4200;
 
@@ -782,6 +804,7 @@ static bool viewUsesMic(int view)
   case VIEW_PLASMA_FACE:
   case VIEW_UWU_EYES:
   case VIEW_CIRCLE_EYES:
+  case VIEW_ALT_FACE:
     return true;
   default:
     return false;
@@ -1364,6 +1387,7 @@ static unsigned long viewFrameIntervalMillis(int view)
   case VIEW_PLASMA_FACE:
   case VIEW_UWU_EYES:
   case VIEW_CIRCLE_EYES:
+  case VIEW_ALT_FACE:
     return PATTERN_PLASMA_FRAME_INTERVAL_MS;
   case VIEW_DVD_LOGO:
     return dvdUpdateInterval;
@@ -2449,6 +2473,22 @@ void blinkingEyes()
     leftEyeX = 93;
     leftEyeY = 2;
     break;
+  case VIEW_ALT_FACE:
+  {
+    const uint16_t pupilColor = dma_display->color565(0, 0, 0);
+    constexpr uint8_t kAltEyeTimeOffsetRight = 80;
+    constexpr uint8_t kAltEyeTimeOffsetLeft = 208;
+
+    drawBitmapAdvanced(10 + final_x_offset, 4 + final_y_offset, 23, 13, Alt_scleraR,
+                       solidColor, blinkProgress, true, kAltEyeTimeOffsetRight);
+    drawBitmapAdvanced(95 + final_x_offset, 4 + final_y_offset, 23, 13, Alt_scleraL,
+                       solidColor, blinkProgress, true, kAltEyeTimeOffsetLeft);
+    drawBitmapWithBlink(19 + final_x_offset, 5 + final_y_offset, 3, 11, AltFacePupil,
+                        pupilColor, blinkProgress);
+    drawBitmapWithBlink(106 + final_x_offset, 5 + final_y_offset, 3, 11, AltFacePupil,
+                        pupilColor, blinkProgress);
+    return;
+  }
     // Default case uses the slanteyes defined before the switch
   }
 
@@ -2616,6 +2656,15 @@ void baseFace()
   int final_y_offset = currentEyeYOffset + idleEyeYOffset;
   int final_x_offset = idleEyeXOffset;
 
+  if (currentView == VIEW_ALT_FACE)
+  {
+    const uint16_t blushColor = dma_display->color565(255, 110, 150);
+    drawPlasmaXbm(22 + final_x_offset, 0 + final_y_offset, 9, 7, Alt_BrowR, 16, 2.0f);
+    drawPlasmaXbm(96 + final_x_offset, 0 + final_y_offset, 9, 7, Alt_BrowL, 144, 2.0f);
+    drawXbm565(8 + final_x_offset, 16 + final_y_offset, 9, 5, Alt_BlushR, blushColor);
+    drawXbm565(110 + final_x_offset, 16 + final_y_offset, 9, 5, Alt_BlushL, blushColor);
+  }
+
   blinkingEyes(); // This function now correctly uses the global offsets internally
 
   const uint8_t mouthBrightness = micGetMouthBrightness();
@@ -2630,8 +2679,16 @@ void baseFace()
     drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0f, 0.2f, mouthBrightness); // Left eye (phase offset)
   }
 
-  drawPlasmaXbm(56, 4 + final_y_offset, 8, 8, nose, 64, 2.0);
-  drawPlasmaXbm(64, 4 + final_y_offset, 8, 8, noseL, 64, 2.0);
+  if (currentView == VIEW_ALT_FACE)
+  {
+    drawPlasmaXbm(58 + final_x_offset, 7 + final_y_offset, 4, 2, Alt_Nose, 96, 2.0f);
+    drawPlasmaXbm(68 + final_x_offset, 7 + final_y_offset, 4, 2, Alt_Nose, 96, 2.0f);
+  }
+  else
+  {
+    drawPlasmaXbm(56, 4 + final_y_offset, 8, 8, nose, 64, 2.0);
+    drawPlasmaXbm(64, 4 + final_y_offset, 8, 8, noseL, 64, 2.0);
+  }
 
   facePlasmaDirty = false;
 }
@@ -3583,7 +3640,7 @@ void setup()
   mxconfig.driver = HUB75_I2S_CFG::FM6126A; // for panels using FM6126A chips
   mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_16M; // 20 MHz proved unstable on this panel; keep the highest stable clock.
   mxconfig.min_refresh_rate = 120;           // Ask the DMA driver to favor a faster panel refresh over color depth.
-  mxconfig.clkphase = true;                  // Match the library's positive-edge default for better HUB75 timing margin.
+  mxconfig.clkphase = false;                  // Match the library's positive-edge default for better HUB75 timing margin.
   mxconfig.double_buff = true; // <------------- Turn on double buffer
 
 #ifndef VIRTUAL_PANE
@@ -4154,6 +4211,7 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     staticColor,                   // VIEW_STATIC_COLOR
     patternRainbowGradient,        // VIEW_RAINBOW_GRADIENT
     patternRainbowLinearBand,      // VIEW_RAINBOW_LINEAR_BAND
+    renderFaceWithPlasma,          // VIEW_ALT_FACE
 };
 
 static_assert(sizeof(VIEW_RENDERERS) / sizeof(ViewRenderFunc) == TOTAL_VIEWS, "View renderer table mismatch");
