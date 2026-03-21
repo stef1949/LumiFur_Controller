@@ -1069,6 +1069,8 @@ class ConfigCallbacks : public NimBLECharacteristicCallbacks
         auroraModeEnabled = false;
       }
       setAutoBrightness(autoBrightnessEnabled);
+      setAccelerometerEnabled(accelerometerEnabled);
+      setSleepMode(sleepModeEnabled);
       setAuroraMode(auroraModeEnabled);
       setStaticColorMode(staticColorModeEnabled);
       // Log the updated settings.
@@ -3332,7 +3334,15 @@ void setup()
   initTempSensor(); // Initialize Temperature Sensor
 
   initPreferences(); // Initialize Preferences
+  userBrightness = static_cast<uint8_t>(constrain(getUserBrightness(), 0, 255));
+  sliderBrightness = map(userBrightness, 1, 255, 1, 100);
+  adaptiveBrightness = userBrightness;
+  targetBrightness = userBrightness;
+  currentBrightness = static_cast<float>(userBrightness);
+  lastBrightness = userBrightness;
   autoBrightnessEnabled = getAutoBrightness();
+  accelerometerEnabled = getAccelerometerEnabled();
+  sleepModeEnabled = getSleepMode();
   auroraModeEnabled = getAuroraMode();
   staticColorModeEnabled = getStaticColorMode();
   if (staticColorModeEnabled)

@@ -102,7 +102,7 @@ bool downloadFlag = false;
 #define DEBUG_PROXIMITY 0     // Set to 1 to enable proximity sensor debug logs
 #define TEXT_DEBUG 0          // Set to 1 to enable text debug outputs
 #define DEBUG_FLUID_EFFECT 0  // Set to 1 to enable fluid effect debug outputs
-#define DEBUG_VIDEO_PLAYER 1  // Set to 1 to enable video player debug logs and overlay
+#define DEBUG_VIDEO_PLAYER 0  // Set to 1 to enable video player debug logs and overlay
 #ifndef PERF_MONITORING
 #define PERF_MONITORING 0     // Set to 1 to collect runtime timing/heap metrics
 #endif
@@ -260,7 +260,8 @@ void err(int x)
   }
 }
 
-uint8_t userBrightness = getUserBrightness(); // e.g., default 255 (100%)
+// Preferences are initialized in setup(), so defer loading persisted brightness until then.
+uint8_t userBrightness = 255;
 
 int sliderBrightness = map(userBrightness, 1, 255, 1, 100);
 
