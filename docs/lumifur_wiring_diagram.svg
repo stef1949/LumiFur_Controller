@@ -1,0 +1,468 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1400" viewBox="0 0 2200 1400" role="img" aria-labelledby="title desc">
+  <title id="title">LumiFur wiring diagram</title>
+  <desc id="desc">Engineering-style wiring diagram for a MatrixPortal S3 based wearable Protogen or fursuit lighting system with dual HUB75 panels, I2C sensors, optional I2S microphone, and wearable battery power architecture.</desc>
+  <defs>
+    <style>
+      text {
+        font-family: "Segoe UI", Arial, sans-serif;
+        fill: #0f172a;
+      }
+      .title {
+        font-size: 31px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+      }
+      .subtitle {
+        font-size: 14px;
+        fill: #475569;
+      }
+      .section {
+        fill: #ffffff;
+        stroke: #cbd5e1;
+        stroke-width: 2;
+        rx: 20;
+        ry: 20;
+      }
+      .sectionHeader {
+        font-size: 20px;
+        font-weight: 700;
+      }
+      .domainLabel {
+        font-size: 15px;
+        font-weight: 700;
+      }
+      .component {
+        fill: #ffffff;
+        stroke: #94a3b8;
+        stroke-width: 2;
+        rx: 16;
+        ry: 16;
+      }
+      .componentFillBlue {
+        fill: #f8fbff;
+      }
+      .componentFillOrange {
+        fill: #fff8ef;
+      }
+      .componentFillRed {
+        fill: #fff7f7;
+      }
+      .componentFillPurple {
+        fill: #faf7ff;
+      }
+      .componentFillGray {
+        fill: #f8fafc;
+      }
+      .componentFillBrown {
+        fill: #fff8f1;
+      }
+      .componentTitle {
+        font-size: 16px;
+        font-weight: 700;
+      }
+      .componentBody {
+        font-size: 13px;
+        fill: #334155;
+      }
+      .small {
+        font-size: 12px;
+        fill: #475569;
+      }
+      .tiny {
+        font-size: 11px;
+        fill: #64748b;
+      }
+      .netLabel {
+        font-size: 12px;
+        font-weight: 700;
+      }
+      .legendLabel {
+        font-size: 12px;
+        fill: #334155;
+      }
+      .note {
+        font-size: 13px;
+        fill: #334155;
+      }
+      .noteStrong {
+        font-size: 13px;
+        font-weight: 700;
+        fill: #0f172a;
+      }
+      .wire5v {
+        stroke: #d73a31;
+        stroke-width: 6;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .wire3v3 {
+        stroke: #f59e0b;
+        stroke-width: 4;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .wireGnd {
+        stroke: #111111;
+        stroke-width: 5;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .wireI2c {
+        stroke: #2563eb;
+        stroke-width: 4;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .wireData {
+        stroke: #16a34a;
+        stroke-width: 5;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .wireAudio {
+        stroke: #7c3aed;
+        stroke-width: 4;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .wireBat {
+        stroke: #92400e;
+        stroke-width: 5;
+        fill: none;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+      }
+      .wireOptional {
+        stroke-dasharray: 8 7;
+      }
+      .labelBox {
+        fill: #ffffff;
+        stroke: #cbd5e1;
+        stroke-width: 1.5;
+        rx: 9;
+        ry: 9;
+      }
+      .connector {
+        fill: #ffffff;
+        stroke: #64748b;
+        stroke-width: 2;
+        rx: 12;
+        ry: 12;
+      }
+      .ghost {
+        fill: none;
+        stroke: #94a3b8;
+        stroke-width: 2;
+        stroke-dasharray: 8 6;
+      }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="2200" height="1400" fill="#ffffff"/>
+
+  <text class="title" x="40" y="52">LumiFur Wearable Wiring Diagram</text>
+  <text class="subtitle" x="40" y="80">Adafruit MatrixPortal S3 controller / dual HUB75 RGB face panels / wearable battery and sensor harnessing</text>
+
+  <g transform="translate(1655,22)">
+    <rect class="labelBox" x="0" y="0" width="500" height="74"/>
+    <circle cx="24" cy="20" r="7" fill="#d73a31"/>
+    <text class="legendLabel" x="40" y="24">+5V LED rail / VIN</text>
+    <circle cx="24" cy="48" r="7" fill="#f59e0b"/>
+    <text class="legendLabel" x="40" y="52">+3.3V logic rail</text>
+    <circle cx="180" cy="20" r="7" fill="#111111"/>
+    <text class="legendLabel" x="196" y="24">GND / common return</text>
+    <circle cx="180" cy="48" r="7" fill="#2563eb"/>
+    <text class="legendLabel" x="196" y="52">I2C: SDA / SCL</text>
+    <circle cx="340" cy="20" r="7" fill="#16a34a"/>
+    <text class="legendLabel" x="356" y="24">Display data / control</text>
+    <circle cx="340" cy="48" r="7" fill="#7c3aed"/>
+    <text class="legendLabel" x="356" y="52">Audio / I2S wiring</text>
+  </g>
+
+  <g>
+    <rect x="40" y="120" width="520" height="1070" class="section" fill="#fffaf5"/>
+    <text class="sectionHeader" x="70" y="160">5. Power System / 6. Charging and Protection</text>
+    <text class="domainLabel" x="70" y="188" fill="#92400e">Wearable battery domain -> regulated 5V distribution</text>
+
+    <rect x="110" y="205" width="360" height="92" class="component componentFillBrown"/>
+    <text class="componentTitle" x="136" y="238">Rechargeable Battery Pack</text>
+    <text class="componentBody" x="136" y="261">1S Li-ion / LiPo wearable pack</text>
+    <text class="componentBody" x="136" y="281">JST-PH 2-pin, protected cell recommended</text>
+
+    <rect x="55" y="375" width="48" height="70" class="connector"/>
+    <text class="componentTitle" x="63" y="404">USB-C</text>
+    <text class="small" x="62" y="424">charge</text>
+
+    <rect x="110" y="360" width="360" height="124" class="component componentFillOrange"/>
+    <text class="componentTitle" x="136" y="394">Charge / Protection Board</text>
+    <text class="componentBody" x="136" y="417">1S Li-ion charger + pack protection / BMS</text>
+    <text class="componentBody" x="136" y="437">Use power-path / load-sharing hardware if charging while operating</text>
+    <text class="componentBody" x="136" y="457">Expose charge port where head shell is serviceable</text>
+
+    <rect x="170" y="548" width="240" height="62" class="component componentFillGray"/>
+    <text class="componentTitle" x="245" y="586">Fuse</text>
+    <text class="componentBody" x="206" y="604">Inline protection sized for panel load</text>
+
+    <rect x="170" y="652" width="240" height="62" class="component componentFillGray"/>
+    <text class="componentTitle" x="216" y="690">Main Power Switch</text>
+    <text class="componentBody" x="225" y="708">Accessible from outside shell</text>
+
+    <rect x="110" y="780" width="360" height="100" class="component componentFillRed"/>
+    <text class="componentTitle" x="136" y="815">5V Boost Regulator</text>
+    <text class="componentBody" x="136" y="838">Boost protected battery output to a regulated 5V rail</text>
+    <text class="componentBody" x="136" y="858">Size for peak LED current, controller overhead, and thermal margin</text>
+
+    <rect x="110" y="936" width="360" height="104" class="component componentFillRed"/>
+    <text class="componentTitle" x="136" y="972">5V Distribution / Harness Split</text>
+    <text class="componentBody" x="136" y="994">Star distribution for controller feed and separate panel injection points</text>
+    <text class="componentBody" x="136" y="1014">Use heavier-gauge wires for panel 5V and GND runs</text>
+
+    <path class="wireBat" d="M290 297 L290 360"/>
+    <path class="wireGnd" d="M380 297 L380 780"/>
+    <path class="wireBat" d="M79 410 L110 410"/>
+
+    <text class="netLabel" x="300" y="336" fill="#92400e">BAT+</text>
+    <text class="netLabel" x="390" y="336" fill="#111111">BAT- / GND</text>
+    <text class="netLabel" x="62" y="366" fill="#d73a31">5V charge in</text>
+
+    <path class="wireBat" d="M290 484 L290 548"/>
+    <path class="wireBat" d="M290 610 L290 652"/>
+    <path class="wireBat" d="M290 714 L290 780"/>
+    <path class="wireBat" d="M290 880 L290 936"/>
+
+    <text class="netLabel" x="301" y="528" fill="#92400e">Protected BAT+</text>
+    <text class="netLabel" x="303" y="752" fill="#92400e">BAT+ to boost</text>
+
+    <path class="wire5v" d="M470 955 L2040 955"/>
+    <path class="wireGnd" d="M470 1005 L2040 1005"/>
+    <text class="netLabel" x="490" y="942" fill="#d73a31">+5V high-current rail</text>
+    <text class="netLabel" x="490" y="1030" fill="#111111">Common GND / 0V return shared by all loads</text>
+  </g>
+
+  <g>
+    <rect x="640" y="120" width="860" height="220" class="section" fill="#f8fbff"/>
+    <text class="sectionHeader" x="670" y="160">3. Sensors</text>
+    <text class="domainLabel" x="670" y="188" fill="#1d4ed8">3.3V I2C sensor domain</text>
+
+    <rect x="780" y="188" width="590" height="48" class="connector"/>
+    <text class="componentTitle" x="802" y="217">I2C Sensor Bus</text>
+    <text class="componentBody" x="920" y="217">3V3 | GND | SDA(GPIO16) | SCL(GPIO17)</text>
+
+    <rect x="705" y="260" width="340" height="64" class="component componentFillBlue"/>
+    <rect x="705" y="260" width="340" height="64" class="ghost"/>
+    <text class="componentTitle" x="728" y="288">LIS3DH Accelerometer / Motion Sensor</text>
+    <text class="componentBody" x="728" y="307">On MatrixPortal S3 PCB, I2C addr 0x19</text>
+
+    <rect x="1090" y="260" width="350" height="64" class="component componentFillBlue"/>
+    <text class="componentTitle" x="1113" y="288">Light / Proximity Sensor</text>
+    <text class="componentBody" x="1113" y="307">APDS9960-class module via STEMMA QT / Qwiic</text>
+
+    <rect x="1170" y="230" width="190" height="24" class="labelBox"/>
+    <text class="small" x="1202" y="247">STEMMA QT / Qwiic</text>
+
+    <path class="wire3v3 wireOptional" d="M872 236 L872 260"/>
+    <path class="wireGnd wireOptional" d="M900 236 L900 260"/>
+    <path class="wireI2c wireOptional" d="M928 236 L928 260"/>
+    <path class="wireI2c wireOptional" d="M956 236 L956 260"/>
+
+    <path class="wire3v3" d="M1210 236 L1210 260"/>
+    <path class="wireGnd" d="M1238 236 L1238 260"/>
+    <path class="wireI2c" d="M1266 236 L1266 260"/>
+    <path class="wireI2c" d="M1294 236 L1294 260"/>
+
+    <text class="small" x="842" y="252" fill="#f59e0b">3V3</text>
+    <text class="small" x="893" y="252" fill="#111111">GND</text>
+    <text class="small" x="915" y="252" fill="#2563eb">SDA</text>
+    <text class="small" x="945" y="252" fill="#2563eb">SCL</text>
+    <text class="small" x="1180" y="252" fill="#f59e0b">3V3</text>
+    <text class="small" x="1230" y="252" fill="#111111">GND</text>
+    <text class="small" x="1252" y="252" fill="#2563eb">SDA</text>
+    <text class="small" x="1282" y="252" fill="#2563eb">SCL</text>
+
+    <path class="wireData wireOptional" d="M1420 324 L1420 360 L1340 360 L1340 380"/>
+    <text class="small" x="1310" y="353" fill="#16a34a">INT -&gt; GPIO_x (optional)</text>
+  </g>
+
+  <g>
+    <rect x="650" y="380" width="820" height="380" class="section" fill="#f8fafc"/>
+    <text class="sectionHeader" x="680" y="420">1. Main Controller</text>
+    <text class="domainLabel" x="680" y="448" fill="#b45309">Logic: 3.3V / Power input: regulated 5V</text>
+
+    <rect x="760" y="472" width="560" height="202" class="component componentFillGray"/>
+    <text class="componentTitle" x="790" y="508">Adafruit MatrixPortal S3</text>
+    <text class="componentBody" x="790" y="532">ESP32-S3 MCU, BLE wireless control, USB-C programming</text>
+    <text class="componentBody" x="790" y="554">Integrated LIS3DH accelerometer, buttons, status NeoPixel</text>
+    <text class="componentBody" x="790" y="576">On-board 3.3V regulator for logic and sensor rails</text>
+    <text class="componentBody" x="790" y="598">Mount near Panel #1 to minimize HUB75 ribbon length</text>
+
+    <rect x="792" y="618" width="230" height="34" class="labelBox"/>
+    <text class="small" x="815" y="640">BLE to phone/app controller (wireless)</text>
+
+    <rect x="675" y="515" width="85" height="92" class="connector"/>
+    <text class="componentTitle" x="689" y="548">5V / VIN</text>
+    <text class="small" x="703" y="569">regulated in</text>
+    <text class="small" x="703" y="590">GND</text>
+
+    <rect x="902" y="424" width="270" height="56" class="connector"/>
+    <text class="componentTitle" x="925" y="450">STEMMA QT / Qwiic</text>
+    <text class="small" x="925" y="470">3V3, GND, SDA(GPIO16), SCL(GPIO17)</text>
+
+    <rect x="1318" y="500" width="118" height="162" class="connector"/>
+    <text class="componentTitle" x="1335" y="528">HUB75 OUT</text>
+    <text class="small" x="1331" y="552">R1 42   G1 41</text>
+    <text class="small" x="1331" y="570">B1 40   R2 38</text>
+    <text class="small" x="1331" y="588">G2 39   B2 37</text>
+    <text class="small" x="1331" y="606">A 45    B 36</text>
+    <text class="small" x="1331" y="624">C 48    D 35</text>
+    <text class="small" x="1331" y="642">E 21 LAT47</text>
+    <text class="small" x="1331" y="660">OE14 CLK2</text>
+
+    <rect x="860" y="690" width="365" height="54" class="connector"/>
+    <text class="componentTitle" x="884" y="715">GPIO / Expansion Breakout</text>
+    <text class="small" x="884" y="734">A0=GPIO12 | A1=GPIO3 | A2=GPIO9 | A3=GPIO10 | A4=GPIO11 | TX=18 | RX=8</text>
+
+    <rect x="1370" y="410" width="120" height="70" class="component componentFillBlue"/>
+    <text class="componentTitle" x="1390" y="442">BLE Link</text>
+    <text class="componentBody" x="1386" y="462">Phone / app</text>
+    <path class="ghost" d="M1320 520 L1370 455"/>
+  </g>
+
+  <g>
+    <rect x="1540" y="120" width="620" height="640" class="section" fill="#fff7f7"/>
+    <text class="sectionHeader" x="1570" y="160">2. LED Matrix Display Chain</text>
+    <text class="domainLabel" x="1570" y="188" fill="#b91c1c">5V LED power domain, shared GND, 3.3V logic driven by MatrixPortal</text>
+
+    <rect x="1580" y="214" width="540" height="70" class="labelBox"/>
+    <text class="componentTitle" x="1602" y="240">HUB75 Logic Bundle</text>
+    <text class="componentBody" x="1602" y="260">R1, G1, B1, R2, G2, B2, A, B, C, D, E, LAT, OE, CLK via 2x8 IDC ribbon</text>
+    <text class="componentBody" x="1602" y="279">Chain Panel #1 OUT to Panel #2 IN; inject 5V and GND separately from the logic ribbon</text>
+
+    <rect x="1630" y="318" width="430" height="150" class="component componentFillRed"/>
+    <text class="componentTitle" x="1655" y="348">RGB LED Matrix Panel #1</text>
+    <text class="componentBody" x="1655" y="370">64x32 HUB75 RGB panel, face display segment</text>
+    <text class="componentBody" x="1655" y="391">HUB75 IN from controller, power injection local to panel</text>
+    <text class="componentBody" x="1655" y="412">Keep ribbon short and strain-relieved inside head shell</text>
+    <text class="small" x="1655" y="444">Left edge: HUB75 IN / Power pads 5V, GND</text>
+    <text class="small" x="1844" y="444">Right edge: HUB75 OUT</text>
+
+    <rect x="1630" y="536" width="430" height="150" class="component componentFillRed"/>
+    <text class="componentTitle" x="1655" y="566">RGB LED Matrix Panel #2</text>
+    <text class="componentBody" x="1655" y="588">64x32 HUB75 RGB panel, second face display segment</text>
+    <text class="componentBody" x="1655" y="609">Daisy-chained from Panel #1 logic output</text>
+    <text class="componentBody" x="1655" y="630">Power inject directly here as well for current balance</text>
+    <text class="small" x="1655" y="662">Left edge: HUB75 IN / Power pads 5V, GND</text>
+
+    <path class="wireData" d="M1436 582 L1515 582 L1515 393 L1630 393"/>
+    <rect x="1462" y="532" width="210" height="42" class="labelBox"/>
+    <text class="small" x="1484" y="558" fill="#16a34a">HUB75 ribbon from MatrixPortal</text>
+
+    <path class="wireData" d="M2060 393 L2092 393 L2092 611 L2060 611"/>
+    <text class="small" x="1888" y="506" fill="#16a34a">Panel #1 HUB75 OUT -> Panel #2 HUB75 IN</text>
+  </g>
+
+  <g>
+    <rect x="720" y="820" width="680" height="180" class="section" fill="#faf7ff"/>
+    <text class="sectionHeader" x="750" y="860">4. Audio Input</text>
+    <text class="domainLabel" x="750" y="888" fill="#6d28d9">Optional 3.3V digital microphone over I2S</text>
+
+    <rect x="934" y="900" width="312" height="78" class="component componentFillPurple"/>
+    <text class="componentTitle" x="957" y="930">MEMS I2S Microphone</text>
+    <text class="componentBody" x="957" y="952">SPH0645-class or equivalent digital mic module</text>
+    <text class="componentBody" x="957" y="972">Mount near mouth opening / acoustic port, not beside panel fans</text>
+  </g>
+
+  <g>
+    <rect x="1540" y="820" width="620" height="370" class="section" fill="#f8fafc"/>
+    <text class="sectionHeader" x="1570" y="860">Engineering Notes</text>
+    <text class="noteStrong" x="1570" y="902">Logic and power constraints</text>
+    <text class="note" x="1570" y="930">- HUB75 panels are 5V high-current loads; size the boost regulator and fuse for peak brightness.</text>
+    <text class="note" x="1570" y="954">- ESP32-S3, I2C sensors, and the optional digital mic are all 3.3V logic devices.</text>
+    <text class="note" x="1570" y="978">- All grounds must be shared so logic thresholds stay valid across the full wearable assembly.</text>
+    <text class="note" x="1570" y="1002">- Do not rely on the ribbon cable for panel power; run dedicated 5V and GND to each matrix.</text>
+    <text class="note" x="1570" y="1026">- If charging while running, use a charger/protection board with load sharing or power-path control.</text>
+
+    <text class="noteStrong" x="1570" y="1070">Integration and serviceability</text>
+    <text class="note" x="1570" y="1098">- Place the MatrixPortal close to Panel #1 to reduce HUB75 length and improve EMC margin.</text>
+    <text class="note" x="1570" y="1122">- Keep 5V panel wiring short and heavier-gauge than the logic harnesses.</text>
+    <text class="note" x="1570" y="1146">- Prefer keyed JST or locking connectors where disassembly or panel replacement is expected.</text>
+    <text class="note" x="1570" y="1170">- Treat this as wiring intent for future PCB / carrier-board planning, not a final schematic.</text>
+  </g>
+
+  <g>
+    <path class="wire5v" d="M760 540 L700 540 L700 955"/>
+    <path class="wireGnd" d="M760 585 L740 585 L740 1005"/>
+    <text class="small" x="642" y="537" fill="#d73a31">5V / VIN in</text>
+    <text class="small" x="645" y="583" fill="#111111">GND</text>
+
+    <path class="wire3v3" d="M960 424 L960 236"/>
+    <path class="wireGnd" d="M988 424 L988 236"/>
+    <path class="wireI2c" d="M1016 424 L1016 236"/>
+    <path class="wireI2c" d="M1044 424 L1044 236"/>
+
+    <text class="small" x="923" y="348" fill="#f59e0b">3V3</text>
+    <text class="small" x="982" y="348" fill="#111111">GND</text>
+    <text class="small" x="1004" y="348" fill="#2563eb">SDA GPIO16</text>
+    <text class="small" x="1004" y="368" fill="#2563eb">SCL GPIO17</text>
+
+    <path class="wireAudio" d="M940 744 L940 900"/>
+    <path class="wireAudio" d="M968 744 L968 900"/>
+    <path class="wireAudio" d="M996 744 L996 900"/>
+    <path class="wireAudio wireOptional" d="M1024 744 L1024 900"/>
+    <path class="wire3v3" d="M1066 744 L1066 900"/>
+    <path class="wireGnd" d="M1094 744 L1094 900"/>
+
+    <text class="small" x="780" y="812" fill="#7c3aed">BCLK = A1 / GPIO3</text>
+    <text class="small" x="780" y="834" fill="#7c3aed">WS / LRCLK = A2 / GPIO9</text>
+    <text class="small" x="780" y="856" fill="#7c3aed">DOUT = A3 / GPIO10</text>
+    <text class="small" x="780" y="878" fill="#7c3aed">PD = A4 / GPIO11 (optional power-down)</text>
+    <text class="small" x="780" y="900" fill="#f59e0b">3V3</text>
+    <text class="small" x="780" y="922" fill="#111111">GND</text>
+
+    <path class="wire5v" d="M1580 955 L1580 446 L1630 446"/>
+    <path class="wireGnd" d="M1606 1005 L1606 430 L1630 430"/>
+    <path class="wire5v" d="M1550 955 L1550 664 L1630 664"/>
+    <path class="wireGnd" d="M1576 1005 L1576 648 L1630 648"/>
+
+    <text class="small" x="1450" y="447" fill="#d73a31">+5V panel power</text>
+    <text class="small" x="1458" y="429" fill="#111111">GND return</text>
+    <text class="small" x="1450" y="665" fill="#d73a31">+5V panel power</text>
+    <text class="small" x="1458" y="647" fill="#111111">GND return</text>
+  </g>
+
+  <g>
+    <rect x="40" y="1220" width="2120" height="140" class="section" fill="#ffffff"/>
+    <text class="sectionHeader" x="70" y="1260">7. Connectors and Expansion</text>
+
+    <rect x="70" y="1280" width="305" height="56" class="connector"/>
+    <text class="componentTitle" x="94" y="1304">HUB75 IDC 2x8 + panel power pads</text>
+    <text class="small" x="94" y="1324">Controller to Panel #1, then Panel #1 OUT to Panel #2 IN</text>
+
+    <rect x="405" y="1280" width="300" height="56" class="connector"/>
+    <text class="componentTitle" x="430" y="1304">STEMMA QT / Qwiic</text>
+    <text class="small" x="430" y="1324">3V3, GND, SDA(GPIO16), SCL(GPIO17)</text>
+
+    <rect x="735" y="1280" width="350" height="56" class="connector"/>
+    <text class="componentTitle" x="760" y="1304">Mic / AUX I2S breakout</text>
+    <text class="small" x="760" y="1324">A1/BCLK, A2/WS, A3/DOUT, A4/PD, 3V3, GND</text>
+
+    <rect x="1115" y="1280" width="300" height="56" class="connector"/>
+    <text class="componentTitle" x="1140" y="1304">USB-C / VIN / 5V input</text>
+    <text class="small" x="1140" y="1324">Programming and regulated 5V controller feed</text>
+
+    <rect x="1445" y="1280" width="270" height="56" class="connector"/>
+    <text class="componentTitle" x="1470" y="1304">Battery JST-PH</text>
+    <text class="small" x="1470" y="1324">1S Li-ion / LiPo pack connection</text>
+
+    <rect x="1745" y="1280" width="375" height="56" class="connector"/>
+    <text class="componentTitle" x="1770" y="1304">Service / expansion header</text>
+    <text class="small" x="1770" y="1324">A0, TX, RX, GPIO_x, 5V, 3V3, GND, BOOT, RESET as needed</text>
+  </g>
+
+  <text class="tiny" x="40" y="1384">LumiFur wiring intent, Rev A draft. Pin labels follow this repo&apos;s MatrixPortal S3 mapping and current device configuration.</text>
+</svg>
