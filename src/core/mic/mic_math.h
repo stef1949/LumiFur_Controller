@@ -1,16 +1,15 @@
 #ifndef MIC_MATH_H
 #define MIC_MATH_H
 
-#include <cstdint>
-
-float micComputeSignalAboveAmbient(float smoothedSignal, float ambientNoise);
-float micComputeOpenThreshold(float ambientNoise);
-float micComputeCloseThreshold(float ambientNoise);
-float micComputeAmbientUpdateLimit(float ambientNoise);
-float micComputeImpulseAvgLimit(float ambientNoise);
-float micComputePeakToAvg(std::uint32_t peakAbs, float currentAvgAbsSignal);
-bool micIsImpulse(std::uint32_t peakAbs, float currentAvgAbsSignal, float ambientNoise);
-float micComputeBrightnessTarget(float smoothedSignal, float ambientNoise);
-float micUpdateBrightnessEma(float brightnessEma, float targetBrightness);
+float micClamp(float value, float minValue, float maxValue);
+float micClamp01(float value);
+float micApplyEma(float currentValue, float targetValue, float alpha);
+float micApplyAttackReleaseEma(float currentValue, float targetValue, float attackAlpha, float releaseAlpha);
+float micUpdateNoiseFloor(float noiseFloor, float blockEnvelope);
+float micComputeSpeechLevel(float blockEnvelope, float noiseFloor);
+float micUpdatePeakReference(float peakReference, float speechLevel);
+float micNormalizeSpeechLevel(float speechLevel, float peakReference);
+float micComputeBrightnessTarget(float normalizedEnvelope);
+bool micShouldOpenMouth(float normalizedEnvelope, bool mouthOpen);
 
 #endif // MIC_MATH_H

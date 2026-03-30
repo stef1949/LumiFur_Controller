@@ -5,7 +5,7 @@
 #define MIC_SCK_PIN A1 // bit clock
 #define MIC_WS_PIN A2  // word-select / LRCLK
 #define MIC_SD_PIN A3  // data in
-#define MIC_PD_PIN A4  // mic power (optional)
+#define MIC_PD_PIN A4  // optional board-specific mic power gate, not an SPH0645 pin
 #endif
 
 #endif // MIC_PINS_H

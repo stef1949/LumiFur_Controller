@@ -8,8 +8,8 @@
 #define I2S_BITS_PER_SAMPLE_32BIT 32
 #endif
 
-#ifndef I2S_CHANNEL_FMT_ONLY_LEFT
-#define I2S_CHANNEL_FMT_ONLY_LEFT 1
+#ifndef I2S_CHANNEL_FMT_RIGHT_LEFT
+#define I2S_CHANNEL_FMT_RIGHT_LEFT 0
 #endif
 
 #ifndef I2S_COMM_FORMAT_STAND_I2S
@@ -27,101 +27,79 @@ void tearDown(void)
 {
 }
 
-void test_signal_above_ambient_clamps(void)
+void test_clamp_helpers(void)
 {
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, micComputeSignalAboveAmbient(10.0f, 20.0f));
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, 5.0f, micComputeSignalAboveAmbient(25.0f, 20.0f));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, micClamp(-1.0f, 0.0f, 1.0f));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.5f, micClamp(0.5f, 0.0f, 1.0f));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, micClamp(2.0f, 0.0f, 1.0f));
+
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, micClamp01(-0.5f));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.25f, micClamp01(0.25f));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 1.0f, micClamp01(1.5f));
 }
 
-void test_threshold_calculations(void)
+void test_ema_helpers(void)
 {
-  const float ambient = 1000.0f;
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, ambient + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT,
-                           micComputeOpenThreshold(ambient));
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, ambient + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * MIC_CLOSE_HYSTERESIS_RATIO,
-                           micComputeCloseThreshold(ambient));
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, ambient + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * MIC_AMBIENT_UPDATE_BAND,
-                           micComputeAmbientUpdateLimit(ambient));
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, ambient + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * MIC_IMPULSE_MAX_AVG_RATIO,
-                           micComputeImpulseAvgLimit(ambient));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 12.0f, micApplyEma(10.0f, 20.0f, 0.2f));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 14.5f, micApplyAttackReleaseEma(10.0f, 20.0f, 0.45f, 0.12f));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 18.8f, micApplyAttackReleaseEma(20.0f, 10.0f, 0.45f, 0.12f));
 }
 
-void test_peak_to_avg_computation(void)
+void test_noise_floor_tracks_quiet_audio(void)
 {
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, micComputePeakToAvg(100, 1.0f));
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, 5.0f, micComputePeakToAvg(500, 100.0f));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 501.0f, micUpdateNoiseFloor(500.0f, 600.0f));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 499.9f, micUpdateNoiseFloor(500.0f, 400.0f));
 }
 
-void test_is_impulse_true(void)
+void test_noise_floor_ignores_active_audio(void)
 {
-  const float ambient = 1000.0f;
-  TEST_ASSERT_TRUE(micIsImpulse(1000, 100.0f, ambient));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 500.0f, micUpdateNoiseFloor(500.0f, 2000.0f));
 }
 
-void test_is_impulse_false_low_ratio(void)
+void test_speech_level_and_normalization(void)
 {
-  const float ambient = 1000.0f;
-  TEST_ASSERT_FALSE(micIsImpulse(200, 100.0f, ambient));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, micComputeSpeechLevel(1200.0f, 500.0f));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 200.0f, micComputeSpeechLevel(1500.0f, 500.0f));
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.05f, micNormalizeSpeechLevel(200.0f, 4000.0f));
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, micNormalizeSpeechLevel(9000.0f, 4000.0f));
 }
 
-void test_is_impulse_false_high_average(void)
+void test_peak_reference_attack_release_and_clamp(void)
 {
-  const float ambient = 1000.0f;
-  TEST_ASSERT_FALSE(micIsImpulse(20000, 2000.0f, ambient));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 4120.0f, micUpdatePeakReference(4000.0f, 8000.0f));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 9994.0f, micUpdatePeakReference(10000.0f, 0.0f));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, MIC_PEAK_REF_MAX, micUpdatePeakReference(MIC_PEAK_REF_MAX, MIC_PEAK_REF_MAX * 2.0f));
 }
 
-void test_brightness_target_bounds(void)
+void test_brightness_target_bounds_and_shape(void)
 {
-  const float ambient = 1000.0f;
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, static_cast<float>(MIC_MIN_BRIGHTNESS),
-                           micComputeBrightnessTarget(ambient - 10.0f, ambient));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, static_cast<float>(MIC_MIN_BRIGHTNESS), micComputeBrightnessTarget(0.0f));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, static_cast<float>(MIC_MAX_BRIGHTNESS), micComputeBrightnessTarget(1.0f));
 
-  const float mappingRange = MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * 2.5f;
-  const float maxSignal = ambient + mappingRange * 2.0f;
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, static_cast<float>(MIC_MAX_BRIGHTNESS),
-                           micComputeBrightnessTarget(maxSignal, ambient));
+  const float expectedMid = static_cast<float>(MIC_MIN_BRIGHTNESS) +
+                            (static_cast<float>(MIC_MAX_BRIGHTNESS - MIC_MIN_BRIGHTNESS) * 0.5f);
+  TEST_ASSERT_FLOAT_WITHIN(0.05f, expectedMid, micComputeBrightnessTarget(0.25f));
 }
 
-void test_brightness_target_midpoint(void)
+void test_mouth_hysteresis(void)
 {
-  const float ambient = 1000.0f;
-  const float mappingRange = MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * 2.5f;
-  const float midSignal = ambient + (mappingRange * 0.5f);
-  const float expected = static_cast<float>(MIC_MIN_BRIGHTNESS) +
-                         (static_cast<float>(MIC_MAX_BRIGHTNESS - MIC_MIN_BRIGHTNESS) * 0.5f);
-  TEST_ASSERT_FLOAT_WITHIN(0.05f, expected, micComputeBrightnessTarget(midSignal, ambient));
-}
-
-void test_brightness_ema_attack_release(void)
-{
-  const float attack = 100.0f + MIC_BRIGHTNESS_ATTACK_ALPHA * (200.0f - 100.0f);
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, attack, micUpdateBrightnessEma(100.0f, 200.0f));
-
-  const float release = 200.0f + MIC_BRIGHTNESS_RELEASE_ALPHA * (100.0f - 200.0f);
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, release, micUpdateBrightnessEma(200.0f, 100.0f));
-}
-
-void test_brightness_ema_clamps(void)
-{
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, static_cast<float>(MIC_MAX_BRIGHTNESS),
-                           micUpdateBrightnessEma(250.0f, 1000.0f));
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, static_cast<float>(MIC_MIN_BRIGHTNESS),
-                           micUpdateBrightnessEma(10.0f, 0.0f));
+  TEST_ASSERT_TRUE(micShouldOpenMouth(MIC_MOUTH_OPEN_THRESHOLD, false));
+  TEST_ASSERT_FALSE(micShouldOpenMouth(MIC_MOUTH_OPEN_THRESHOLD - 0.01f, false));
+  TEST_ASSERT_TRUE(micShouldOpenMouth(MIC_MOUTH_CLOSE_THRESHOLD + 0.01f, true));
+  TEST_ASSERT_FALSE(micShouldOpenMouth(MIC_MOUTH_CLOSE_THRESHOLD - 0.01f, true));
 }
 
 void setup()
 {
   UNITY_BEGIN();
-  RUN_TEST(test_signal_above_ambient_clamps);
-  RUN_TEST(test_threshold_calculations);
-  RUN_TEST(test_peak_to_avg_computation);
-  RUN_TEST(test_is_impulse_true);
-  RUN_TEST(test_is_impulse_false_low_ratio);
-  RUN_TEST(test_is_impulse_false_high_average);
-  RUN_TEST(test_brightness_target_bounds);
-  RUN_TEST(test_brightness_target_midpoint);
-  RUN_TEST(test_brightness_ema_attack_release);
-  RUN_TEST(test_brightness_ema_clamps);
+  RUN_TEST(test_clamp_helpers);
+  RUN_TEST(test_ema_helpers);
+  RUN_TEST(test_noise_floor_tracks_quiet_audio);
+  RUN_TEST(test_noise_floor_ignores_active_audio);
+  RUN_TEST(test_speech_level_and_normalization);
+  RUN_TEST(test_peak_reference_attack_release_and_clamp);
+  RUN_TEST(test_brightness_target_bounds_and_shape);
+  RUN_TEST(test_mouth_hysteresis);
   UNITY_END();
 }
 
