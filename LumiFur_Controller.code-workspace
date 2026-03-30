@@ -24,6 +24,8 @@
 			"debug.overrideProxyUrl": ""
 		},
 		"platformio-ide.useBuiltinPIOCore": true,
-		"platformio-ide.useDevelopmentPIOCore": false
+		"platformio-ide.useDevelopmentPIOCore": false,
+		"cmake.configureOnOpen": false,
+		"cmake.configureOnEdit": false
 	}
 }

@@ -98,7 +98,7 @@ bool downloadFlag = false;
 #define DEBUG_BRIGHTNESS 0    // Set to 1 to enable brightness debug outputs
 #define DEBUG_VIEWS 0         // Set to 1 to enable views debug outputs
 #define DEBUG_VIEW_TIMING 0   // Set to 1 to enable views debug outputs
-#define DEBUG_FPS_COUNTER 0   // Set to 1 to enable FPS counter debug outputs
+#define DEBUG_FPS_COUNTER 1   // Set to 1 to enable FPS counter debug outputs
 #define DEBUG_PROXIMITY 0     // Set to 1 to enable proximity sensor debug logs
 #define TEXT_DEBUG 0          // Set to 1 to enable text debug outputs
 #define DEBUG_FLUID_EFFECT 0  // Set to 1 to enable fluid effect debug outputs
@@ -343,7 +343,7 @@ void setupAdaptiveBrightness()
   #endif
   LOG_PROX_LN("APDS init: begin() succeeded");
   // Boost sensitivity for proximity and color for auto-brightness
-  apds.setProxGain(APDS9960_PGAIN_8X);
+  apds.setProxGain(APDS9960_PGAIN_4X); // 
   // apds.setLEDDrive(APDS9960_LEDDRIVE_100MA);
   apds.setADCGain(apdsColorGain);
   apds.setADCIntegrationTime(apdsIntegrationTimeMs); // Tuning for lux range
