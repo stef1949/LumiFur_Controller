@@ -9,6 +9,7 @@
 #include "mic_config.h"
 #include "mic_math.h"
 #include "mic_pins.h"
+#include "core/PerfTelemetry.h"
 
 static TaskHandle_t s_micTaskHandle = nullptr;
 static volatile bool s_mouthOpen = false;
@@ -159,6 +160,8 @@ static void micTask(void *param)
 
   for (;;)
   {
+    const uint32_t loopStartMicros = micros();
+
     if (!s_micEnabled)
     {
       if (i2sRunning)
@@ -222,6 +225,7 @@ static void micTask(void *param)
       Serial.printf(">mic_mouth_brightness:%u\n", s_mouthBrightness);
       Serial.printf(">mic_mouth_open:%d\n", s_mouthOpen ? 1 : 0);
 #endif
+      perfTelemetryRecordDuration(PerfDurationId::MicBlock, micros() - loopStartMicros);
       vTaskDelay(1);
       continue;
     }
@@ -230,6 +234,7 @@ static void micTask(void *param)
     const size_t frames = wordsRead / MIC_SLOT_COUNT;
     if (frames == 0)
     {
+      perfTelemetryRecordDuration(PerfDurationId::MicBlock, micros() - loopStartMicros);
       vTaskDelay(1);
       continue;
     }
@@ -270,6 +275,7 @@ static void micTask(void *param)
     Serial.printf(">mic_mouth_open:%d\n", s_mouthOpen ? 1 : 0);
 #endif
 
+    perfTelemetryRecordDuration(PerfDurationId::MicBlock, micros() - loopStartMicros);
     vTaskDelay(1);
   }
 }
@@ -318,4 +324,13 @@ bool micIsMouthOpen()
 uint8_t micGetMouthBrightness()
 {
   return s_mouthBrightness;
+}
+
+uint32_t micGetTaskStackHighWaterMark()
+{
+  if (s_micTaskHandle == nullptr)
+  {
+    return 0;
+  }
+  return static_cast<uint32_t>(uxTaskGetStackHighWaterMark(s_micTaskHandle));
 }

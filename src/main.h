@@ -3,6 +3,7 @@
 
 #include <FastLED.h>
 #include "debug_config.h"
+#include "perf_tuning.h"
 #include "userPreferences.h"
 #include "deviceConfig.h"
 #include "ble/ble.h"
@@ -95,10 +96,10 @@ bool downloadFlag = false;
 
 ////////////////////// DEBUG MODE //////////////////////
 #ifndef PERF_MONITORING
-#define PERF_MONITORING 0     // Set to 1 to collect runtime timing/heap metrics
+#define PERF_MONITORING LF_PERF_MONITORING_DEFAULT // Set to 1 to collect runtime timing/heap metrics
 #endif
 #ifndef PERF_LOGGING
-#define PERF_LOGGING PERF_MONITORING 0 // Set to 0 to collect counters without serial output
+#define PERF_LOGGING LF_PERF_LOGGING_DEFAULT // Set to 1 to emit periodic perf logs
 #endif
 #ifndef PERF_REPORT_INTERVAL_MS
 #define PERF_REPORT_INTERVAL_MS 1000UL

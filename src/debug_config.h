@@ -1,10 +1,10 @@
 #pragma once
 
 #ifndef DEBUG_MODE
-#define DEBUG_MODE 0          // Set to 1 to enable debug outputs
+#define DEBUG_MODE 1          // Set to 1 to enable debug outputs
 #endif
 #ifndef DEBUG_MICROPHONE
-#define DEBUG_MICROPHONE 1    // Set to 1 to enable microphone debug outputs
+#define DEBUG_MICROPHONE 0    // Set to 1 to enable microphone debug outputs
 #endif
 #ifndef DEBUG_ACCELEROMETER
 #define DEBUG_ACCELEROMETER 0 // Set to 1 to enable accelerometer debug outputs
@@ -19,7 +19,7 @@
 #define DEBUG_VIEW_TIMING 0   // Set to 1 to enable view timing debug outputs
 #endif
 #ifndef DEBUG_FPS_COUNTER
-#define DEBUG_FPS_COUNTER 0   // Set to 1 to enable FPS counter debug outputs
+#define DEBUG_FPS_COUNTER 1   // Set to 1 to enable FPS counter debug outputs
 #endif
 #ifndef DEBUG_PROXIMITY
 #define DEBUG_PROXIMITY 0     // Set to 1 to enable proximity sensor debug logs

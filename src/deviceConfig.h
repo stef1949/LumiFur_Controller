@@ -183,9 +183,6 @@ extern MatrixPanel_I2S_DMA *dma_display;
 // patten change delay
 #define PATTERN_DELAY 2000
 
-// gradient buffer
-extern CRGB *ledbuff;
-
 // LED array
 extern CRGB leds[1];
 

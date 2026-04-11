@@ -12,7 +12,6 @@ MatrixPanel_I2S_DMA *chain = nullptr;
 MatrixPanel_I2S_DMA *dma_display = nullptr;
 #endif
 
-CRGB *ledbuff = nullptr;
 CRGB leds[1];
 
 unsigned long t1 = 0;

@@ -11,6 +11,8 @@
 
 #include "debug_config.h"
 #include "deviceConfig.h"
+#include "perf_tuning.h"
+#include "core/PerfTelemetry.h"
 
 extern bool autoBrightnessEnabled;
 extern uint8_t userBrightness;
@@ -23,16 +25,15 @@ bool apdsInitialized = false;
 bool apdsFaulted = false;
 unsigned long lastApdsProximityCheck = 0;
 unsigned long lastApdsInitRetry = 0;
-unsigned long lastLuxUpdate = 0;
+unsigned long lastAmbientSampleMs = 0;
+unsigned long lastProximitySampleMs = 0;
 
-constexpr unsigned long APDS_PROX_FALLBACK_MS = 750;
-constexpr unsigned long APDS_PROX_CACHE_MS = 50;
 constexpr unsigned long APDS_INIT_RETRY_MS = 2000;
 
 uint16_t lastKnownClearValue = 0;
-uint16_t lastKnownRedValue = 0;
-uint16_t lastKnownGreenValue = 0;
-uint16_t lastKnownBlueValue = 0;
+uint8_t lastKnownProximityValue = 0;
+bool lastKnownProximityValid = false;
+bool lastKnownAmbientValid = false;
 float lastKnownLuxValue = 0.0f;
 apds9960AGain_t apdsColorGain = APDS9960_AGAIN_4X;
 uint16_t apdsIntegrationTimeMs = 10;
@@ -50,14 +51,14 @@ constexpr float brightnessSmoothingFactor = 0.95f;
 constexpr float manualBrightnessSmoothingFactor = 0.04f;
 int lastBrightness = 0;
 constexpr int brightnessThreshold = 1;
-constexpr unsigned long luxUpdateInterval = 250;
+bool apdsInterruptConfigured = false;
 
-#if defined(APDS_AVAILABLE)
-volatile bool apdsProximityInterruptFlag = false;
+#if defined(APDS_AVAILABLE) && defined(APDS_INT_PIN)
+volatile bool apdsProximityInterruptPending = false;
 
 void IRAM_ATTR onApdsInterrupt()
 {
-  apdsProximityInterruptFlag = true;
+  apdsProximityInterruptPending = true;
 }
 #endif
 
@@ -117,6 +118,58 @@ float scaleLuxForSettings(float luxRaw)
   return luxRaw * scale;
 }
 
+#if defined(APDS_AVAILABLE)
+bool readApdsRegisterBytes(uint8_t reg, uint8_t *buffer, size_t length)
+{
+  if (buffer == nullptr || length == 0)
+  {
+    return false;
+  }
+
+  Wire.beginTransmission(APDS9960_ADDRESS);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0)
+  {
+    return false;
+  }
+
+  const size_t bytesRead = Wire.requestFrom(static_cast<uint8_t>(APDS9960_ADDRESS),
+                                            static_cast<uint8_t>(length),
+                                            static_cast<uint8_t>(true));
+  if (bytesRead != length)
+  {
+    while (Wire.available())
+    {
+      (void)Wire.read();
+    }
+    return false;
+  }
+
+  for (size_t i = 0; i < length; ++i)
+  {
+    if (!Wire.available())
+    {
+      return false;
+    }
+    buffer[i] = static_cast<uint8_t>(Wire.read());
+  }
+  return true;
+}
+
+bool readApdsClearChannel(uint16_t &clearOut)
+{
+  uint8_t raw[2] = {};
+  if (!readApdsRegisterBytes(APDS9960_CDATAL, raw, sizeof(raw)))
+  {
+    return false;
+  }
+
+  clearOut = static_cast<uint16_t>(raw[0]) |
+             (static_cast<uint16_t>(raw[1]) << 8);
+  return true;
+}
+#endif
+
 void adjustApdsColorRange(uint16_t clear)
 {
   bool changed = false;
@@ -171,7 +224,6 @@ void adjustApdsColorRange(uint16_t clear)
 void updateAmbientLightSample()
 {
   static unsigned long lastLogTime = 0;
-  static unsigned long lastForcedReadTime = 0;
   const unsigned long logInterval = 500;
 
   if (!apdsInitialized || apdsFaulted)
@@ -180,34 +232,50 @@ void updateAmbientLightSample()
   }
 
   const unsigned long now = millis();
-  const bool ready = apds.colorDataReady();
-  const bool forceRead = (now - lastForcedReadTime) >= APDS_PROX_FALLBACK_MS;
-  if (ready || forceRead)
+  if (lastKnownAmbientValid &&
+      static_cast<unsigned long>(now - lastAmbientSampleMs) < LF_APDS_LUX_SAMPLE_INTERVAL_MS)
   {
-    uint16_t r, g, b, c;
-    apds.getColorData(&r, &g, &b, &c);
-    lastForcedReadTime = now;
+    return;
+  }
 
-    lastKnownRedValue = r;
-    lastKnownGreenValue = g;
-    lastKnownBlueValue = b;
+  const uint32_t startMicros = micros();
+#if LF_APDS_USE_CLEAR_ONLY_LUX
+  uint16_t c = 0;
+  if (!readApdsClearChannel(c))
+  {
+    return;
+  }
+
+  lastKnownClearValue = c;
+  lastKnownLuxValue = scaleLuxForSettings(static_cast<float>(c));
+#else
+  uint16_t r = 0;
+  uint16_t g = 0;
+  uint16_t b = 0;
+  uint16_t c = 0;
+    apds.getColorData(&r, &g, &b, &c);
+
     lastKnownClearValue = c;
     lastKnownLuxValue = scaleLuxForSettings(calculateLuxFromRgb(r, g, b));
+#endif
 
-    adjustApdsColorRange(c);
+  lastAmbientSampleMs = now;
+  lastKnownAmbientValid = true;
+  perfTelemetryRecordDuration(PerfDurationId::ApdsTransaction, micros() - startMicros);
+
+  adjustApdsColorRange(c);
 
 #if DEBUG_BRIGHTNESS
-    if (now - lastLogTime >= logInterval)
-    {
-      lastLogTime = now;
-      Serial.printf("Ambient light: clear=%u lux=%.1f gain=%.0fx it=%ums\n",
-                    c,
-                    lastKnownLuxValue,
-                    apdsGainToFloat(apdsColorGain),
-                    apdsIntegrationTimeMs);
-    }
-#endif
+  if (now - lastLogTime >= logInterval)
+  {
+    lastLogTime = now;
+    Serial.printf("Ambient light: clear=%u lux=%.1f gain=%.0fx it=%ums\n",
+                  c,
+                  lastKnownLuxValue,
+                  apdsGainToFloat(apdsColorGain),
+                  apdsIntegrationTimeMs);
   }
+#endif
 }
 
 void updateAdaptiveBrightness()
@@ -253,13 +321,14 @@ void updateAdaptiveBrightness()
 
   static float cachedLux = 0.0f;
   static bool hasCachedLux = false;
+  static unsigned long lastBrightnessProcessMs = 0;
   const unsigned long now = millis();
 
-  if (!hasCachedLux || (now - lastLuxUpdate) >= luxUpdateInterval)
+  if (!hasCachedLux || (now - lastBrightnessProcessMs) >= LF_APDS_LUX_SAMPLE_INTERVAL_MS)
   {
     cachedLux = getAmbientLux();
     smoothedLux = (luxSmoothingFactor * cachedLux) + ((1.0f - luxSmoothingFactor) * smoothedLux);
-    lastLuxUpdate = now;
+    lastBrightnessProcessMs = now;
     hasCachedLux = true;
   }
 
@@ -318,6 +387,51 @@ void updateAdaptiveBrightness()
   }
 }
 
+void configureApdsRuntime()
+{
+  apds.setProxGain(APDS9960_PGAIN_4X);
+  apds.setADCGain(apdsColorGain);
+  apds.setADCIntegrationTime(apdsIntegrationTimeMs);
+  apds.enableProximity(true);
+  apds.enableColor(true);
+#if defined(APDS_INT_PIN)
+  apds.setProximityInterruptThreshold(0, 175);
+  apds.enableProximityInterrupt();
+  if (!apdsInterruptConfigured)
+  {
+    pinMode(APDS_INT_PIN, INPUT_PULLUP);
+    attachInterrupt(digitalPinToInterrupt(APDS_INT_PIN), onApdsInterrupt, FALLING);
+    apdsInterruptConfigured = true;
+  }
+#endif
+}
+
+bool ensureApdsReady()
+{
+  if (apdsInitialized && !apdsFaulted)
+  {
+    return true;
+  }
+
+  if (apdsFaulted)
+  {
+    return false;
+  }
+
+  apdsInitialized = apds.begin();
+  apdsFaulted = !apdsInitialized;
+  if (!apdsInitialized)
+  {
+    LOG_PROX_LN("APDS lazy init: begin() failed");
+    return false;
+  }
+
+  configureApdsRuntime();
+  lastKnownProximityValid = false;
+  LOG_PROX_LN("APDS lazy init: begin() succeeded");
+  return true;
+}
+
 } // namespace
 
 void setupAdaptiveBrightness()
@@ -340,21 +454,13 @@ void setupAdaptiveBrightness()
 
   apdsInitialized = true;
   apdsFaulted = false;
+  lastKnownProximityValid = false;
 #if DEBUG_MODE
   Serial.println("Proximity sensor initialized!");
 #endif
   LOG_PROX_LN("APDS init: begin() succeeded");
-  apds.setProxGain(APDS9960_PGAIN_4X);
-  apds.setADCGain(apdsColorGain);
-  apds.setADCIntegrationTime(apdsIntegrationTimeMs);
-  apds.enableProximity(true);
-  apds.enableColor(true);
-  apds.setProximityInterruptThreshold(0, 175);
-  apds.enableProximityInterrupt();
-#ifdef APDS_INT_PIN
-  pinMode(APDS_INT_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(APDS_INT_PIN), onApdsInterrupt, FALLING);
-#endif
+  configureApdsRuntime();
+  updateAmbientLightSample();
 #else
   (void)apdsFaulted;
   (void)apdsInitialized;
@@ -392,43 +498,53 @@ void maybeUpdateBrightness()
   updateAdaptiveBrightness();
 }
 
-bool shouldReadProximity(unsigned long now)
+bool readAmbientProximity(unsigned long now, uint8_t &proximityOut, uint32_t *transactionMicros)
 {
 #if defined(APDS_AVAILABLE)
-  if (!apdsInitialized && !apdsFaulted)
-  {
-    apdsInitialized = apds.begin();
-    apdsFaulted = !apdsInitialized;
-    if (apdsInitialized)
-    {
-      apds.enableProximity(true);
-      apds.enableColor(true);
-      apds.setProximityInterruptThreshold(0, 175);
-      apds.enableProximityInterrupt();
-      LOG_PROX_LN("APDS lazy init: begin() succeeded");
-    }
-    else
-    {
-      LOG_PROX_LN("APDS lazy init: begin() failed");
-      apdsFaulted = true;
-      apdsInitialized = false;
-    }
-  }
-
-  if (!apdsInitialized || apdsFaulted)
+  if (!ensureApdsReady())
   {
     LOG_PROX_LN("APDS not initialized or faulted; skipping proximity read");
     return false;
   }
 
-  if ((now - lastApdsProximityCheck) < APDS_PROX_CACHE_MS)
+#if defined(APDS_INT_PIN)
+  const bool interruptPending = apdsProximityInterruptPending;
+#else
+  const bool interruptPending = false;
+#endif
+
+  if (!interruptPending &&
+      lastKnownProximityValid &&
+      static_cast<unsigned long>(now - lastProximitySampleMs) < LF_APDS_PROX_SAMPLE_INTERVAL_MS)
   {
+    proximityOut = lastKnownProximityValue;
+    if (transactionMicros != nullptr)
+    {
+      *transactionMicros = 0;
+    }
     return false;
   }
 
   lastApdsProximityCheck = now;
+  const uint32_t startMicros = micros();
+  proximityOut = apds.readProximity();
+#if defined(APDS_INT_PIN)
+  apds.clearInterrupt();
+  apdsProximityInterruptPending = false;
+#endif
+  const uint32_t elapsedMicros = micros() - startMicros;
+  lastKnownProximityValue = proximityOut;
+  lastKnownProximityValid = true;
+  lastProximitySampleMs = now;
+  if (transactionMicros != nullptr)
+  {
+    *transactionMicros = elapsedMicros;
+  }
+  perfTelemetryRecordDuration(PerfDurationId::ApdsTransaction, elapsedMicros);
   return true;
 #else
+  (void)proximityOut;
+  (void)transactionMicros;
   (void)now;
   return false;
 #endif
@@ -440,7 +556,7 @@ bool shouldDeferProximityRead(unsigned long now, unsigned long guardMs)
   {
     return false;
   }
-  return static_cast<unsigned long>(now - lastLuxUpdate) < guardMs;
+  return static_cast<unsigned long>(now - lastAmbientSampleMs) < guardMs;
 }
 
 void syncBrightnessState(uint8_t brightness)

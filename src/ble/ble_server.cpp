@@ -2,8 +2,7 @@
 #include "ble/ble_state.h"
 
 #include <Arduino.h>
-#include <algorithm>
-#include <vector>
+#include <array>
 
 #include "esp_system.h"
 
@@ -26,28 +25,50 @@ bool isBondedPeer(const NimBLEConnInfo &connInfo)
     return !peerAddr.isNull() && NimBLEDevice::isBonded(peerAddr);
 }
 
-std::vector<uint16_t> pairingCandidateHandles;
+constexpr size_t kMaxPairingCandidates = CONFIG_BT_NIMBLE_MAX_CONNECTIONS;
+std::array<uint16_t, kMaxPairingCandidates> pairingCandidateHandles = {};
+size_t pairingCandidateCount = 0;
 
 void addPairingCandidate(uint16_t connHandle)
 {
-    if (std::find(pairingCandidateHandles.begin(), pairingCandidateHandles.end(), connHandle) != pairingCandidateHandles.end())
+    for (size_t index = 0; index < pairingCandidateCount; ++index)
     {
+        if (pairingCandidateHandles[index] == connHandle)
+        {
+            return;
+        }
+    }
+
+    if (pairingCandidateCount >= pairingCandidateHandles.size())
+    {
+#if DEBUG_BLE
+        Serial.printf("Pairing candidate table full, dropping handle %u\n", connHandle);
+#endif
         return;
     }
 
-    pairingCandidateHandles.push_back(connHandle);
+    pairingCandidateHandles[pairingCandidateCount++] = connHandle;
 }
 
 bool removePairingCandidate(uint16_t connHandle)
 {
-    const auto it = std::find(pairingCandidateHandles.begin(), pairingCandidateHandles.end(), connHandle);
-    if (it == pairingCandidateHandles.end())
+    for (size_t index = 0; index < pairingCandidateCount; ++index)
     {
-        return false;
+        if (pairingCandidateHandles[index] != connHandle)
+        {
+            continue;
+        }
+
+        for (size_t shift = index + 1; shift < pairingCandidateCount; ++shift)
+        {
+            pairingCandidateHandles[shift - 1] = pairingCandidateHandles[shift];
+        }
+        --pairingCandidateCount;
+        pairingCandidateHandles[pairingCandidateCount] = 0;
+        return true;
     }
 
-    pairingCandidateHandles.erase(it);
-    return true;
+    return false;
 }
 } // namespace
 
