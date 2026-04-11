@@ -3642,7 +3642,7 @@ void setup()
   Serial.println("Strobe Settings Characteristic created");
 
   // nimBLEService* pBaadService = pServer->createService("BAAD");
-  pService->start();
+  // Services are started when the GATT server starts during advertising.
 
   /** Create an advertising instance and add the services to the advertised data */
   NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
