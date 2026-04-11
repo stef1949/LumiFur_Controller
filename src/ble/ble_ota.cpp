@@ -1,5 +1,6 @@
 #include "ble/ble_ota.h"
 
+#include <Arduino.h>
 #include <esp_system.h>
 
 void OTACallbacks::onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo)

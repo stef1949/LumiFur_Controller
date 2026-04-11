@@ -462,7 +462,7 @@ static void requestDisplayRefresh()
   }
 }
 
-inline void updateGlobalBrightnessScale(uint8_t brightness)
+void updateGlobalBrightnessScale(uint8_t brightness)
 {
   globalBrightnessScale = brightness / 255.0f;
   globalBrightnessScaleFixed = static_cast<uint16_t>((static_cast<uint32_t>(brightness) * 256u + 127u) / 255u);
@@ -870,8 +870,7 @@ void wakeFromSleepMode()
   // Restore normal brightness
   dma_display->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
-  lastBrightness = userBrightness;
-  currentBrightness = static_cast<float>(userBrightness);
+  syncBrightnessState(userBrightness);
 
   lastActivityTime = millis(); // Reset activity timer
 
@@ -1097,8 +1096,7 @@ class ConfigCallbacks : public NimBLECharacteristicCallbacks
           Serial.println("Auto brightness has been DISABLED. Applying user-set brightness.");
           dma_display->setBrightness8(userBrightness);
           updateGlobalBrightnessScale(userBrightness);
-          lastBrightness = userBrightness;
-          currentBrightness = static_cast<float>(userBrightness);
+          syncBrightnessState(userBrightness);
           Serial.printf("Applied manual brightness: %u\n", userBrightness);
         }
       }
@@ -2983,7 +2981,7 @@ static void displayTask(void *pvParameters)
   };
   auto getBaseBrightness = []() -> uint8_t
   {
-    const int constrainedBrightness = constrain(lastBrightness, 0, 255);
+    const int constrainedBrightness = constrain(getLastAppliedBrightness(), 0, 255);
     return static_cast<uint8_t>(constrainedBrightness);
   };
   auto applyTransitionBrightness = [](uint8_t brightness)
@@ -3336,11 +3334,8 @@ void setup()
   initPreferences(); // Initialize Preferences
   userBrightness = static_cast<uint8_t>(constrain(getUserBrightness(), 0, 255));
   sliderBrightness = map(userBrightness, 1, 255, 1, 100);
-  adaptiveBrightness = userBrightness;
-  targetBrightness = userBrightness;
-  currentBrightness = static_cast<float>(userBrightness);
-  lastBrightness = userBrightness;
   autoBrightnessEnabled = getAutoBrightness();
+  syncBrightnessState(userBrightness);
   accelerometerEnabled = getAccelerometerEnabled();
   sleepModeEnabled = getSleepMode();
   auroraModeEnabled = getAuroraMode();
@@ -3685,16 +3680,14 @@ void setup()
   dma_display->begin();
   dma_display->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
-  lastBrightness = userBrightness;
-  currentBrightness = static_cast<float>(userBrightness);
+  syncBrightnessState(userBrightness);
   initFlameEffect(dma_display);
 #else
   chain = new MatrixPanel_I2S_DMA(mxconfig);
   chain->begin();
   chain->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
-  lastBrightness = userBrightness;
-  currentBrightness = static_cast<float>(userBrightness);
+  syncBrightnessState(userBrightness);
   // create VirtualDisplay object based on our newly created dma_display object
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
   initFlameEffect(matrix);
@@ -4823,7 +4816,7 @@ void loop()
 
     // --- Proximity Sensor Logic: Blush Trigger AND Eye Bounce Trigger ---
     // static unsigned long lastSensorReadTime = 0; // Already global
-    const bool deferProximityRead = autoBrightnessEnabled && !hasElapsedSince(loopNow, lastLuxUpdate, PROX_LUX_READ_GUARD_MS);
+    const bool deferProximityRead = shouldDeferProximityRead(loopNow, PROX_LUX_READ_GUARD_MS);
     if (!deferProximityRead)
     {
       runIfElapsed(loopNow, lastSensorReadTime, sensorInterval, [&]()

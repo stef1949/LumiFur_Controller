@@ -1,6 +1,7 @@
 #include "ble/ble_server.h"
 #include "ble/ble_state.h"
 
+#include <Arduino.h>
 #include <algorithm>
 #include <vector>
 
