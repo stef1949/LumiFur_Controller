@@ -1,10 +1,94 @@
 #include "ble/ble_server.h"
 #include "ble/ble_state.h"
 
+#include <Arduino.h>
+#include <array>
+
 #include "esp_system.h"
+
+namespace
+{
+bool isBondedPeer(const NimBLEConnInfo &connInfo)
+{
+    if (connInfo.isBonded())
+    {
+        return true;
+    }
+
+    const NimBLEAddress peerId = connInfo.getIdAddress();
+    if (!peerId.isNull() && NimBLEDevice::isBonded(peerId))
+    {
+        return true;
+    }
+
+    const NimBLEAddress peerAddr = connInfo.getAddress();
+    return !peerAddr.isNull() && NimBLEDevice::isBonded(peerAddr);
+}
+
+constexpr size_t kMaxPairingCandidates = CONFIG_BT_NIMBLE_MAX_CONNECTIONS;
+std::array<uint16_t, kMaxPairingCandidates> pairingCandidateHandles = {};
+size_t pairingCandidateCount = 0;
+
+void addPairingCandidate(uint16_t connHandle)
+{
+    for (size_t index = 0; index < pairingCandidateCount; ++index)
+    {
+        if (pairingCandidateHandles[index] == connHandle)
+        {
+            return;
+        }
+    }
+
+    if (pairingCandidateCount >= pairingCandidateHandles.size())
+    {
+#if DEBUG_BLE
+        Serial.printf("Pairing candidate table full, dropping handle %u\n", connHandle);
+#endif
+        return;
+    }
+
+    pairingCandidateHandles[pairingCandidateCount++] = connHandle;
+}
+
+bool removePairingCandidate(uint16_t connHandle)
+{
+    for (size_t index = 0; index < pairingCandidateCount; ++index)
+    {
+        if (pairingCandidateHandles[index] != connHandle)
+        {
+            continue;
+        }
+
+        for (size_t shift = index + 1; shift < pairingCandidateCount; ++shift)
+        {
+            pairingCandidateHandles[shift - 1] = pairingCandidateHandles[shift];
+        }
+        --pairingCandidateCount;
+        pairingCandidateHandles[pairingCandidateCount] = 0;
+        return true;
+    }
+
+    return false;
+}
+} // namespace
 
 void ServerCallbacks::onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo)
 {
+    const bool bondedPeer = isBondedPeer(connInfo);
+    if (!bondedPeer && !isPairingModeActive())
+    {
+#if DEBUG_BLE
+        Serial.printf("Rejecting BLE connection from unpaired device: %s\n", connInfo.getAddress().toString().c_str());
+#endif
+        pServer->disconnect(connInfo.getConnHandle());
+        return;
+    }
+
+    if (!bondedPeer)
+    {
+        addPairingCandidate(connInfo.getConnHandle());
+    }
+
     deviceConnected = true;
 
     /**
@@ -22,17 +106,10 @@ void ServerCallbacks::onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo)
 #endif
 }
 
-void ServerCallbacks::onPairingRequest(NimBLEServer *pServer, NimBLEConnInfo &connInfo)
-{
-    setPairingState(true, false, 0, false);
-#if DEBUG_BLE
-    Serial.printf("Pairing request from: %s\n", connInfo.getAddress().toString().c_str());
-#endif
-}
-
 void ServerCallbacks::onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason)
 {
-    deviceConnected = false;
+    removePairingCandidate(connInfo.getConnHandle());
+    deviceConnected = pServer->getConnectedCount() > 0;
     setPairingState(false, false, 0, true);
     const bool resetPending = isPairingResetPending();
     if (resetPending && pServer->getConnectedCount() == 0)
@@ -43,7 +120,7 @@ void ServerCallbacks::onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connIn
         Serial.printf("BLE pairing reset: bonds cleared=%s\n", cleared ? "true" : "false");
 #endif
     }
-    NimBLEDevice::startAdvertising();
+    refreshBleAdvertising();
 #if DEBUG_BLE
     Serial.println("Client disconnected - advertising");
 #endif
@@ -83,14 +160,24 @@ void ServerCallbacks::onConfirmPassKey(NimBLEConnInfo &connInfo, uint32_t pass_k
 
 void ServerCallbacks::onAuthenticationComplete(NimBLEConnInfo &connInfo)
 {
+    const bool pairedDuringThisSession = removePairingCandidate(connInfo.getConnHandle());
+
     if (!connInfo.isEncrypted())
     {
         Serial.printf("Encryption not established for: %s\n", connInfo.getAddress().toString().c_str());
-        // Instead of disconnecting, you might choose to leave the connection or handle it gracefully.
-        // For production use you can decide to force disconnect once you’re sure your client supports pairing.
         setPairingState(false, false, 0, true);
+        if (pServer != nullptr)
+        {
+            pServer->disconnect(connInfo.getConnHandle());
+        }
         return;
     }
+
+    if (pairedDuringThisSession)
+    {
+        stopPairingMode(true);
+    }
+
     setPairingState(false, false, 0, true);
     Serial.printf("Secured connection to: %s\n", connInfo.getAddress().toString().c_str());
 }

@@ -8,8 +8,8 @@
 #define I2S_BITS_PER_SAMPLE_32BIT 32
 #endif
 
-#ifndef I2S_CHANNEL_FMT_ONLY_LEFT
-#define I2S_CHANNEL_FMT_ONLY_LEFT 1
+#ifndef I2S_CHANNEL_FMT_RIGHT_LEFT
+#define I2S_CHANNEL_FMT_RIGHT_LEFT 0
 #endif
 
 #ifndef I2S_COMM_FORMAT_STAND_I2S
@@ -27,70 +27,40 @@ void tearDown(void)
 {
 }
 
-void test_threshold_relationships(void)
+void test_slot_selection_configuration(void)
 {
-  const float ambient = 1000.0f;
-  const float openThreshold = micComputeOpenThreshold(ambient);
-  const float closeThreshold = micComputeCloseThreshold(ambient);
-  const float updateLimit = micComputeAmbientUpdateLimit(ambient);
-  const float impulseAvgLimit = micComputeImpulseAvgLimit(ambient);
-
-  TEST_ASSERT_GREATER_THAN_FLOAT(closeThreshold, openThreshold);
-  TEST_ASSERT_GREATER_THAN_FLOAT(updateLimit, openThreshold);
-  TEST_ASSERT_GREATER_THAN_FLOAT(impulseAvgLimit, openThreshold);
-  TEST_ASSERT_GREATER_THAN_FLOAT(ambient, closeThreshold);
+  TEST_ASSERT_EQUAL_INT(I2S_CHANNEL_FMT_RIGHT_LEFT, MIC_CHANNEL_FORMAT);
+  TEST_ASSERT_TRUE((MIC_ACTIVE_SLOT_INDEX == 0) || (MIC_ACTIVE_SLOT_INDEX == 1));
 }
 
-void test_peak_to_avg_zero_when_avg_leq_one(void)
+void test_mouth_threshold_relationships(void)
 {
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, micComputePeakToAvg(100, 1.0f));
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, micComputePeakToAvg(100, 0.5f));
+  TEST_ASSERT_TRUE(MIC_MOUTH_OPEN_THRESHOLD > MIC_MOUTH_CLOSE_THRESHOLD);
+  TEST_ASSERT_TRUE(micShouldOpenMouth(MIC_MOUTH_OPEN_THRESHOLD, false));
+  TEST_ASSERT_FALSE(micShouldOpenMouth(MIC_MOUTH_CLOSE_THRESHOLD - 0.01f, true));
 }
 
-void test_is_impulse_at_threshold_true(void)
+void test_speech_gate_requires_margin_above_floor(void)
 {
-  const float ambient = 1000.0f;
-  const float avg = 100.0f;
-  const std::uint32_t peak = static_cast<std::uint32_t>(MIC_IMPULSE_PEAK_RATIO * avg);
-  TEST_ASSERT_TRUE(micIsImpulse(peak, avg, ambient));
+  const float floor = 500.0f;
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 0.0f, micComputeSpeechLevel(floor + MIC_NOISE_GATE_MARGIN, floor));
+  TEST_ASSERT_FLOAT_WITHIN(0.01f, 50.0f, micComputeSpeechLevel(floor + MIC_NOISE_GATE_MARGIN + 50.0f, floor));
 }
 
-void test_is_impulse_at_limit_false(void)
+void test_peak_reference_returns_to_minimum(void)
 {
-  const float ambient = 1000.0f;
-  const float avg = micComputeImpulseAvgLimit(ambient);
-  const std::uint32_t peak = static_cast<std::uint32_t>(MIC_IMPULSE_PEAK_RATIO * avg);
-  TEST_ASSERT_FALSE(micIsImpulse(peak, avg, ambient));
-}
-
-void test_brightness_target_clamps_min_max(void)
-{
-  const float ambient = 1000.0f;
-  const float mappingRange = MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * 2.5f;
-  const float lowSignal = ambient - 100.0f;
-  const float highSignal = ambient + (mappingRange * 5.0f);
-
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, static_cast<float>(MIC_MIN_BRIGHTNESS),
-                           micComputeBrightnessTarget(lowSignal, ambient));
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, static_cast<float>(MIC_MAX_BRIGHTNESS),
-                           micComputeBrightnessTarget(highSignal, ambient));
-}
-
-void test_brightness_ema_no_change_when_equal(void)
-{
-  const float value = 123.4f;
-  TEST_ASSERT_FLOAT_WITHIN(0.01f, value, micUpdateBrightnessEma(value, value));
+  const float released = micUpdatePeakReference(MIC_PEAK_REF_MIN + 1000.0f, 0.0f);
+  TEST_ASSERT_TRUE(released < (MIC_PEAK_REF_MIN + 1000.0f));
+  TEST_ASSERT_TRUE(released > MIC_PEAK_REF_MIN);
 }
 
 void setup()
 {
   UNITY_BEGIN();
-  RUN_TEST(test_threshold_relationships);
-  RUN_TEST(test_peak_to_avg_zero_when_avg_leq_one);
-  RUN_TEST(test_is_impulse_at_threshold_true);
-  RUN_TEST(test_is_impulse_at_limit_false);
-  RUN_TEST(test_brightness_target_clamps_min_max);
-  RUN_TEST(test_brightness_ema_no_change_when_equal);
+  RUN_TEST(test_slot_selection_configuration);
+  RUN_TEST(test_mouth_threshold_relationships);
+  RUN_TEST(test_speech_gate_requires_margin_above_floor);
+  RUN_TEST(test_peak_reference_returns_to_minimum);
   UNITY_END();
 }
 

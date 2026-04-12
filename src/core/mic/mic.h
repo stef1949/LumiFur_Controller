@@ -7,5 +7,6 @@ void micInit();
 void micSetEnabled(bool enabled);
 bool micIsMouthOpen();
 uint8_t micGetMouthBrightness();
+uint32_t micGetTaskStackHighWaterMark();
 
 #endif // MIC_H

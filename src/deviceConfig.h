@@ -1,3 +1,10 @@
+#pragma once
+
+#include <FastLED.h>
+
+class MatrixPanel_I2S_DMA;
+class VirtualMatrixPanel;
+
 /////////////////////////////////////////////////////
 /////////////////////////////////////////////////////
 /////////////////////////////////////////////////////
@@ -66,11 +73,11 @@
 // the pin that the interrupt is attached to
 // #define INT_PIN 3
 #define APDS_AVAILABLE
-Adafruit_APDS9960 apds;
+extern Adafruit_APDS9960 apds;
 #include <Adafruit_LIS3DH.h>   // Library for built-in For accelerometer
 #include <Adafruit_NeoPixel.h> // Library for built-in NeoPixel
 #define STATUS_LED_PIN 4
-Adafruit_NeoPixel statusPixel(1, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
+extern Adafruit_NeoPixel statusPixel;
 #include "core/mic/mic_pins.h"
 #define ACCEL_AVAILABLE
 #elif defined(ARDUINO_ADAFRUIT_METRO_ESP32S3) // Metro ESP32-S3
@@ -167,25 +174,30 @@ Adafruit_NeoPixel statusPixel(1, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
 #endif
 
 #ifdef VIRTUAL_PANE
-VirtualMatrixPanel *matrix = nullptr;
-MatrixPanel_I2S_DMA *chain = nullptr;
+extern VirtualMatrixPanel *matrix;
+extern MatrixPanel_I2S_DMA *chain;
 #else
-MatrixPanel_I2S_DMA *dma_display = nullptr;
+extern MatrixPanel_I2S_DMA *dma_display;
 #endif
 
 // patten change delay
 #define PATTERN_DELAY 2000
 
-// gradient buffer
-CRGB *ledbuff;
-
 // LED array
-CRGB leds[1];
+extern CRGB leds[1];
 
-unsigned long t1, t2, s1 = 0, s2 = 0, s3 = 0;
-uint32_t ccount1, ccount2;
+extern unsigned long t1;
+extern unsigned long t2;
+extern unsigned long s1;
+extern unsigned long s2;
+extern unsigned long s3;
+extern uint32_t ccount1;
+extern uint32_t ccount2;
 
-uint8_t color1 = 0, color2 = 0, color3 = 0;
-uint16_t x, y;
+extern uint8_t color1;
+extern uint8_t color2;
+extern uint8_t color3;
+extern uint16_t x;
+extern uint16_t y;
 
-const char *message = "* ESP32 I2S DMA *";
+extern const char *message;

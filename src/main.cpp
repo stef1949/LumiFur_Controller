@@ -10,6 +10,7 @@
 
 #include <Arduino.h>
 #include <Adafruit_GFX.h>
+#include <FFat.h>
 #include <Wire.h> // For I2C sensors
 #ifdef VIRTUAL_PANE
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>
@@ -24,10 +25,14 @@
 #include "customEffects/strobeEffect.h"
 #include "core/mic/mic.h"
 #include "core/ColorParser.h"
+#include "core/PerfTelemetry.h"
 #include "customEffects/flameEffect.h"
 #include "customEffects/fluidEffect.h"
+#include "customEffects/monoVideoPlayer.h"
 #include "core/AnimationState.h"
 #include "core/ScrollState.h"
+#include "ble/ble_worker.h"
+#include "perf_tuning.h"
 // #include "customEffects/pixelDustEffect.h" // New effect
 
 // BLE Libraries
@@ -39,6 +44,21 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+
+#include "freertos/queue.h"
+#include "freertos/task.h"
+
+struct BleWorkQueueStats
+{
+  uint32_t drops = 0;
+  UBaseType_t highWaterDepth = 0;
+};
+
+static TaskHandle_t displayTaskHandle = NULL;
+static TaskHandle_t bleNotifyTaskHandle = NULL;
+static TaskHandle_t bleWorkerTaskHandle = NULL;
+static QueueHandle_t bleWorkQueue = nullptr;
+static BleWorkQueueStats bleTakeQueueStats();
 
 // #define PIXEL_COLOR_DEPTH_BITS 16 // 16 bits per pixel
 #if DEBUG_MODE
@@ -148,6 +168,15 @@ static void perfMaybeReport(unsigned long nowMs)
 
   const uint32_t freeHeap = ESP.getFreeHeap();
   const uint32_t minFreeHeap = ESP.getMinFreeHeap();
+  const PerfTelemetrySnapshot telemetry = perfTelemetryTakeSnapshot();
+  const BleWorkQueueStats bleQueueStats = bleTakeQueueStats();
+  const unsigned long bleQueueDepth = bleWorkQueue ? static_cast<unsigned long>(uxQueueMessagesWaiting(bleWorkQueue)) : 0UL;
+  const unsigned long bleQueueHighWater = static_cast<unsigned long>(bleQueueStats.highWaterDepth);
+  const unsigned long bleQueueDrops = static_cast<unsigned long>(bleQueueStats.drops);
+  const unsigned long displayStackMin = displayTaskHandle ? static_cast<unsigned long>(uxTaskGetStackHighWaterMark(displayTaskHandle)) : 0UL;
+  const unsigned long bleNotifyStackMin = bleNotifyTaskHandle ? static_cast<unsigned long>(uxTaskGetStackHighWaterMark(bleNotifyTaskHandle)) : 0UL;
+  const unsigned long bleWorkerStackMin = bleWorkerTaskHandle ? static_cast<unsigned long>(uxTaskGetStackHighWaterMark(bleWorkerTaskHandle)) : 0UL;
+  const unsigned long micStackMin = static_cast<unsigned long>(micGetTaskStackHighWaterMark());
 
   const auto avgMicros = [](uint64_t total, uint32_t count) -> uint32_t
   {
@@ -163,9 +192,15 @@ static void perfMaybeReport(unsigned long nowMs)
   const PerfBucketStats &sensors = snapshot.buckets[static_cast<size_t>(PerfBucket::Sensors)];
   const PerfBucketStats &io = snapshot.buckets[static_cast<size_t>(PerfBucket::Io)];
   const PerfBucketStats &animation = snapshot.buckets[static_cast<size_t>(PerfBucket::Animation)];
+  const PerfDurationStatsSnapshot &renderFrame = telemetry.durations[static_cast<size_t>(PerfDurationId::RenderFrame)];
+  const PerfDurationStatsSnapshot &bleCallback = telemetry.durations[static_cast<size_t>(PerfDurationId::BleCallback)];
+  const PerfDurationStatsSnapshot &micBlock = telemetry.durations[static_cast<size_t>(PerfDurationId::MicBlock)];
+  const PerfDurationStatsSnapshot &apdsTxn = telemetry.durations[static_cast<size_t>(PerfDurationId::ApdsTransaction)];
+  const PerfDurationStatsSnapshot &displayBusy = telemetry.durations[static_cast<size_t>(PerfDurationId::DisplayTaskBusy)];
+  const PerfDurationStatsSnapshot &bleWorkerBusy = telemetry.durations[static_cast<size_t>(PerfDurationId::BleWorkerTaskBusy)];
 
   Serial.printf(
-      "PERF loop=%lu avg=%luus max=%luus render=%lu/%luus/%luus ble=%lu/%luus/%luus sens=%lu/%luus/%luus io=%lu/%luus/%luus anim=%lu/%luus/%luus heap=%lu min=%lu\n",
+      "PERF loop=%lu avg=%luus max=%luus render=%lu/%luus/%luus ble=%lu/%luus/%luus sens=%lu/%luus/%luus io=%lu/%luus/%luus anim=%lu/%luus/%luus frame=%lu/%luus/%luus slow=%lu blecb=%lu/%luus/%luus mic=%lu/%luus/%luus apds=%lu/%luus/%luus disp=%lu/%luus/%luus blewrk=%lu/%luus/%luus q=%lu qhi=%lu qdrop=%lu stkD=%lu stkN=%lu stkW=%lu stkM=%lu heap=%lu min=%lu\n",
       static_cast<unsigned long>(snapshot.loopCount),
       static_cast<unsigned long>(avgMicros(snapshot.loopTotalMicros, snapshot.loopCount)),
       static_cast<unsigned long>(snapshot.loopMaxMicros),
@@ -184,6 +219,32 @@ static void perfMaybeReport(unsigned long nowMs)
       static_cast<unsigned long>(animation.calls),
       static_cast<unsigned long>(avgMicros(animation.totalMicros, animation.calls)),
       static_cast<unsigned long>(animation.maxMicros),
+      static_cast<unsigned long>(renderFrame.calls),
+      static_cast<unsigned long>(avgMicros(renderFrame.totalMicros, renderFrame.calls)),
+      static_cast<unsigned long>(renderFrame.maxMicros),
+      static_cast<unsigned long>(telemetry.slowFrames),
+      static_cast<unsigned long>(bleCallback.calls),
+      static_cast<unsigned long>(avgMicros(bleCallback.totalMicros, bleCallback.calls)),
+      static_cast<unsigned long>(bleCallback.maxMicros),
+      static_cast<unsigned long>(micBlock.calls),
+      static_cast<unsigned long>(avgMicros(micBlock.totalMicros, micBlock.calls)),
+      static_cast<unsigned long>(micBlock.maxMicros),
+      static_cast<unsigned long>(apdsTxn.calls),
+      static_cast<unsigned long>(avgMicros(apdsTxn.totalMicros, apdsTxn.calls)),
+      static_cast<unsigned long>(apdsTxn.maxMicros),
+      static_cast<unsigned long>(displayBusy.calls),
+      static_cast<unsigned long>(avgMicros(displayBusy.totalMicros, displayBusy.calls)),
+      static_cast<unsigned long>(displayBusy.maxMicros),
+      static_cast<unsigned long>(bleWorkerBusy.calls),
+      static_cast<unsigned long>(avgMicros(bleWorkerBusy.totalMicros, bleWorkerBusy.calls)),
+      static_cast<unsigned long>(bleWorkerBusy.maxMicros),
+      bleQueueDepth,
+      bleQueueHighWater,
+      bleQueueDrops,
+      displayStackMin,
+      bleNotifyStackMin,
+      bleWorkerStackMin,
+      micStackMin,
       static_cast<unsigned long>(freeHeap),
       static_cast<unsigned long>(minFreeHeap));
 #else
@@ -218,20 +279,42 @@ inline void perfMaybeReport(unsigned long nowMs)
 // ----------------------------------------------------------------
 // ----------------------------------------------------------------
 FluidEffect *fluidEffectInstance = nullptr; // Global pointer for our fluid effect object
+MonoVideoPlayer *videoPlayerInstance = nullptr;
 // FluidEffect* fluidEffectInstance = nullptr; // Keep or remove if replacing
 // PixelDustEffect* pixelDustEffectInstance = nullptr; // Add this
 // Brightness control
 //  Retrieve the brightness value from preferences
 bool g_accelerometer_initialized = false;
+static constexpr char BAD_APPLE_VIDEO_PATH[] = "/videos/bad_apple.lfv";
+static bool gVideoStorageReady = false;
 
 constexpr unsigned long MOTION_SAMPLE_INTERVAL_FAST = 15; // ms between accel reads when looking for shakes
 
 // --- Performance Tuning ---
 // Target ~50-60 FPS. Adjust as needed based on view complexity.
-const unsigned long targetFrameIntervalMillis = 16; // ~60 FPS pacing on 1 kHz ticks, ~50 FPS on 100 Hz ticks
-constexpr unsigned long PATTERN_PLASMA_FRAME_INTERVAL_MS = 9; // ~111 FPS target on 1 kHz ticks
-constexpr uint32_t SLOW_FRAME_THRESHOLD_US = targetFrameIntervalMillis * 1000UL;
+const unsigned long targetFrameIntervalMillis = 8; // ~60 FPS pacing on 1 kHz ticks, ~50 FPS on 100 Hz ticks
+constexpr unsigned long PATTERN_PLASMA_FRAME_INTERVAL_MS = LF_FACE_VIEW_FRAME_INTERVAL_MS;
 constexpr uint8_t VIEW_TRANSITION_FADE_STEPS = 8;
+
+static bool initializeVideoStorage()
+{
+  if (FFat.begin(true))
+  {
+    if (!FFat.exists("/videos"))
+    {
+      FFat.mkdir("/videos");
+    }
+
+    Serial.printf("FFat mounted: total=%lu used=%lu free=%lu\n",
+                  static_cast<unsigned long>(FFat.totalBytes()),
+                  static_cast<unsigned long>(FFat.usedBytes()),
+                  static_cast<unsigned long>(FFat.freeBytes()));
+    return true;
+  }
+
+  Serial.println("FFat mount failed; video playback disabled until storage is available.");
+  return false;
+}
 
 #if DEBUG_MODE
 constexpr uint32_t SLOW_SECTION_THRESHOLD_US = 2000; // Flag non-render work that takes >2ms
@@ -268,8 +351,10 @@ bool brightnessChanged = false;
 
 constexpr unsigned long LUX_UPDATE_INTERVAL_MS = 500;
 constexpr unsigned long SLEEP_CHECK_INTERVAL_MS = 60;
+constexpr unsigned long BUTTON_DEBOUNCE_MS = 50;
+constexpr unsigned long PAIRING_MODE_HOLD_MS = 3000;
+constexpr unsigned long PAIRING_MODE_WINDOW_MS = 60000;
 constexpr unsigned long PAIRING_RESET_HOLD_MS = 3000;
-constexpr unsigned long PAIRING_RESET_DEBOUNCE_MS = 50;
 constexpr unsigned long BLE_STATUS_LED_INTERVAL_MS = 25;
 constexpr unsigned long PROX_LUX_READ_GUARD_MS = 20;
 constexpr unsigned long ANIMATION_UPDATE_INTERVAL_MS = 8;
@@ -282,6 +367,102 @@ static unsigned long lastBleStatusLedUpdateTime = 0;
 static unsigned long lastAnimationUpdateTime = 0;
 static unsigned long lastMotionCheckTime = 0;
 static unsigned long lastBrightnessUpdateTime = 0;
+
+namespace
+{
+struct ButtonState
+{
+  bool rawPressed = false;
+  bool stablePressed = false;
+  bool longPressHandled = false;
+  bool shortPressPending = false;
+  unsigned long lastChangeMs = 0;
+  unsigned long pressedAtMs = 0;
+};
+
+void updateButtonState(ButtonState &button, bool pressedSample, unsigned long nowMs, unsigned long debounceMs)
+{
+  if (pressedSample != button.rawPressed)
+  {
+    button.rawPressed = pressedSample;
+    button.lastChangeMs = nowMs;
+  }
+
+  if ((nowMs - button.lastChangeMs) < debounceMs || button.stablePressed == button.rawPressed)
+  {
+    return;
+  }
+
+  button.stablePressed = button.rawPressed;
+  if (button.stablePressed)
+  {
+    button.pressedAtMs = nowMs;
+    button.longPressHandled = false;
+    button.shortPressPending = false;
+    return;
+  }
+
+  if (!button.longPressHandled)
+  {
+    button.shortPressPending = true;
+  }
+}
+
+void suppressButtonPress(ButtonState &button)
+{
+  button.shortPressPending = false;
+  if (button.stablePressed)
+  {
+    button.longPressHandled = true;
+  }
+}
+
+bool consumeButtonShortPress(ButtonState &button)
+{
+  const bool pending = button.shortPressPending;
+  button.shortPressPending = false;
+  return pending;
+}
+
+bool consumeButtonLongPress(ButtonState &button, unsigned long nowMs, unsigned long holdMs)
+{
+  if (!button.stablePressed || button.longPressHandled)
+  {
+    return false;
+  }
+
+  if ((nowMs - button.pressedAtMs) < holdMs)
+  {
+    return false;
+  }
+
+  button.longPressHandled = true;
+  button.shortPressPending = false;
+  return true;
+}
+
+// Derived from the Alt_ bitmap exports with the source XBM bit order/background normalized.
+static const uint8_t AltFaceNose[] PROGMEM = {
+    0xb0, 0xf8, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
+static const uint8_t AltFaceBlushL[] PROGMEM = {
+    0x80, 0x8c, 0x00, 0x9a, 0xc0, 0xb6, 0x80, 0xec, 0x00, 0x80};
+static const uint8_t AltFaceBrowL[] PROGMEM = {
+    0xc0, 0x80, 0xc0, 0x86, 0x80, 0x8e, 0x00, 0x9e, 0x00, 0xbe, 0x00, 0xfc, 0x00, 0xf0};
+static const uint8_t AltFaceScleraL[] PROGMEM = {
+    0x7f, 0x00, 0x80, 0xff, 0x01, 0x80, 0xff, 0x0f, 0x80, 0xff, 0x3f, 0x80, 0xff, 0xff, 0x80, 0xfe,
+    0xff, 0x82, 0xfc, 0xff, 0x86, 0xfc, 0xff, 0x8e, 0xf8, 0xff, 0x9e, 0xf0, 0xff, 0xfe, 0xe0, 0xff,
+    0xbe, 0xc0, 0xff, 0x86, 0x80, 0x3f, 0x80};
+static const uint8_t AltFaceBlushR[] PROGMEM = {
+    0xd8, 0x80, 0x6c, 0x80, 0xb6, 0x80, 0xdb, 0x80, 0x40, 0x80};
+static const uint8_t AltFaceBrowR[] PROGMEM = {
+    0xc0, 0x80, 0xf0, 0x80, 0xf8, 0x80, 0x7c, 0x80, 0x3e, 0x80, 0x1f, 0x80, 0x07, 0x80};
+static const uint8_t AltFaceScleraR[] PROGMEM = {
+    0x00, 0x00, 0xfe, 0x00, 0xc0, 0xfe, 0x00, 0xf8, 0xfe, 0x00, 0xfe, 0xfe, 0x80, 0xff, 0xfe, 0xe0,
+    0xff, 0xbe, 0xf0, 0xff, 0x9e, 0xf8, 0xff, 0x9e, 0xfc, 0xff, 0x8e, 0xff, 0xff, 0x86, 0xfe, 0xff,
+    0x82, 0xf0, 0xff, 0x80, 0x00, 0xfe, 0x80};
+static const uint8_t AltFacePupil[] PROGMEM = {
+    0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0, 0xe0};
+} // namespace
 
 // View switching
 volatile uint8_t currentView = VIEW_FLAME_EFFECT; // Current view (volatile so the display task sees updates)
@@ -329,7 +510,12 @@ volatile uint8_t &blushBrightness = gAnimationState.blushBrightness;
 float globalBrightnessScale = 0.0f;
 uint16_t globalBrightnessScaleFixed = 256;
 bool facePlasmaDirty = true;
-static TaskHandle_t displayTaskHandle = NULL;
+static portMUX_TYPE gLastViewPersistMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool gLastViewPersistDirty = false;
+static volatile uint8_t gPendingLastView = 0;
+static volatile unsigned long gPendingLastViewChangedMs = 0;
+static uint8_t gLastPersistedView = 0;
+static unsigned long gLastButtonInteractionMs = 0;
 
 static void requestDisplayRefresh()
 {
@@ -339,7 +525,60 @@ static void requestDisplayRefresh()
   }
 }
 
-inline void updateGlobalBrightnessScale(uint8_t brightness)
+static void noteButtonInteraction(unsigned long nowMs)
+{
+  gLastButtonInteractionMs = nowMs;
+}
+
+static bool shakeSuppressedByRecentButton(unsigned long nowMs)
+{
+  return !hasElapsedSince(nowMs, gLastButtonInteractionMs, LF_SHAKE_SUPPRESS_AFTER_BUTTON_MS);
+}
+
+static void scheduleLastViewPersist(uint8_t view)
+{
+  const unsigned long nowMs = millis();
+  portENTER_CRITICAL(&gLastViewPersistMux);
+  gPendingLastView = view;
+  gPendingLastViewChangedMs = nowMs;
+  gLastViewPersistDirty = true;
+  portEXIT_CRITICAL(&gLastViewPersistMux);
+}
+
+static void flushPendingLastViewPersist(unsigned long nowMs)
+{
+  bool dirty = false;
+  uint8_t pendingView = 0;
+  unsigned long changedMs = 0;
+
+  portENTER_CRITICAL(&gLastViewPersistMux);
+  dirty = gLastViewPersistDirty;
+  pendingView = gPendingLastView;
+  changedMs = gPendingLastViewChangedMs;
+  portEXIT_CRITICAL(&gLastViewPersistMux);
+
+  if (!dirty || !hasElapsedSince(nowMs, changedMs, LF_LAST_VIEW_PERSIST_DELAY_MS))
+  {
+    return;
+  }
+
+  if (pendingView != gLastPersistedView)
+  {
+    saveLastView(pendingView);
+    gLastPersistedView = pendingView;
+  }
+
+  portENTER_CRITICAL(&gLastViewPersistMux);
+  if (gLastViewPersistDirty &&
+      gPendingLastView == pendingView &&
+      gPendingLastViewChangedMs == changedMs)
+  {
+    gLastViewPersistDirty = false;
+  }
+  portEXIT_CRITICAL(&gLastViewPersistMux);
+}
+
+void updateGlobalBrightnessScale(uint8_t brightness)
 {
   globalBrightnessScale = brightness / 255.0f;
   globalBrightnessScaleFixed = static_cast<uint16_t>((static_cast<uint32_t>(brightness) * 256u + 127u) / 255u);
@@ -536,8 +775,8 @@ constexpr unsigned long EYE_BOUNCE_DURATION = 400;
 constexpr int EYE_BOUNCE_AMPLITUDE = 5;
 constexpr int MAX_EYE_BOUNCES = 10;
 
-const int IDLE_HOVER_AMPLITUDE_Y = 1;
-const int IDLE_HOVER_AMPLITUDE_X = 1;
+const int IDLE_HOVER_AMPLITUDE_Y = 2.5;
+const int IDLE_HOVER_AMPLITUDE_X = 2.5;
 const unsigned long IDLE_HOVER_PERIOD_MS_Y = 3000;
 const unsigned long IDLE_HOVER_PERIOD_MS_X = 4200;
 
@@ -644,7 +883,100 @@ const float LOG_SPIRAL_B_COEFF = 0.10f; // Controls how tightly wound the spiral
 const float SPIRAL_ARM_COLOR_FACTOR = 5.0f; // Could be based on 'r' now instead of 'theta_arm'
 const float SPIRAL_THICKNESS_RADIUS = 1.0f; // Start with 0 for performance, then increase
 
-static TaskHandle_t bleNotifyTaskHandle = NULL;
+static portMUX_TYPE gBleWorkQueueStatsMux = portMUX_INITIALIZER_UNLOCKED;
+static BleWorkQueueStats gBleWorkQueueStats;
+
+static void bleWorkerTask(void *param);
+static void handleBleCommandWork(const BleWorkItem &item);
+static void handleBleFaceWriteWork(const BleWorkItem &item);
+static void handleBleConfigWriteWork(const BleWorkItem &item);
+static void handleBleBrightnessWriteWork(const BleWorkItem &item);
+static void handleBleStaticColorWriteWork(const BleWorkItem &item);
+static void handleBleStrobeSettingsWriteWork(const BleWorkItem &item);
+
+static void bleRecordQueueDepth(UBaseType_t depth)
+{
+  portENTER_CRITICAL(&gBleWorkQueueStatsMux);
+  if (depth > gBleWorkQueueStats.highWaterDepth)
+  {
+    gBleWorkQueueStats.highWaterDepth = depth;
+  }
+  portEXIT_CRITICAL(&gBleWorkQueueStatsMux);
+}
+
+static void bleRecordQueueDrop()
+{
+  portENTER_CRITICAL(&gBleWorkQueueStatsMux);
+  ++gBleWorkQueueStats.drops;
+  portEXIT_CRITICAL(&gBleWorkQueueStatsMux);
+}
+
+static BleWorkQueueStats bleTakeQueueStats()
+{
+  BleWorkQueueStats snapshot{};
+  portENTER_CRITICAL(&gBleWorkQueueStatsMux);
+  snapshot = gBleWorkQueueStats;
+  gBleWorkQueueStats = {};
+  portEXIT_CRITICAL(&gBleWorkQueueStatsMux);
+  return snapshot;
+}
+
+static bool bleQueueWorkInternal(const BleWorkItem &item)
+{
+  if (bleWorkQueue == nullptr)
+  {
+    return false;
+  }
+
+  if (xQueueSend(bleWorkQueue, &item, 0) != pdPASS)
+  {
+    bleRecordQueueDrop();
+    return false;
+  }
+
+  bleRecordQueueDepth(uxQueueMessagesWaiting(bleWorkQueue));
+  return true;
+}
+
+bool bleQueuePayload(BleWorkType type, NimBLECharacteristic *characteristic, const uint8_t *data, size_t length)
+{
+  if ((length > 0 && data == nullptr) || length > LF_BLE_WORK_ITEM_PAYLOAD_MAX)
+  {
+    return false;
+  }
+
+  BleWorkItem item{};
+  item.type = type;
+  item.characteristic = characteristic;
+  item.length = static_cast<uint16_t>(length);
+  if (length > 0)
+  {
+    std::memcpy(item.data, data, length);
+  }
+  return bleQueueWorkInternal(item);
+}
+
+bool bleQueueString(BleWorkType type, NimBLECharacteristic *characteristic, const std::string &value)
+{
+  return bleQueuePayload(type, characteristic,
+                         reinterpret_cast<const uint8_t *>(value.data()),
+                         value.size());
+}
+
+bool bleQueueByte(BleWorkType type, NimBLECharacteristic *characteristic, uint8_t value)
+{
+  return bleQueuePayload(type, characteristic, &value, 1);
+}
+
+bool bleQueueEmpty(BleWorkType type, NimBLECharacteristic *characteristic)
+{
+  return bleQueuePayload(type, characteristic, nullptr, 0);
+}
+
+bool bleIsOtaBusy()
+{
+  return otaCallbacks.isActive();
+}
 
 inline void notifyBleTask()
 {
@@ -706,6 +1038,7 @@ static bool viewUsesMic(int view)
   case VIEW_PLASMA_FACE:
   case VIEW_UWU_EYES:
   case VIEW_CIRCLE_EYES:
+  case VIEW_ALT_FACE:
     return true;
   default:
     return false;
@@ -746,8 +1079,7 @@ void wakeFromSleepMode()
   // Restore normal brightness
   dma_display->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
-  lastBrightness = userBrightness;
-  currentBrightness = static_cast<float>(userBrightness);
+  syncBrightnessState(userBrightness);
 
   lastActivityTime = millis(); // Reset activity timer
 
@@ -768,7 +1100,7 @@ void wakeFromSleepMode()
   {
     NimBLEDevice::getAdvertising()->setMinInterval(160); // 100 ms (default)
     NimBLEDevice::getAdvertising()->setMaxInterval(240); // 150 ms (default)
-    NimBLEDevice::startAdvertising();
+    refreshBleAdvertising();
   }
 }
 
@@ -777,37 +1109,22 @@ class CommandCallbacks : public NimBLECharacteristicCallbacks
 {
 
   // Override the onWrite method
-  void onWrite(NimBLECharacteristic *pCharacteristic)
+  void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override
   {
+    (void)connInfo;
+    ScopedPerfTelemetryDuration perfScope(PerfDurationId::BleCallback);
     // Get the value written by the client
-    std::string rxValue = pCharacteristic->getValue();
+    const auto &rxValue = pCharacteristic->getValue();
 
-    if (rxValue.length() > 0)
+    if (rxValue.size() > 0)
     {
-      uint8_t commandCode = rxValue[0]; // Assuming single-byte commands
+      const uint8_t commandCode = rxValue[0]; // Assuming single-byte commands
 
       Serial.print("Command Characteristic received write, command code: 0x");
       Serial.println(commandCode, HEX);
-
-      // Process the command
-      switch (commandCode)
+      if (!bleQueueByte(BleWorkType::Command, pCharacteristic, commandCode))
       {
-      case 0x01: // Command: Get Temperature History
-        Serial.println("-> Command: Get Temperature History");
-        triggerHistoryTransfer(); // Call the function to start sending history
-        break;
-
-      case 0x02: // Example: Command: Clear History Buffer
-        Serial.println("-> Command: Clear History Buffer");
-        clearHistoryBuffer();
-        break;
-
-        // Add more cases for other commands here...
-
-      default:
-        Serial.print("-> Unknown command code received: 0x");
-        Serial.println(commandCode, HEX);
-        break;
+        Serial.println("BLE command queue full, dropping command.");
       }
     }
     else
@@ -838,44 +1155,26 @@ class CharacteristicCallbacks : public NimBLECharacteristicCallbacks
 {
   void onRead(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override
   {
+    (void)connInfo;
     uint8_t bleViewValue = static_cast<uint8_t>(currentView);
     pCharacteristic->setValue(&bleViewValue, 1);
     Serial.printf("Read request - returned view: %d\n", bleViewValue);
   }
 
-  void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo)
+  void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override
   {
-    std::string value = pCharacteristic->getValue();
-    if (value.length() < 1)
+    (void)connInfo;
+    ScopedPerfTelemetryDuration perfScope(PerfDurationId::BleCallback);
+    const auto &value = pCharacteristic->getValue();
+    if (value.size() < 1)
+    {
       return;
-
-    uint8_t newView = value[0];
-
-    // --- Handle Wake-up First ---
-    if (sleepModeActive)
-    {
-      Serial.println("BLE write received while sleeping, waking up..."); // DEBUG
-      wakeFromSleepMode();
-      // NOTE: wakeFromSleepMode resets lastActivityTime and sets sleepModeActive = false
-      // Now that we are awake, proceed to process the command below.
     }
-    // Normal view change
-    if (newView >= 0 && newView < totalViews && newView != currentView)
+    const uint8_t newView = value[0];
+    if (!bleQueueByte(BleWorkType::FaceWrite, pCharacteristic, newView))
     {
-      currentView = newView;
-      saveLastView(currentView);   // Persist the new view
-      lastActivityTime = millis(); // BLE command counts as activity
-      requestDisplayRefresh();
-      Serial.printf("Write request - new view: %d\n", currentView);
-      // pCharacteristic->notify();
-      // notifyPending = true;
-      notifyBleTask();
+      Serial.println("BLE face write queue full, dropping view update.");
     }
-    else if (newView >= totalViews)
-    {
-      Serial.printf("BLE Write ignored - invalid view number: %d (Total Views: %d)\n", newView, totalViews); // DEBUG
-    }
-    // If newView == currentView, we still woke up (if sleeping), but don't change the view or notify
   }
 
   void onStatus(NimBLECharacteristic *pCharacteristic, int code) override
@@ -916,74 +1215,17 @@ class ConfigCallbacks : public NimBLECharacteristicCallbacks
 {
   void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override
   {
-    std::string value = pCharacteristic->getValue();
-    Serial.println("Received configuration update:");
-    // Expect at least 4 bytes (legacy) or 5 bytes (adds static color mode).
-    if (value.length() >= 4)
-    {
-      bool oldAutoBrightnessEnabled = autoBrightnessEnabled; // Store old state
-      bool oldAuroraMode = auroraModeEnabled;
-      bool oldStaticColorMode = staticColorModeEnabled;
-      // Decode each setting; non-zero is true, zero is false.
-      autoBrightnessEnabled = (value[0] != 0);
-      accelerometerEnabled = (value[1] != 0);
-      sleepModeEnabled = (value[2] != 0);
-      auroraModeEnabled = (value[3] != 0);
-      if (value.length() >= 5)
-      {
-        staticColorModeEnabled = (value[4] != 0);
-      }
-      else
-      {
-        staticColorModeEnabled = false;
-        Serial.println("Static color flag not provided, defaulting to disabled.");
-      }
-
-      if (staticColorModeEnabled)
-      {
-        // Static color mode takes precedence over aurora mode.
-        auroraModeEnabled = false;
-      }
-      setAutoBrightness(autoBrightnessEnabled);
-      setAuroraMode(auroraModeEnabled);
-      setStaticColorMode(staticColorModeEnabled);
-      // Log the updated settings.
-      Serial.print("  Auto Brightness: ");
-      Serial.println(autoBrightnessEnabled ? "Enabled" : "Disabled");
-      Serial.print("  Accelerometer:   ");
-      Serial.println(accelerometerEnabled ? "Enabled" : "Disabled");
-      Serial.print("  Sleep Mode:      ");
-      Serial.println(sleepModeEnabled ? "Enabled" : "Disabled");
-      Serial.print("  Aurora Mode:     ");
-      Serial.println(auroraModeEnabled ? "Enabled" : "Disabled");
-      Serial.print("  Static Color:    ");
-      Serial.println(staticColorModeEnabled ? "Enabled" : "Disabled");
-      // Apply configuration changes based on the new settings.
-      applyConfigOptions();
-      if (oldAutoBrightnessEnabled != autoBrightnessEnabled)
-      { // If the setting actually changed
-        if (autoBrightnessEnabled)
-        {
-          Serial.println("Auto brightness has been ENABLED. Adaptive logic will take over.");
-        }
-        else
-        {
-          Serial.println("Auto brightness has been DISABLED. Applying user-set brightness.");
-          dma_display->setBrightness8(userBrightness);
-          updateGlobalBrightnessScale(userBrightness);
-          lastBrightness = userBrightness;
-          currentBrightness = static_cast<float>(userBrightness);
-          Serial.printf("Applied manual brightness: %u\n", userBrightness);
-        }
-      }
-      if (oldAuroraMode != auroraModeEnabled || oldStaticColorMode != staticColorModeEnabled)
-      {
-        facePlasmaDirty = true;
-      }
-    }
-    else
+    (void)connInfo;
+    ScopedPerfTelemetryDuration perfScope(PerfDurationId::BleCallback);
+    const auto &value = pCharacteristic->getValue();
+    if (value.size() < 4)
     {
       Serial.println("Error: Config payload is not at least 4 bytes.");
+      return;
+    }
+    if (!bleQueuePayload(BleWorkType::ConfigWrite, pCharacteristic, value.data(), value.size()))
+    {
+      Serial.println("BLE config queue full, dropping configuration update.");
     }
   }
 };
@@ -994,14 +1236,15 @@ class BrightnessCallbacks : public NimBLECharacteristicCallbacks
 {
   void onWrite(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
   {
+    (void)connInfo;
+    ScopedPerfTelemetryDuration perfScope(PerfDurationId::BleCallback);
     auto val = pChr->getValue();
     if (val.size() >= 1)
     {
-      userBrightness = (uint8_t)val[0]; // Store the app-set brightness
-      brightnessChanged = true;         // Flag that brightness was set by user
-      setUserBrightness(userBrightness);
-      // Always store target; manual mode easing applies the change in updateAdaptiveBrightness().
-      Serial.printf("Brightness target set to %u\n", userBrightness);
+      if (!bleQueueByte(BleWorkType::BrightnessWrite, pChr, static_cast<uint8_t>(val[0])))
+      {
+        Serial.println("BLE brightness queue full, dropping brightness update.");
+      }
     }
   }
 };
@@ -1011,24 +1254,18 @@ class StaticColorCallbacks : public NimBLECharacteristicCallbacks
 {
   void onWrite(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
   {
-    const std::string &val = pChr->getValue();
-    if (val.empty())
+    (void)connInfo;
+    ScopedPerfTelemetryDuration perfScope(PerfDurationId::BleCallback);
+    const auto &val = pChr->getValue();
+    if (val.size() == 0)
     {
       return;
     }
 
-    std::string normalized;
-    if (!applyStaticColorBytes(reinterpret_cast<const uint8_t *>(val.data()), val.size(), true, &normalized))
+    if (!bleQueuePayload(BleWorkType::StaticColorWrite, pChr, val.data(), val.size()))
     {
-      Serial.println("Invalid static color payload received over BLE.");
-      return;
+      Serial.println("BLE static color queue full, dropping payload.");
     }
-
-    pChr->setValue(normalized);
-    pChr->notify();
-#if DEBUG_MODE
-    Serial.printf("Static color updated to #%s\n", normalized.c_str());
-#endif
   }
 
   void onRead(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
@@ -1053,57 +1290,17 @@ class StrobeSettingsCallbacks : public NimBLECharacteristicCallbacks
 {
   void onWrite(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
   {
-    const std::string &val = pChr->getValue();
-    if (val.empty())
+    (void)connInfo;
+    ScopedPerfTelemetryDuration perfScope(PerfDurationId::BleCallback);
+    const auto &val = pChr->getValue();
+    if (val.size() == 0)
     {
       return;
     }
-
-    constexpr uint8_t kOpcodeColor = 0x01;
-    constexpr uint8_t kOpcodeSpeed = 0x02;
-
-    const uint8_t opcode = static_cast<uint8_t>(val[0]);
-    const uint8_t *payload = reinterpret_cast<const uint8_t *>(val.data() + 1);
-    const size_t payloadLength = val.size() - 1;
-
-    if (payloadLength == 0)
+    if (!bleQueuePayload(BleWorkType::StrobeSettingsWrite, pChr, val.data(), val.size()))
     {
-      return;
+      Serial.println("BLE strobe queue full, dropping payload.");
     }
-
-    if (opcode == kOpcodeColor)
-    {
-      std::string normalized;
-      if (!applyStrobeColorBytes(payload, payloadLength, true, &normalized))
-      {
-        Serial.println("Invalid strobe color payload received over BLE.");
-        return;
-      }
-#if DEBUG_MODE
-      Serial.printf("Strobe color updated to #%s\n", normalized.c_str());
-#endif
-    }
-    else if (opcode == kOpcodeSpeed)
-    {
-      uint16_t speedMs = 0;
-      if (!applyStrobeSpeedBytes(payload, payloadLength, true, &speedMs))
-      {
-        Serial.println("Invalid strobe speed payload received over BLE.");
-        return;
-      }
-#if DEBUG_MODE
-      Serial.printf("Strobe speed updated to %u ms\n", static_cast<unsigned int>(speedMs));
-#endif
-    }
-    else
-    {
-      Serial.printf("Invalid strobe settings opcode received over BLE: 0x%02X\n", opcode);
-      return;
-    }
-
-    const std::string response = buildStrobeSettingsPayload();
-    pChr->setValue(response);
-    pChr->notify();
   }
 
   void onRead(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
@@ -1113,6 +1310,283 @@ class StrobeSettingsCallbacks : public NimBLECharacteristicCallbacks
   }
 };
 static StrobeSettingsCallbacks strobeSettingsCallbacks;
+
+static void handleBleCommandWork(const BleWorkItem &item)
+{
+  if (item.length < 1)
+  {
+    return;
+  }
+
+  const uint8_t commandCode = item.data[0];
+  switch (commandCode)
+  {
+  case 0x01:
+    Serial.println("-> Command: Get Temperature History");
+    triggerHistoryTransfer();
+    break;
+  case 0x02:
+    Serial.println("-> Command: Clear History Buffer");
+    clearHistoryBuffer();
+    break;
+  default:
+    Serial.print("-> Unknown command code received: 0x");
+    Serial.println(commandCode, HEX);
+    break;
+  }
+}
+
+static void handleBleFaceWriteWork(const BleWorkItem &item)
+{
+  if (item.length < 1)
+  {
+    return;
+  }
+
+  const uint8_t newView = item.data[0];
+  if (sleepModeActive)
+  {
+    Serial.println("BLE write received while sleeping, waking up...");
+    wakeFromSleepMode();
+  }
+
+  if (newView >= totalViews)
+  {
+#if defined(DEBUG_BLE)
+    Serial.printf("BLE Write ignored - invalid view number: %d (Total Views: %d)\n", newView, totalViews);
+#endif
+    return;
+  }
+
+  lastActivityTime = millis();
+  if (newView == currentView)
+  {
+    return;
+  }
+
+  currentView = newView;
+  scheduleLastViewPersist(currentView);
+  requestDisplayRefresh();
+#if defined(DEBUG_BLE)
+  Serial.printf("Write request - new view: %d\n", currentView);
+#endif
+  notifyBleTask();
+}
+
+static void handleBleConfigWriteWork(const BleWorkItem &item)
+{
+  if (item.length < 4)
+  {
+    Serial.println("Error: Config payload is not at least 4 bytes.");
+    return;
+  }
+
+#if defined(DEBUG_BLE)
+  Serial.println("Received configuration update:");
+#endif
+  const bool oldAutoBrightnessEnabled = autoBrightnessEnabled;
+  const bool oldAuroraMode = auroraModeEnabled;
+  const bool oldStaticColorMode = staticColorModeEnabled;
+
+  autoBrightnessEnabled = (item.data[0] != 0);
+  accelerometerEnabled = (item.data[1] != 0);
+  sleepModeEnabled = (item.data[2] != 0);
+  auroraModeEnabled = (item.data[3] != 0);
+  if (item.length >= 5)
+  {
+    staticColorModeEnabled = (item.data[4] != 0);
+  }
+  else
+  {
+    staticColorModeEnabled = false;
+#if defined(DEBUG_BLE)
+    Serial.println("Static color flag not provided, defaulting to disabled.");
+#endif
+  }
+
+  if (staticColorModeEnabled)
+  {
+    auroraModeEnabled = false;
+  }
+
+  setAutoBrightness(autoBrightnessEnabled);
+  setAccelerometerEnabled(accelerometerEnabled);
+  setSleepMode(sleepModeEnabled);
+  setAuroraMode(auroraModeEnabled);
+  setStaticColorMode(staticColorModeEnabled);
+
+#if defined(DEBUG_BLE)
+  Serial.print("  Auto Brightness: ");
+  Serial.println(autoBrightnessEnabled ? "Enabled" : "Disabled");
+  Serial.print("  Accelerometer:   ");
+  Serial.println(accelerometerEnabled ? "Enabled" : "Disabled");
+  Serial.print("  Sleep Mode:      ");
+  Serial.println(sleepModeEnabled ? "Enabled" : "Disabled");
+  Serial.print("  Aurora Mode:     ");
+  Serial.println(auroraModeEnabled ? "Enabled" : "Disabled");
+  Serial.print("  Static Color:    ");
+  Serial.println(staticColorModeEnabled ? "Enabled" : "Disabled");
+#endif
+
+  applyConfigOptions();
+  if (oldAutoBrightnessEnabled != autoBrightnessEnabled)
+  {
+    if (autoBrightnessEnabled)
+    {
+#if defined(DEBUG_BLE)
+      Serial.println("Auto brightness has been ENABLED. Adaptive logic will take over.");
+#endif
+    }
+    else
+    {
+#if defined(DEBUG_BLE)
+      Serial.println("Auto brightness has been DISABLED. Applying user-set brightness.");
+      Serial.printf("Applied manual brightness: %u\n", userBrightness);
+#endif
+      dma_display->setBrightness8(userBrightness);
+      updateGlobalBrightnessScale(userBrightness);
+      syncBrightnessState(userBrightness);
+    }
+  }
+
+  if (oldAuroraMode != auroraModeEnabled || oldStaticColorMode != staticColorModeEnabled)
+  {
+    facePlasmaDirty = true;
+    requestDisplayRefresh();
+  }
+}
+
+static void handleBleBrightnessWriteWork(const BleWorkItem &item)
+{
+  if (item.length < 1)
+  {
+    return;
+  }
+
+  userBrightness = item.data[0];
+  brightnessChanged = true;
+  setUserBrightness(userBrightness);
+#if DEBUG_BRIGHTNESS
+  Serial.printf("Brightness target set to %u\n", userBrightness);
+#endif
+}
+
+static void handleBleStaticColorWriteWork(const BleWorkItem &item)
+{
+  if (item.characteristic == nullptr || item.length == 0)
+  {
+    return;
+  }
+
+  std::string normalized;
+  if (!applyStaticColorBytes(item.data, item.length, true, &normalized))
+  {
+    Serial.println("Invalid static color payload received over BLE.");
+    return;
+  }
+
+  item.characteristic->setValue(normalized);
+  item.characteristic->notify();
+#if DEBUG_MODE
+  Serial.printf("Static color updated to #%s\n", normalized.c_str());
+#endif
+}
+
+static void handleBleStrobeSettingsWriteWork(const BleWorkItem &item)
+{
+  if (item.characteristic == nullptr || item.length < 2)
+  {
+    return;
+  }
+
+  constexpr uint8_t kOpcodeColor = 0x01;
+  constexpr uint8_t kOpcodeSpeed = 0x02;
+
+  const uint8_t opcode = item.data[0];
+  const uint8_t *payload = item.data + 1;
+  const size_t payloadLength = item.length - 1;
+
+  if (opcode == kOpcodeColor)
+  {
+    std::string normalized;
+    if (!applyStrobeColorBytes(payload, payloadLength, true, &normalized))
+    {
+      Serial.println("Invalid strobe color payload received over BLE.");
+      return;
+    }
+#if DEBUG_MODE
+    Serial.printf("Strobe color updated to #%s\n", normalized.c_str());
+#endif
+  }
+  else if (opcode == kOpcodeSpeed)
+  {
+    uint16_t speedMs = 0;
+    if (!applyStrobeSpeedBytes(payload, payloadLength, true, &speedMs))
+    {
+      Serial.println("Invalid strobe speed payload received over BLE.");
+      return;
+    }
+#if DEBUG_MODE
+    Serial.printf("Strobe speed updated to %u ms\n", static_cast<unsigned int>(speedMs));
+#endif
+  }
+  else
+  {
+    Serial.printf("Invalid strobe settings opcode received over BLE: 0x%02X\n", opcode);
+    return;
+  }
+
+  const std::string response = buildStrobeSettingsPayload();
+  item.characteristic->setValue(response);
+  item.characteristic->notify();
+}
+
+static void bleWorkerTask(void *param)
+{
+  (void)param;
+  BleWorkItem item{};
+
+  for (;;)
+  {
+    if (xQueueReceive(bleWorkQueue, &item, portMAX_DELAY) != pdPASS)
+    {
+      continue;
+    }
+
+    const uint32_t workStartMicros = micros();
+    PERF_SCOPE(PerfBucket::Ble);
+    switch (item.type)
+    {
+    case BleWorkType::Command:
+      handleBleCommandWork(item);
+      break;
+    case BleWorkType::FaceWrite:
+      handleBleFaceWriteWork(item);
+      break;
+    case BleWorkType::ConfigWrite:
+      handleBleConfigWriteWork(item);
+      break;
+    case BleWorkType::BrightnessWrite:
+      handleBleBrightnessWriteWork(item);
+      break;
+    case BleWorkType::StaticColorWrite:
+      handleBleStaticColorWriteWork(item);
+      break;
+    case BleWorkType::StrobeSettingsWrite:
+      handleBleStrobeSettingsWriteWork(item);
+      break;
+    case BleWorkType::ScrollWrite:
+      handleScrollWritePayload(item.characteristic, item.data, item.length);
+      break;
+    case BleWorkType::OtaPacket:
+      otaCallbacks.processPacket(item.characteristic, item.data, item.length);
+      break;
+    default:
+      break;
+    }
+    perfTelemetryRecordDuration(PerfDurationId::BleWorkerTaskBusy, micros() - workStartMicros);
+  }
+}
 
 class DescriptorCallbacks : public NimBLEDescriptorCallbacks
 {
@@ -1145,7 +1619,7 @@ void handleBLEStatusLED()
     else
     {
       statusPixel.setPixelColor(0, 0, 0, 0); // Off when disconnected
-      NimBLEDevice::startAdvertising();
+      refreshBleAdvertising();
     }
     // statusPixel.show();
     oldDeviceConnected = deviceConnected;
@@ -1164,7 +1638,7 @@ void handleBLEStatusLED()
     fadeInAndOutLED(128, 0, 128); // Purple fade when pairing
     pixelShown = true;
   }
-  else if (!deviceConnected)
+  else if (shouldBleAdvertise())
   {
     fadeInAndOutLED(0, 0, 100); // Blue fade when disconnected
     pixelShown = true;
@@ -1183,7 +1657,7 @@ static void resetBlePairing()
     return;
   }
 
-  setPairingState(false, false, 0, true);
+  startPairingMode(PAIRING_MODE_WINDOW_MS);
   const std::vector<uint16_t> peers = pServer->getPeerDevices();
   if (!peers.empty())
   {
@@ -1197,8 +1671,8 @@ static void resetBlePairing()
 
   const bool cleared = NimBLEDevice::deleteAllBonds();
   setPairingResetPending(false);
-  NimBLEDevice::startAdvertising();
-#if DEBUG_BLE
+  refreshBleAdvertising();
+#if defined(DEBUG_BLE)
   Serial.printf("BLE pairing reset: bonds cleared=%s\n", cleared ? "true" : "false");
 #endif
 }
@@ -1288,12 +1762,23 @@ static unsigned long viewFrameIntervalMillis(int view)
   case VIEW_PLASMA_FACE:
   case VIEW_UWU_EYES:
   case VIEW_CIRCLE_EYES:
+  case VIEW_ALT_FACE:
     return PATTERN_PLASMA_FRAME_INTERVAL_MS;
   case VIEW_DVD_LOGO:
     return dvdUpdateInterval;
   default:
     return targetFrameIntervalMillis;
   }
+}
+
+static uint32_t viewFrameBudgetMicros(int view)
+{
+  unsigned long frameIntervalMs = viewFrameIntervalMillis(view);
+  if (bleIsOtaBusy() && frameIntervalMs < LF_OTA_ACTIVE_FRAME_INTERVAL_MS)
+  {
+    frameIntervalMs = LF_OTA_ACTIVE_FRAME_INTERVAL_MS;
+  }
+  return static_cast<uint32_t>(frameIntervalMs) * 1000UL;
 }
 
 #if PERF_SELF_TEST
@@ -1977,7 +2462,7 @@ void updateEyeBounceAnimation()
       if (currentView == VIEW_CIRCLE_EYES)
       {
         currentView = viewBeforeEyeBounce;
-        saveLastView(currentView);
+        scheduleLastViewPersist(currentView);
         requestDisplayRefresh();
         LOG_DEBUG("Eye bounce finished. Reverting to view: %d\n", currentView);
         notifyBleTask();
@@ -2373,6 +2858,22 @@ void blinkingEyes()
     leftEyeX = 93;
     leftEyeY = 2;
     break;
+  case VIEW_ALT_FACE:
+  {
+    const uint16_t pupilColor = dma_display->color565(0, 0, 0);
+    constexpr uint8_t kAltEyeTimeOffsetRight = 80;
+    constexpr uint8_t kAltEyeTimeOffsetLeft = 208;
+
+    drawBitmapAdvanced(10 + final_x_offset, 4 + final_y_offset, 23, 13, Alt_scleraR,
+                       solidColor, blinkProgress, true, kAltEyeTimeOffsetRight);
+    drawBitmapAdvanced(95 + final_x_offset, 4 + final_y_offset, 23, 13, Alt_scleraL,
+                       solidColor, blinkProgress, true, kAltEyeTimeOffsetLeft);
+    drawBitmapWithBlink(19 + final_x_offset, 5 + final_y_offset, 3, 11, AltFacePupil,
+                        pupilColor, blinkProgress);
+    drawBitmapWithBlink(106 + final_x_offset, 5 + final_y_offset, 3, 11, AltFacePupil,
+                        pupilColor, blinkProgress);
+    return;
+  }
     // Default case uses the slanteyes defined before the switch
   }
 
@@ -2444,7 +2945,7 @@ void updateBlush()
       if (wasBlushOverlay)
       {
         currentView = originalViewBeforeBlush;
-        saveLastView(currentView);
+        scheduleLastViewPersist(currentView);
         requestDisplayRefresh();
         Serial.printf("Blush overlay finished. Reverting to view: %d\n", currentView);
         notifyBleTask();
@@ -2540,6 +3041,15 @@ void baseFace()
   int final_y_offset = currentEyeYOffset + idleEyeYOffset;
   int final_x_offset = idleEyeXOffset;
 
+  if (currentView == VIEW_ALT_FACE)
+  {
+    const uint16_t blushColor = dma_display->color565(255, 110, 150);
+    drawPlasmaXbm(22 + final_x_offset, 0 + final_y_offset, 9, 7, Alt_BrowR, 16, 2.0f);
+    drawPlasmaXbm(96 + final_x_offset, 0 + final_y_offset, 9, 7, Alt_BrowL, 144, 2.0f);
+    drawXbm565(8 + final_x_offset, 16 + final_y_offset, 9, 5, Alt_BlushR, blushColor);
+    drawXbm565(110 + final_x_offset, 16 + final_y_offset, 9, 5, Alt_BlushL, blushColor);
+  }
+
   blinkingEyes(); // This function now correctly uses the global offsets internally
 
   const uint8_t mouthBrightness = micGetMouthBrightness();
@@ -2554,8 +3064,16 @@ void baseFace()
     drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0f, 0.2f, mouthBrightness); // Left eye (phase offset)
   }
 
-  drawPlasmaXbm(56, 4 + final_y_offset, 8, 8, nose, 64, 2.0);
-  drawPlasmaXbm(64, 4 + final_y_offset, 8, 8, noseL, 64, 2.0);
+  if (currentView == VIEW_ALT_FACE)
+  {
+    drawPlasmaXbm(58 + final_x_offset, 7 + final_y_offset, 4, 2, Alt_Nose, 96, 2.0f);
+    drawPlasmaXbm(68 + final_x_offset, 7 + final_y_offset, 4, 2, Alt_Nose, 96, 2.0f);
+  }
+  else
+  {
+    drawPlasmaXbm(56, 4 + final_y_offset, 8, 8, nose, 64, 2.0);
+    drawPlasmaXbm(64, 4 + final_y_offset, 8, 8, noseL, 64, 2.0);
+  }
 
   facePlasmaDirty = false;
 }
@@ -2758,8 +3276,6 @@ void initStarfield()
 
 void updateStarfield()
 {
-  // Clear the display for a fresh frame
-  dma_display->clearScreen(); // Uncommented to clear the screen
   // Update and draw each star
   for (int i = 0; i < NUM_STARS; i++)
   {
@@ -2823,7 +3339,7 @@ static void displayTask(void *pvParameters)
   };
   auto getBaseBrightness = []() -> uint8_t
   {
-    const int constrainedBrightness = constrain(lastBrightness, 0, 255);
+    const int constrainedBrightness = constrain(getLastAppliedBrightness(), 0, 255);
     return static_cast<uint8_t>(constrainedBrightness);
   };
   auto applyTransitionBrightness = [](uint8_t brightness)
@@ -2847,6 +3363,7 @@ static void displayTask(void *pvParameters)
 
   for (;;)
   {
+    const uint32_t taskLoopStartMicros = micros();
     const int requestedView = static_cast<int>(currentView);
 
     if (sleepModeActive)
@@ -2856,6 +3373,7 @@ static void displayTask(void *pvParameters)
       displayedView = requestedView;
       pendingView = requestedView;
       displayCurrentView(requestedView);
+      perfTelemetryRecordDuration(PerfDurationId::DisplayTaskBusy, micros() - taskLoopStartMicros);
       vTaskDelayUntil(&lastWake, millisToTicksCeil(sleepFrameInterval));
       continue;
     }
@@ -2885,9 +3403,7 @@ static void displayTask(void *pvParameters)
       viewToRender = displayedView;
     }
 
-#if DEBUG_MODE
     const uint32_t frameStartMicros = micros();
-#endif
     {
       PERF_SCOPE(PerfBucket::Render);
       displayCurrentView(viewToRender);
@@ -2919,21 +3435,35 @@ static void displayTask(void *pvParameters)
         ++transitionLevel;
       }
     }
-#if DEBUG_MODE
     const uint32_t frameMicros = micros() - frameStartMicros;
-    gLastFrameDurationMicros = frameMicros;
-    if (frameMicros > gWorstFrameDurationMicros)
+    unsigned long frameIntervalMs = viewFrameIntervalMillis(viewToRender);
+    const uint32_t frameBudgetMicros = viewFrameBudgetMicros(viewToRender);
+    perfTelemetryRecordDuration(PerfDurationId::RenderFrame, frameMicros);
+    if (frameMicros > frameBudgetMicros)
     {
-      gWorstFrameDurationMicros = frameMicros;
-    }
-    if (frameMicros > SLOW_FRAME_THRESHOLD_US)
-    {
+      perfTelemetryRecordSlowFrame();
+#if DEBUG_MODE
+      gLastFrameDurationMicros = frameMicros;
+      if (frameMicros > gWorstFrameDurationMicros)
+      {
+        gWorstFrameDurationMicros = frameMicros;
+      }
       const unsigned long now = millis();
       if (now - lastSlowFrameLogMs >= 250)
       {
-        Serial.printf("Slow frame %lu us (view %d, worst %lu us)\n", static_cast<unsigned long>(frameMicros), currentView, static_cast<unsigned long>(gWorstFrameDurationMicros));
+        Serial.printf("Slow frame %lu us (budget %lu us, view %d, worst %lu us)\n",
+                      static_cast<unsigned long>(frameMicros),
+                      static_cast<unsigned long>(frameBudgetMicros),
+                      currentView,
+                      static_cast<unsigned long>(gWorstFrameDurationMicros));
         lastSlowFrameLogMs = now;
       }
+#endif
+    }
+#if DEBUG_MODE
+    else
+    {
+      gLastFrameDurationMicros = frameMicros;
     }
 #endif
     const unsigned long nowMs = millis();
@@ -2941,23 +3471,19 @@ static void displayTask(void *pvParameters)
         !viewNeedsContinuousRefresh(displayedView) &&
         !bluetoothOverlayNeedsContinuousRefresh(nowMs))
     {
+      perfTelemetryRecordDuration(PerfDurationId::DisplayTaskBusy, micros() - taskLoopStartMicros);
       ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
       lastWake = xTaskGetTickCount();
       continue;
     }
 
-    vTaskDelayUntil(&lastWake, millisToTicksCeil(viewFrameIntervalMillis(viewToRender)));
+    if (bleIsOtaBusy() && frameIntervalMs < LF_OTA_ACTIVE_FRAME_INTERVAL_MS)
+    {
+      frameIntervalMs = LF_OTA_ACTIVE_FRAME_INTERVAL_MS;
+    }
+    perfTelemetryRecordDuration(PerfDurationId::DisplayTaskBusy, micros() - taskLoopStartMicros);
+    vTaskDelayUntil(&lastWake, millisToTicksCeil(frameIntervalMs));
   }
-}
-
-static volatile unsigned long softMillis = 0; // our software “millis” counter
-TimerHandle_t softMillisTimer = nullptr;
-
-// this callback fires every 1 ms and increments softMillis:
-static void IRAM_ATTR onSoftMillisTimer(TimerHandle_t xTimer)
-{
-  (void)xTimer;
-  softMillis++;
 }
 
 // Matrix and Effect Configuration
@@ -3141,7 +3667,16 @@ void updateAndDrawFullScreenSpiral(SpiralColorMode colorMode)
 void setup()
 {
   Serial.begin(BAUD_RATE);
-  delay(500); // Delay for serial monitor to start
+
+  // Native USB CDC on the ESP32-S3 can take a moment to attach after reset.
+  // Wait briefly so startup logs are visible in the serial monitor, but do not
+  // stall boot indefinitely if no host is connected.
+  const unsigned long serialAttachStartMs = millis();
+  while (!Serial && (millis() - serialAttachStartMs) < 2500UL)
+  {
+    delay(10);
+  }
+  delay(50);
 
 #if PERF_SELF_TEST
   runPerfSelfTest();
@@ -3169,10 +3704,17 @@ void setup()
   Serial.printf("Build: %s %s\n", BUILD_DATE, BUILD_TIME);
 #endif
 
+  gVideoStorageReady = initializeVideoStorage();
+
   initTempSensor(); // Initialize Temperature Sensor
 
   initPreferences(); // Initialize Preferences
+  userBrightness = static_cast<uint8_t>(constrain(getUserBrightness(), 0, 255));
+  sliderBrightness = map(userBrightness, 1, 255, 1, 100);
   autoBrightnessEnabled = getAutoBrightness();
+  syncBrightnessState(userBrightness);
+  accelerometerEnabled = getAccelerometerEnabled();
+  sleepModeEnabled = getSleepMode();
   auroraModeEnabled = getAuroraMode();
   staticColorModeEnabled = getStaticColorMode();
   if (staticColorModeEnabled)
@@ -3207,6 +3749,7 @@ void setup()
   // - LOAD LAST VIEW -
   currentView = getLastView();
   previousView = currentView;
+  gLastPersistedView = currentView;
   Serial.printf("Loaded last view: %d\n", currentView);
   ensureStrobeSettingsLoaded();
 
@@ -3243,6 +3786,7 @@ void setup()
   NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY);
   pServer = NimBLEDevice::createServer();
   pServer->setCallbacks(&serverCallbacks);
+  pServer->advertiseOnDisconnect(false);
 
   NimBLEService *pService = pServer->createService(SERVICE_UUID);
 
@@ -3476,7 +4020,7 @@ void setup()
   Serial.println("Strobe Settings Characteristic created");
 
   // nimBLEService* pBaadService = pServer->createService("BAAD");
-  pService->start();
+  // Services are started when the GATT server starts during advertising.
 
   /** Create an advertising instance and add the services to the advertised data */
   NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
@@ -3484,9 +4028,10 @@ void setup()
   // pAdvertising->setAppearance(0);         // Appearance value (0 is generic)
   pAdvertising->enableScanResponse(true); // Enable scan response to include more data
   pAdvertising->addServiceUUID(pService->getUUID());
-  pAdvertising->start();
+  refreshBleAdvertising();
 
-  Serial.println("BLE setup complete - advertising started");
+  Serial.println(shouldBleAdvertise() ? "BLE setup complete - advertising started"
+                                      : "BLE setup complete - waiting for pairing mode");
 
   // Redefine pins if required
   // HUB75_I2S_CFG::i2s_pins _pins={R1, G1, BL1, R2, G2, BL2, CH_A, CH_B, CH_C, CH_D, CH_E, LAT, OE, CLK};
@@ -3503,26 +4048,26 @@ void setup()
 
   mxconfig.gpio.e = PIN_E;
   mxconfig.driver = HUB75_I2S_CFG::FM6126A; // for panels using FM6126A chips
-  mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_16M; // 20 MHz proved unstable on this panel; keep the highest stable clock.
-  mxconfig.min_refresh_rate = 120;           // Ask the DMA driver to favor a faster panel refresh over color depth.
-  mxconfig.clkphase = false;                  // Match the library's positive-edge default for better HUB75 timing margin.
-  mxconfig.double_buff = true; // <------------- Turn on double buffer
+  mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_16M;                // 20 MHz proved unstable on this panel; keep the highest stable clock.
+  mxconfig.min_refresh_rate = LF_HUB75_MIN_REFRESH_RATE_HZ; // Favor refresh stability over extra effective color depth.
+  mxconfig.latch_blanking = LF_HUB75_LATCH_BLANKING;        // Keep blanking explicit to avoid per-panel surprises.
+  mxconfig.clkphase = LF_HUB75_CLKPHASE;                    // false selects the library's negative-edge clocking mode.
+  mxconfig.double_buff = true;
+  mxconfig.setPixelColorDepthBits(LF_HUB75_COLOR_DEPTH_BITS);
 
 #ifndef VIRTUAL_PANE
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   dma_display->begin();
   dma_display->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
-  lastBrightness = userBrightness;
-  currentBrightness = static_cast<float>(userBrightness);
+  syncBrightnessState(userBrightness);
   initFlameEffect(dma_display);
 #else
   chain = new MatrixPanel_I2S_DMA(mxconfig);
   chain->begin();
   chain->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
-  lastBrightness = userBrightness;
-  currentBrightness = static_cast<float>(userBrightness);
+  syncBrightnessState(userBrightness);
   // create VirtualDisplay object based on our newly created dma_display object
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
   initFlameEffect(matrix);
@@ -3530,14 +4075,6 @@ void setup()
 
   dma_display->clearScreen();
   dma_display->flipDMABuffer();
-
-  // Memory allocation for LED buffer
-  ledbuff = (CRGB *)malloc(NUM_LEDS * sizeof(CRGB));
-  if (ledbuff == nullptr)
-  {
-    Serial.println("Memory allocation for ledbuff failed!");
-    err(250); // Call error handler
-  }
 
 #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
   // Initialize onboard components for MatrixPortal ESP32-S3
@@ -3576,6 +4113,16 @@ void setup()
     // For now, it will just print "Fluid Error" in displayCurrentView if null.
   }
 
+  videoPlayerInstance = new MonoVideoPlayer(FFat, BAD_APPLE_VIDEO_PATH, PANE_WIDTH, PANE_HEIGHT, PANEL_WIDTH, DEBUG_VIDEO_PLAYER != 0);
+  if (!videoPlayerInstance)
+  {
+    Serial.println("FATAL: Failed to allocate MonoVideoPlayer instance!");
+  }
+  else if (!gVideoStorageReady)
+  {
+    Serial.println("Video player created; waiting for FFat storage to become available.");
+  }
+
   // ... rest of your setup() code ...
   // e.g., currentView = getLastView();
 
@@ -3583,6 +4130,10 @@ void setup()
   if (currentView == VIEW_FLUID_EFFECT && fluidEffectInstance)
   { // Assuming 16 is the fluid effect view
     fluidEffectInstance->begin();
+  }
+  if (currentView == VIEW_VIDEO_PLAYER && videoPlayerInstance)
+  {
+    videoPlayerInstance->begin();
   }
 
   lastActivityTime = millis(); // Initialize the activity timer for sleep mode
@@ -3667,6 +4218,13 @@ void setup()
   // #endif
 
   // Spawn BLE notify task (you already have):
+  bleWorkQueue = xQueueCreate(LF_BLE_WORKER_QUEUE_LENGTH, sizeof(BleWorkItem));
+  if (bleWorkQueue == nullptr)
+  {
+    Serial.println("Failed to create BLE worker queue");
+    err(125);
+  }
+
   xTaskCreatePinnedToCore(
       bleNotifyTask,
       "BLE Task",
@@ -3674,6 +4232,15 @@ void setup()
       NULL,
       1,
       &bleNotifyTaskHandle,
+      CONFIG_BT_NIMBLE_PINNED_TO_CORE);
+
+  xTaskCreatePinnedToCore(
+      bleWorkerTask,
+      "BLE Worker",
+      LF_BLE_WORKER_STACK_SIZE,
+      NULL,
+      LF_BLE_WORKER_PRIORITY,
+      &bleWorkerTaskHandle,
       CONFIG_BT_NIMBLE_PINNED_TO_CORE);
 
   // Now spawn the display task pinned to the other core so rendering never competes with loop():
@@ -3691,17 +4258,6 @@ void setup()
   // Then return—loop() can be left empty or just do background housekeeping
 
   // create a 1 ms auto‑reloading FreeRTOS timer
-  softMillisTimer = xTimerCreate(
-      "softMillis",     // name
-      pdMS_TO_TICKS(1), // period = 1 ms
-      pdTRUE,           // auto‑reload
-      nullptr,          // timer ID
-      onSoftMillisTimer // callback
-  );
-  if (softMillisTimer)
-  {
-    xTimerStart(softMillisTimer, 0);
-  }
 }
 
 void drawDVDLogo(int x, int y, uint16_t color)
@@ -4047,6 +4603,79 @@ static void renderFullscreenSpiralWhite()
   updateAndDrawFullScreenSpiral(SPIRAL_COLOR_WHITE);
 }
 
+static void renderVideoPlayerView()
+{
+  if (videoPlayerInstance)
+  {
+    videoPlayerInstance->updateAndDraw(dma_display, micros());
+#if DEBUG_VIDEO_PLAYER
+    static unsigned long lastVideoDebugLogMs = 0;
+    const MonoVideoDebugInfo info = videoPlayerInstance->debugInfo();
+    const unsigned long displayedFrame = (info.frameCount > 0U) ? (info.currentFrameIndex + 1U) : 0U;
+    const unsigned long nowMs = millis();
+    if ((nowMs - lastVideoDebugLogMs) >= 1000UL)
+    {
+      Serial.printf(
+          "Video dbg ready=%u open=%u frame=%lu/%lu interval=%luus rew=%lu fail=%lu catch=%u max=%u decode=%luus offset=%lu err=%s\n",
+          static_cast<unsigned int>(videoPlayerInstance->ready()),
+          static_cast<unsigned int>(info.fileOpen),
+          displayedFrame,
+          static_cast<unsigned long>(info.frameCount),
+          static_cast<unsigned long>(info.frameIntervalMicros),
+          static_cast<unsigned long>(info.rewindCount),
+          static_cast<unsigned long>(info.decodeFailureCount),
+          static_cast<unsigned int>(info.lastCatchupFrames),
+          static_cast<unsigned int>(info.maxCatchupFrames),
+          static_cast<unsigned long>(info.lastDecodeMicros),
+          static_cast<unsigned long>(info.currentFileOffset),
+          videoPlayerInstance->error());
+      lastVideoDebugLogMs = nowMs;
+    }
+
+    dma_display->setFont(&TomThumb);
+    dma_display->setTextSize(1);
+    dma_display->setTextColor(dma_display->color565(255, 255, 0));
+
+    char line1[24];
+    char line2[24];
+    char line3[24];
+    snprintf(line1,
+             sizeof(line1),
+             "fr %lu/%lu %lums",
+             displayedFrame,
+             static_cast<unsigned long>(info.frameCount),
+             static_cast<unsigned long>((info.frameIntervalMicros + 500U) / 1000U));
+    snprintf(line2,
+             sizeof(line2),
+             "rw %lu de %lu c%u",
+             static_cast<unsigned long>(info.rewindCount),
+             static_cast<unsigned long>(info.decodeFailureCount),
+             static_cast<unsigned int>(info.lastCatchupFrames));
+    snprintf(line3,
+             sizeof(line3),
+             "dc %luus of %lu",
+             static_cast<unsigned long>(info.lastDecodeMicros),
+             static_cast<unsigned long>(info.currentFileOffset));
+
+    dma_display->setCursor(1, 9);
+    dma_display->print(line1);
+    dma_display->setCursor(1, 17);
+    dma_display->print(line2);
+    dma_display->setCursor(1, 25);
+    dma_display->print(line3);
+#endif
+    return;
+  }
+
+  dma_display->setFont(&TomThumb);
+  dma_display->setTextSize(1);
+  dma_display->setTextColor(dma_display->color565(255, 0, 0));
+  dma_display->setCursor(3, 12);
+  dma_display->print("Video Err");
+  dma_display->setCursor(3, 22);
+  dma_display->print("Init fail");
+}
+
 static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     renderDebugSquaresView,        // VIEW_DEBUG_SQUARES
     renderLoadingBarView,          // VIEW_LOADING_BAR
@@ -4076,9 +4705,30 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     staticColor,                   // VIEW_STATIC_COLOR
     patternRainbowGradient,        // VIEW_RAINBOW_GRADIENT
     patternRainbowLinearBand,      // VIEW_RAINBOW_LINEAR_BAND
+    renderFaceWithPlasma,          // VIEW_ALT_FACE
+    renderVideoPlayerView,         // VIEW_VIDEO_PLAYER
 };
 
 static_assert(sizeof(VIEW_RENDERERS) / sizeof(ViewRenderFunc) == TOTAL_VIEWS, "View renderer table mismatch");
+
+static bool viewNeedsPreClear(int view)
+{
+  switch (view)
+  {
+  case VIEW_PATTERN_PLASMA:
+  case VIEW_TRANS_FLAG:
+  case VIEW_LGBT_FLAG:
+  case VIEW_BSOD:
+  case VIEW_FLAME_EFFECT:
+  case VIEW_STROBE_EFFECT:
+  case VIEW_STATIC_COLOR:
+  case VIEW_RAINBOW_GRADIENT:
+  case VIEW_RAINBOW_LINEAR_BAND:
+    return false;
+  default:
+    return true;
+  }
+}
 
 void displayCurrentView(int view)
 {
@@ -4102,7 +4752,10 @@ void displayCurrentView(int view)
   }
   mouthOpen = micIsMouthOpen();
 
-  dma_display->clearScreen(); // Clear the display
+  if (viewNeedsPreClear(view))
+  {
+    dma_display->clearScreen();
+  }
   if (view != previousViewLocal)
   { // Check if the view has changed
     facePlasmaDirty = true;
@@ -4136,6 +4789,10 @@ void displayCurrentView(int view)
     {
       resetDinoGame(millis());
     }
+    if (view == VIEW_VIDEO_PLAYER && videoPlayerInstance)
+    {
+      videoPlayerInstance->begin();
+    }
     previousViewLocal = view;
   }
 
@@ -4155,12 +4812,16 @@ void displayCurrentView(int view)
   }
 #if DEBUG_MODE
   const uint32_t rendererMicros = micros() - rendererStartMicros;
-  if (rendererMicros > SLOW_FRAME_THRESHOLD_US)
+  const uint32_t rendererBudgetMicros = viewFrameBudgetMicros(view);
+  if (rendererMicros > rendererBudgetMicros)
   {
     const unsigned long now = millis();
     if (now - lastSlowRendererLog >= 500)
     {
-      Serial.printf("Slow renderer %lu us (view %d)\n", static_cast<unsigned long>(rendererMicros), view);
+      Serial.printf("Slow renderer %lu us (budget %lu us, view %d)\n",
+                    static_cast<unsigned long>(rendererMicros),
+                    static_cast<unsigned long>(rendererBudgetMicros),
+                    view);
       lastSlowRendererLog = now;
     }
   }
@@ -4310,7 +4971,7 @@ void enterSleepMode()
     vTaskDelay(pdMS_TO_TICKS(10));                        // Short delay
     NimBLEDevice::getAdvertising()->setMinInterval(2400); // 1500 ms
     NimBLEDevice::getAdvertising()->setMaxInterval(4800); // 3000 ms
-    NimBLEDevice::startAdvertising();
+    refreshBleAdvertising();
     #if DEBUG_MODE
     Serial.println("Reduced BLE Adv interval for sleep.");
     #endif
@@ -4392,6 +5053,14 @@ void loop()
   // unsigned long frameStartTimeMillis = millis(); // Timestamp at frame start
   const unsigned long loopNow = millis();
 
+  if (expirePairingModeIfNeeded())
+  {
+    refreshBleAdvertising();
+    requestDisplayRefresh();
+  }
+
+  flushPendingLastViewPersist(loopNow);
+
   // --- Handle Inputs and State Updates ---
 
   // Check for motion and handle sleep/wake state
@@ -4421,7 +5090,22 @@ void loop()
                  {
                    PERF_SCOPE(PerfBucket::Sensors);
                    PROFILE_SECTION("MotionDetection");
-                   if (accelerometerEnabled && g_accelerometer_initialized && currentView != VIEW_FLUID_EFFECT && currentView != VIEW_DINO_GAME && currentView != VIEW_RAINBOW_GRADIENT && currentView != VIEW_RAINBOW_LINEAR_BAND && !isEyeBouncing && !proximityLatchedHigh)
+                   #if defined(BUTTON_UP) && defined(BUTTON_DOWN)
+                   const bool buttonPhysicallyPressed = (digitalRead(BUTTON_UP) == LOW) || (digitalRead(BUTTON_DOWN) == LOW);
+                   #else
+                   const bool buttonPhysicallyPressed = false;
+                   #endif
+
+                   if (!buttonPhysicallyPressed &&
+                       !shakeSuppressedByRecentButton(loopNow) &&
+                       accelerometerEnabled &&
+                       g_accelerometer_initialized &&
+                       currentView != VIEW_FLUID_EFFECT &&
+                       currentView != VIEW_DINO_GAME &&
+                       currentView != VIEW_RAINBOW_GRADIENT &&
+                       currentView != VIEW_RAINBOW_LINEAR_BAND &&
+                       !isEyeBouncing &&
+                       !proximityLatchedHigh)
                    {
                      useShakeSensitivity = true; // Use high threshold for shake detection
                      if (detectMotion())
@@ -4444,30 +5128,24 @@ void loop()
 // --- Handle button inputs for view changes ---
 #if defined(BUTTON_UP) && defined(BUTTON_DOWN)
     PERF_SCOPE(PerfBucket::Io);
-    // Hold both buttons to clear BLE bonds and restart pairing.
+    static ButtonState upButtonState;
+    static ButtonState downButtonState;
     static bool pairingHoldActive = false;
     static bool pairingHoldTriggered = false;
     static unsigned long pairingHoldStartMs = 0;
-    static bool pairingHoldRaw = false;
-    static bool pairingHoldStable = false;
-    static unsigned long pairingHoldLastChangeMs = 0;
 
-    const bool pairingHoldSample = (digitalRead(BUTTON_UP) == LOW) && (digitalRead(BUTTON_DOWN) == LOW);
+    updateButtonState(upButtonState, digitalRead(BUTTON_UP) == LOW, loopNow, BUTTON_DEBOUNCE_MS);
+    updateButtonState(downButtonState, digitalRead(BUTTON_DOWN) == LOW, loopNow, BUTTON_DEBOUNCE_MS);
 
-    if (pairingHoldSample != pairingHoldRaw)
-    {
-      pairingHoldRaw = pairingHoldSample;
-      pairingHoldLastChangeMs = loopNow;
-    }
-    if ((loopNow - pairingHoldLastChangeMs) >= PAIRING_RESET_DEBOUNCE_MS)
-    {
-      pairingHoldStable = pairingHoldRaw;
-    }
-
-    const bool pairingHoldPressed = pairingHoldStable;
+    const bool upPressed = upButtonState.stablePressed;
+    const bool downPressed = downButtonState.stablePressed;
+    const bool pairingHoldPressed = upPressed && downPressed;
 
     if (pairingHoldPressed)
     {
+      suppressButtonPress(upButtonState);
+      suppressButtonPress(downButtonState);
+      noteButtonInteraction(loopNow);
       lastActivityTime = loopNow;
       if (!pairingHoldActive)
       {
@@ -4487,30 +5165,60 @@ void loop()
     }
 
     bool viewChangedByButton = false;
+    bool pairingModeTriggered = false;
 
-    if (!pairingHoldPressed && debounceButton(BUTTON_UP))
+    if (!pairingHoldPressed && upPressed && !downPressed &&
+        consumeButtonLongPress(upButtonState, loopNow, PAIRING_MODE_HOLD_MS))
     {
+      noteButtonInteraction(loopNow);
+      startPairingMode(PAIRING_MODE_WINDOW_MS);
+      refreshBleAdvertising();
+      lastActivityTime = loopNow;
+      pairingModeTriggered = true;
+      requestDisplayRefresh();
+    }
+
+    if (!pairingHoldPressed && downPressed && !upPressed &&
+        consumeButtonLongPress(downButtonState, loopNow, PAIRING_MODE_HOLD_MS))
+    {
+      noteButtonInteraction(loopNow);
+      startPairingMode(PAIRING_MODE_WINDOW_MS);
+      refreshBleAdvertising();
+      lastActivityTime = loopNow;
+      pairingModeTriggered = true;
+      requestDisplayRefresh();
+    }
+
+    if (!pairingHoldPressed && consumeButtonShortPress(upButtonState))
+    {
+      noteButtonInteraction(loopNow);
       currentView = (currentView + 1);
       if (currentView >= totalViews)
         currentView = 0;
       viewChangedByButton = true;
-      saveLastView(currentView);
+      scheduleLastViewPersist(currentView);
       lastActivityTime = loopNow;
       requestDisplayRefresh();
     }
 
-    if (!pairingHoldPressed && debounceButton(BUTTON_DOWN))
+    if (!pairingHoldPressed && consumeButtonShortPress(downButtonState))
     {
       PROFILE_SECTION("ButtonInputs");
+      noteButtonInteraction(loopNow);
       currentView = (currentView - 1);
       if (currentView < 0)
       {
         currentView = totalViews - 1;
       }
       viewChangedByButton = true;
-      saveLastView(currentView);
+      scheduleLastViewPersist(currentView);
       lastActivityTime = loopNow;
       requestDisplayRefresh();
+    }
+
+    if (pairingModeTriggered)
+    {
+      LOG_DEBUG_LN("BLE pairing mode enabled by long button press.");
     }
 
     if (viewChangedByButton)
@@ -4533,7 +5241,7 @@ void loop()
 
     // --- Proximity Sensor Logic: Blush Trigger AND Eye Bounce Trigger ---
     // static unsigned long lastSensorReadTime = 0; // Already global
-    const bool deferProximityRead = autoBrightnessEnabled && !hasElapsedSince(loopNow, lastLuxUpdate, PROX_LUX_READ_GUARD_MS);
+    const bool deferProximityRead = shouldDeferProximityRead(loopNow, PROX_LUX_READ_GUARD_MS);
     if (!deferProximityRead)
     {
       runIfElapsed(loopNow, lastSensorReadTime, sensorInterval, [&]()
@@ -4550,18 +5258,15 @@ void loop()
                      return;
                    }
 
-                   if (!shouldReadProximity(sensorNow))
+                   uint8_t proximity = 0;
+                   uint32_t proxDuration = 0;
+                   if (!readAmbientProximity(sensorNow, proximity, &proxDuration))
                    {
 #if DEBUG_PROXIMITY
                      LOG_PROX("Prox skip @%lu ms\n", sensorNow);
 #endif
-                     return; // Skip sensor work when nothing is pending
+                     return;
                    }
-
-                   const uint32_t proxStartMicros = micros();
-                   uint8_t proximity = apds.readProximity();
-                   apds.clearInterrupt(); // Ensure latched interrupt doesn't block future samples
-                   const uint32_t proxDuration = micros() - proxStartMicros;
 
 #if DEBUG_MODE
                    if (proxDuration > SLOW_SECTION_THRESHOLD_US)

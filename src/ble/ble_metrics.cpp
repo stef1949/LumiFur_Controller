@@ -1,6 +1,8 @@
 #include "ble/ble_metrics.h"
 #include "ble/ble_state.h"
 
+#include "core/AdaptiveBrightness.h"
+
 #include "driver/temp_sensor.h"
 
 #include <Arduino.h>
@@ -9,6 +11,9 @@
 #include <cstring>
 #include <cstdio>
 #include <string>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 extern uint8_t userBrightness;
 extern bool brightnessChanged;
@@ -158,7 +163,7 @@ void triggerHistoryTransfer()
 
     pTemperatureLogsCharacteristic->setValue(startPkt, sizeof(startPkt));
     pTemperatureLogsCharacteristic->notify();
-    delay(20);
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     // Oldest entry index in ring buffer
     int readIndex = bufferFull ? historyWriteIndex : 0;
@@ -202,7 +207,7 @@ void triggerHistoryTransfer()
                       (unsigned)(chunkIndex + 1), (unsigned)totalChunks,
                       (unsigned)pointsInChunk, (unsigned)pktLen);
 
-        delay(20);
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
 
     // ---- END packet (optional; Swift currently ignores but harmless) ----
@@ -263,7 +268,6 @@ void updateLux()
         if (deviceConnected && pLuxCharacteristic != nullptr)
         {
             // Get current lux value from the APDS9960 sensor (in lux)
-            extern uint16_t getAmbientLuxU16(); // Function from main.h
             uint16_t currentLux = getAmbientLuxU16();
 
             // Only send update if lux has changed significantly to avoid spam

@@ -1,5 +1,7 @@
 #include "core/mic/mic_math.h"
 
+#include <cmath>
+
 #ifndef I2S_NUM_1
 #define I2S_NUM_1 1
 #endif
@@ -8,8 +10,8 @@
 #define I2S_BITS_PER_SAMPLE_32BIT 32
 #endif
 
-#ifndef I2S_CHANNEL_FMT_ONLY_LEFT
-#define I2S_CHANNEL_FMT_ONLY_LEFT 1
+#ifndef I2S_CHANNEL_FMT_RIGHT_LEFT
+#define I2S_CHANNEL_FMT_RIGHT_LEFT 0
 #endif
 
 #ifndef I2S_COMM_FORMAT_STAND_I2S
@@ -18,76 +20,86 @@
 
 #include "core/mic/mic_config.h"
 
-float micComputeSignalAboveAmbient(float smoothedSignal, float ambientNoise)
+float micClamp(float value, float minValue, float maxValue)
 {
-  float signal = smoothedSignal - ambientNoise;
-  return (signal < 0.0f) ? 0.0f : signal;
-}
-
-float micComputeOpenThreshold(float ambientNoise)
-{
-  return ambientNoise + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT;
-}
-
-float micComputeCloseThreshold(float ambientNoise)
-{
-  return ambientNoise + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * MIC_CLOSE_HYSTERESIS_RATIO;
-}
-
-float micComputeAmbientUpdateLimit(float ambientNoise)
-{
-  return ambientNoise + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * MIC_AMBIENT_UPDATE_BAND;
-}
-
-float micComputeImpulseAvgLimit(float ambientNoise)
-{
-  return ambientNoise + MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * MIC_IMPULSE_MAX_AVG_RATIO;
-}
-
-float micComputePeakToAvg(std::uint32_t peakAbs, float currentAvgAbsSignal)
-{
-  if (currentAvgAbsSignal > 1.0f)
+  if (value < minValue)
   {
-    return static_cast<float>(peakAbs) / currentAvgAbsSignal;
+    return minValue;
   }
-  return 0.0f;
+  if (value > maxValue)
+  {
+    return maxValue;
+  }
+  return value;
 }
 
-bool micIsImpulse(std::uint32_t peakAbs, float currentAvgAbsSignal, float ambientNoise)
+float micClamp01(float value)
 {
-  const float impulseAvgLimit = micComputeImpulseAvgLimit(ambientNoise);
-  const float peakToAvg = micComputePeakToAvg(peakAbs, currentAvgAbsSignal);
-  return (peakToAvg >= MIC_IMPULSE_PEAK_RATIO) && (currentAvgAbsSignal < impulseAvgLimit);
+  return micClamp(value, 0.0f, 1.0f);
 }
 
-float micComputeBrightnessTarget(float smoothedSignal, float ambientNoise)
+float micApplyEma(float currentValue, float targetValue, float alpha)
 {
-  const float signalAboveAmbient = micComputeSignalAboveAmbient(smoothedSignal, ambientNoise);
-  const float brightnessMappingRange = MIC_SENSITIVITY_OFFSET_ABOVE_AMBIENT * 2.5f;
-  float normalized = 0.0f;
-  if (brightnessMappingRange > 0.0f)
+  const float clampedAlpha = micClamp01(alpha);
+  return currentValue + clampedAlpha * (targetValue - currentValue);
+}
+
+float micApplyAttackReleaseEma(float currentValue, float targetValue, float attackAlpha, float releaseAlpha)
+{
+  const float alpha = (targetValue > currentValue) ? attackAlpha : releaseAlpha;
+  return micApplyEma(currentValue, targetValue, alpha);
+}
+
+float micUpdateNoiseFloor(float noiseFloor, float blockEnvelope)
+{
+  if (blockEnvelope > noiseFloor + MIC_NOISE_FLOOR_GATE_BAND)
   {
-    normalized = signalAboveAmbient / brightnessMappingRange;
+    return micClamp(noiseFloor, MIC_NOISE_FLOOR_MIN, MIC_NOISE_FLOOR_MAX);
   }
-  if (normalized > 1.0f)
+
+  const float alpha = (blockEnvelope >= noiseFloor) ? MIC_NOISE_FLOOR_RISE_ALPHA : MIC_NOISE_FLOOR_FALL_ALPHA;
+  const float updated = micApplyEma(noiseFloor, blockEnvelope, alpha);
+  return micClamp(updated, MIC_NOISE_FLOOR_MIN, MIC_NOISE_FLOOR_MAX);
+}
+
+float micComputeSpeechLevel(float blockEnvelope, float noiseFloor)
+{
+  const float speech = blockEnvelope - (noiseFloor + MIC_NOISE_GATE_MARGIN);
+  return (speech > 0.0f) ? speech : 0.0f;
+}
+
+float micUpdatePeakReference(float peakReference, float speechLevel)
+{
+  const float target = (speechLevel > MIC_PEAK_REF_MIN) ? speechLevel : MIC_PEAK_REF_MIN;
+  const float updated = micApplyAttackReleaseEma(
+      peakReference,
+      target,
+      MIC_PEAK_REF_ATTACK_ALPHA,
+      MIC_PEAK_REF_RELEASE_ALPHA);
+  return micClamp(updated, MIC_PEAK_REF_MIN, MIC_PEAK_REF_MAX);
+}
+
+float micNormalizeSpeechLevel(float speechLevel, float peakReference)
+{
+  if (peakReference <= 0.0f)
   {
-    normalized = 1.0f;
+    return 0.0f;
   }
+  return micClamp01(speechLevel / peakReference);
+}
+
+float micComputeBrightnessTarget(float normalizedEnvelope)
+{
+  const float shapedEnvelope = std::sqrt(micClamp01(normalizedEnvelope));
   return static_cast<float>(MIC_MIN_BRIGHTNESS) +
-         (static_cast<float>(MIC_MAX_BRIGHTNESS - MIC_MIN_BRIGHTNESS) * normalized);
+         (static_cast<float>(MIC_MAX_BRIGHTNESS - MIC_MIN_BRIGHTNESS) * shapedEnvelope);
 }
 
-float micUpdateBrightnessEma(float brightnessEma, float targetBrightness)
+bool micShouldOpenMouth(float normalizedEnvelope, bool mouthOpen)
 {
-  const float alpha = (targetBrightness > brightnessEma) ? MIC_BRIGHTNESS_ATTACK_ALPHA : MIC_BRIGHTNESS_RELEASE_ALPHA;
-  brightnessEma += alpha * (targetBrightness - brightnessEma);
-  if (brightnessEma < static_cast<float>(MIC_MIN_BRIGHTNESS))
+  if (mouthOpen)
   {
-    brightnessEma = static_cast<float>(MIC_MIN_BRIGHTNESS);
+    return normalizedEnvelope >= MIC_MOUTH_CLOSE_THRESHOLD;
   }
-  if (brightnessEma > static_cast<float>(MIC_MAX_BRIGHTNESS))
-  {
-    brightnessEma = static_cast<float>(MIC_MAX_BRIGHTNESS);
-  }
-  return brightnessEma;
+  return normalizedEnvelope >= MIC_MOUTH_OPEN_THRESHOLD;
 }
