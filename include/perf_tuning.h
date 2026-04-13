@@ -19,7 +19,7 @@
 
 // Face/plasma pacing
 #ifndef LF_FACE_VIEW_FRAME_INTERVAL_MS
-#define LF_FACE_VIEW_FRAME_INTERVAL_MS 8UL
+#define LF_FACE_VIEW_FRAME_INTERVAL_MS 10UL
 #endif
 
 // BLE worker sizing
