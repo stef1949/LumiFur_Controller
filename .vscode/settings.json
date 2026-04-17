@@ -77,7 +77,6 @@
   // PlatformIO specific settings
   "platformio-ide.useBuiltinPIOCore": true,
   "platformio-ide.useDevelopmentPIOCore": false,
-  "platformio-ide.customPATH": "C:\\Users\\stef1\\.platformio\\penv\\Scripts;C:\\msys64\\mingw64\\bin;C:\\msys64\\ucrt64\\bin;${env:PATH}",
   "cmake.configureOnOpen": false,
   "cmake.configureOnEdit": false,
   

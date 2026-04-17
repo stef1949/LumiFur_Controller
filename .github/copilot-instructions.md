@@ -14,12 +14,12 @@ LumiFur Controller is an embedded C++ project for ESP32 microcontrollers that co
 ## Architecture & Code Structure
 
 ### Main Components
-- `main.cpp` (~1500 lines): Core application logic, view management, animations
-- `main.h`: Function declarations, configuration constants, helper functions
-- `bitmaps.h`: Bitmap data for facial expressions and graphics
-- `ble.h`: Bluetooth Low Energy communication handling
-- `deviceConfig.h`: Hardware pin definitions and device-specific settings
-- `userPreferences.h`: User settings and preferences management
+- `src/app/main.cpp` (~1500 lines): Core application logic, view management, animations
+- `src/app/main.h`: Function declarations, configuration constants, helper functions
+- `src/assets/bitmaps.h`: Bitmap data for facial expressions and graphics
+- `src/ble/ble.h`: Bluetooth Low Energy communication handling
+- `src/hardware/deviceConfig.h`: Hardware pin definitions and device-specific settings
+- `src/config/userPreferences.h`: User settings and preferences management
 
 ### Key Concepts
 - **Views**: Different facial expressions (idle, happy, angry, playful, etc.)

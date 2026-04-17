@@ -1,5 +1,5 @@
 #include <unity.h>
-#include "bitmaps.h"
+#include "assets/bitmaps.h"
 
 // Compute expected byte-size for a width x height monochrome XBM:
 // each row is padded to full bytes: ((w + 7) / 8) bytes per row.

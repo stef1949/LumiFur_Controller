@@ -1,4 +1,4 @@
-#include "customEffects/basicRainbow.h"
+#include "effects/basicRainbow.h"
 
 #include <Arduino.h>
 #include <FastLED.h>

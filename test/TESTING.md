@@ -18,7 +18,7 @@ Tests for the `ScrollState` module (`src/core/ScrollState.cpp`)
 - **6 tests** covering initialization, speed updates, timing reset, and boundary conditions
 
 ### test_easing_functions
-Tests for easing functions (`src/main.h`)
+Tests for easing functions (`src/app/main.h`)
 - **7 tests** covering `easeInQuad`, `easeOutQuad`, and `easeInOutQuad` functions
 - Includes boundary condition tests, mid-value tests, and monotonicity verification
 
@@ -29,14 +29,14 @@ Tests for BLE (Bluetooth Low Energy) module (`src/ble.h`)
 - Validates temperature precision and history capacity
 
 ### test_accelerometer
-Tests for accelerometer motion detection (`src/main.cpp`)
+Tests for accelerometer motion detection (`src/app/main.cpp`)
 - **19 tests** covering threshold detection, motion flags, and delta calculations
 - Tests shake vs sleep threshold switching
 - Validates motion detection on multiple axes
 - Boundary condition testing for motion thresholds
 
 ### test_microphone
-Tests for microphone audio processing (`src/main.cpp`)
+Tests for microphone audio processing (`src/app/main.cpp`)
 - **25 tests** covering maw brightness calculation, mouth state detection, and signal processing
 - Tests trigger threshold calculations and signal-to-brightness mapping
 - Validates Arduino map/constrain helper functions

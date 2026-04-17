@@ -3,7 +3,7 @@
 
 #include "core/ScrollState.h"
 #include "core/PerfTelemetry.h"
-#include "userPreferences.h"
+#include "config/userPreferences.h"
 
 #include <Arduino.h>
 #include <cstring>

@@ -31,14 +31,14 @@ A real-time firmware for animating a HUB75 LED matrix Protogen mask with sensor-
 - Bluetooth Low Energy control via NimBLE with remote expression switching, brightness management, sensor feature toggles, temperature telemetry, and a command channel for log retrieval.
 - Wireless firmware delivery through a dedicated OTA characteristic plus runtime build metadata advertisement for companion apps.
 - Power-aware runtime with wake-on-motion, sleep dimming, ambient light scaling, and persistent user preferences stored in ESP32 NVS.
-- Optimized HUB75 pipeline using DMA double buffering, optional virtual panel simulation, and extensible C++ effect modules under `src/customEffects/`.
+- Optimized HUB75 pipeline using DMA double buffering, optional virtual panel simulation, and extensible C++ effect modules under `src/effects/`.
 - File-backed monochrome video playback from onboard FATFS storage, including GIF/video conversion into a compact `LFV1` format for the new `VIEW_VIDEO_PLAYER`.
 
 ## Hardware
 - **Controller:** Adafruit MatrixPortal ESP32-S3 (default target) with built-in APDS9960, LIS3DH, status NeoPixel, and onboard microphone used by the firmware.
 - **Display:** Two chained 64×32 HUB75 RGB matrix panels (1/16 scan) plus appropriate ribbon cables and 5 V power delivery.
-- **Inputs & sensors:** Onboard buttons map to view navigation; alternate hardware can be remapped in `src/deviceConfig.h`.
-- **Optional:** Additional peripherals (e.g., alternative sensors or external microphones) can be integrated by adjusting the pin definitions and initialization blocks in `deviceConfig.h` / `main.cpp`.
+- **Inputs & sensors:** Onboard buttons map to view navigation; alternate hardware can be remapped in `src/hardware/deviceConfig.h`.
+- **Optional:** Additional peripherals (e.g., alternative sensors or external microphones) can be integrated by adjusting the pin definitions and initialization blocks in `src/hardware/deviceConfig.h` / `src/app/main.cpp`.
 
 ## Build & Flash
 All dependencies are resolved by PlatformIO. You can work from the CLI or through the VS Code extension.
@@ -62,11 +62,12 @@ pio run -e adafruit_matrixportal_esp32s3 -t uploadfs
 ```
 
 Additional PlatformIO environments are defined in `platformio.ini`, including a `dev` flavor with extra instrumentation and native test environments (`codeql`, `native`, `native2`).
+The PlatformIO helper scripts used by these environments now live under `tools/platformio/`, and the firmware artifact workflow is documented in `docs/build/FIRMWARE_BUILD.md`.
 
 ## Configuration
-- **Persistent preferences:** `src/userPreferences.h` manages stored defaults for brightness, auto-blink, accelerometer usage, sleep mode, and other controller behaviors.
-- **Hardware mapping:** Modify `src/deviceConfig.h` to adjust HUB75 pinouts, panel chains, button inputs, or to enable the virtual panel simulator (`VIRTUAL_PANE`).
-- **Effects & assets:** Custom scenes live in `src/customEffects/` and bitmap assets in `src/bitmaps.h`; add new animations or alter existing ones there.
+- **Persistent preferences:** `src/config/userPreferences.h` manages stored defaults for brightness, auto-blink, accelerometer usage, sleep mode, and other controller behaviors.
+- **Hardware mapping:** Modify `src/hardware/deviceConfig.h` to adjust HUB75 pinouts, panel chains, button inputs, or to enable the virtual panel simulator (`VIRTUAL_PANE`).
+- **Effects & assets:** Custom scenes live in `src/effects/`, bitmap assets in `src/assets/bitmaps.h`, and optional font assets in `src/assets/fonts/`; add new animations or alter existing ones there.
 - **Video assets:** Put `bad_apple.gif` or another supported source file in `video_sources/` or `data/videos/` for automatic conversion during `buildfs`/`uploadfs`; generated assets are written as lowercase `.lfv` files such as `data/videos/bad_apple.lfv`, using a `64x32` per-panel `cover` layout by default so each panel is filled without distorting aspect ratio.
 - **Build metadata:** `platformio.ini` sets `FIRMWARE_VERSION`, device model tags, and compiler flags shared across environments.
 

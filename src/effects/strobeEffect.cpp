@@ -1,11 +1,11 @@
-#include "customEffects/strobeEffect.h"
+#include "effects/strobeEffect.h"
 
 #include <Arduino.h>
 #include <cstdlib>
 #include <string>
 
 #include "core/ColorParser.h"
-#include "userPreferences.h"
+#include "config/userPreferences.h"
 
 #ifdef VIRTUAL_PANE
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>

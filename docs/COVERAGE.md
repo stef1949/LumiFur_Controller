@@ -22,13 +22,13 @@ build_flags =
     -lgcov
     --coverage
     -DUNITY_CONFIG_DIR=./unity
-extra_scripts = test-coverage.py
+extra_scripts = tools/platformio/test_coverage.py
 ```
 
 Key flags:
 - `-lgcov`: Links against the gcov library
 - `--coverage`: Enables both compilation and linking flags for coverage
-- `extra_scripts`: Runs `test-coverage.py` after tests to generate reports
+- `extra_scripts`: Runs `tools/platformio/test_coverage.py` after tests to generate reports
 
 ### GitHub Actions Workflow
 
@@ -108,7 +108,7 @@ Current test suites contributing to coverage:
 
 - **test_animation_state** (7 tests) - `src/core/AnimationState.cpp`
 - **test_scroll_state** (6 tests) - `src/core/ScrollState.cpp`
-- **test_easing_functions** (7 tests) - Easing functions in `src/main.h`
+- **test_easing_functions** (7 tests) - Easing functions in `src/app/main.h`
 - **test_ble** (13 tests) - BLE helper functions
 - **test_accelerometer** (19 tests) - Motion detection logic
 - **test_microphone** (25 tests) - Audio processing functions

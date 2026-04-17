@@ -5,13 +5,13 @@
 #pragma once
 
 #include <Arduino.h>
-#include "main.h"
+#include "app/main.h"
 
 // Example 1: Creating a new facial expression
 // Prompt: "Create a new facial expression bitmap for surprised face, 64x32 pixels"
 const uint16_t PROGMEM surprisedFaceBitmap[] = {
     // Copilot would generate appropriate bitmap data here
-    // Following the existing pattern from bitmaps.h
+    // Following the existing pattern from assets/bitmaps.h
 };
 
 // Example 2: Adding BLE command handling  

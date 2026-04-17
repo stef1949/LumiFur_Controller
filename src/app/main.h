@@ -2,15 +2,15 @@
 #define MAIN_H
 
 #include <FastLED.h>
-#include "debug_config.h"
+#include "config/debug_config.h"
 #include "perf_tuning.h"
-#include "userPreferences.h"
-#include "deviceConfig.h"
+#include "config/userPreferences.h"
+#include "hardware/deviceConfig.h"
 #include "ble/ble.h"
 #include "core/AdaptiveBrightness.h"
 #include "SPI.h"
 #include "xtensa/core-macros.h"
-#include "bitmaps.h"
+#include "assets/bitmaps.h"
 #include <stdio.h>
 #include "esp_ota_ops.h"
 #include "nvs_flash.h"
@@ -18,7 +18,7 @@
 #include <esp_task_wdt.h>
 #include <cmath>
 
-// #include "customFonts/lequahyper20pt7b.h" // Stylized font
+// #include "assets/fonts/lequahyper20pt7b.h" // Stylized font
 // #include <Fonts/FreeSansBold18pt7b.h>     // Larger font
 // #include <Fonts/FreeMonoBold12pt7b.h>    // Smaller font
 // #include <Fonts/Picopixel.h>     // Smallest font

@@ -9,10 +9,10 @@ You are working on LumiFur Controller, an embedded C++ project for ESP32 microco
 - **Memory**: Limited RAM (~320KB), use PROGMEM for large static data
 
 ## Key Files
-- `main.cpp`: Core logic, view management, animations (~1500 lines)
-- `bitmaps.h`: Facial expression bitmap data
-- `ble.h`: Bluetooth Low Energy communication  
-- `deviceConfig.h`: Hardware pin definitions
+- `src/app/main.cpp`: Core logic, view management, animations (~1500 lines)
+- `src/assets/bitmaps.h`: Facial expression bitmap data
+- `src/ble/ble.h`: Bluetooth Low Energy communication  
+- `src/hardware/deviceConfig.h`: Hardware pin definitions
 - `platformio.ini`: Build configurations and dependencies
 
 ## Code Style

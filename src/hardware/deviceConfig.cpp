@@ -1,4 +1,4 @@
-#include "deviceConfig.h"
+#include "hardware/deviceConfig.h"
 
 #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
 Adafruit_APDS9960 apds;

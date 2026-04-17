@@ -4,7 +4,7 @@
 #include <Fonts/TomThumb.h>
 #include <cstdio>
 
-#include "bitmaps.h"
+#include "assets/bitmaps.h"
 
 #ifdef VIRTUAL_PANE
 #include <ESP32-VirtualMatrixPanel-I2S-DMA.h>

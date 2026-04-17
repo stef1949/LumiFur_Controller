@@ -20,20 +20,20 @@
 
 #include <Adafruit_PixelDust.h> // For sand simulation
 #include "main.h"
-#include "customEffects/dinoGame.h"
-#include "customEffects/basicRainbow.h"
-#include "customEffects/strobeEffect.h"
+#include "effects/dinoGame.h"
+#include "effects/basicRainbow.h"
+#include "effects/strobeEffect.h"
 #include "core/mic/mic.h"
 #include "core/ColorParser.h"
 #include "core/PerfTelemetry.h"
-#include "customEffects/flameEffect.h"
-#include "customEffects/fluidEffect.h"
-#include "customEffects/monoVideoPlayer.h"
+#include "effects/flameEffect.h"
+#include "effects/fluidEffect.h"
+#include "effects/monoVideoPlayer.h"
 #include "core/AnimationState.h"
 #include "core/ScrollState.h"
 #include "ble/ble_worker.h"
 #include "perf_tuning.h"
-// #include "customEffects/pixelDustEffect.h" // New effect
+// #include "effects/pixelDustEffect.h" // New effect
 
 // BLE Libraries
 #include <NimBLEDevice.h>
@@ -1633,6 +1633,11 @@ void handleBLEStatusLED()
     lastPasskeyValid = pairingSnapshot.passkeyValid;
     lastPasskey = pairingSnapshot.passkey;
   }
+#if DEBUG_DISABLE_BLE_INDICATOR_LIGHT
+  statusPixel.setPixelColor(0, 0, 0, 0);
+  statusPixel.show();
+  return;
+#endif
   if (pairingSnapshot.pairing)
   {
     fadeInAndOutLED(128, 0, 128); // Purple fade when pairing
@@ -1734,6 +1739,10 @@ constexpr unsigned long BLUETOOTH_CONNECTED_FADE_DURATION_MS = 1500UL;
 
 static bool bluetoothOverlayNeedsContinuousRefresh(unsigned long nowMs)
 {
+#if DEBUG_DISABLE_BLE_STATUS_ICON
+  (void)nowMs;
+  return false;
+#else
   if (!deviceConnected)
   {
     return true;
@@ -1746,6 +1755,7 @@ static bool bluetoothOverlayNeedsContinuousRefresh(unsigned long nowMs)
 
   const unsigned long connectedDuration = nowMs - bluetoothStatusChangeMillis;
   return connectedDuration <= (BLUETOOTH_CONNECTED_FADE_DELAY_MS + BLUETOOTH_CONNECTED_FADE_DURATION_MS);
+#endif
 }
 
 static unsigned long viewFrameIntervalMillis(int view)
@@ -1833,6 +1843,9 @@ static uint8_t scaleColorComponent(uint8_t value, float intensity)
 
 void drawBluetoothStatusIcon()
 {
+#if DEBUG_DISABLE_BLE_STATUS_ICON
+  return;
+#endif
   if (!dma_display)
   {
     return;

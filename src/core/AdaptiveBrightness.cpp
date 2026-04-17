@@ -9,8 +9,8 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #endif
 
-#include "debug_config.h"
-#include "deviceConfig.h"
+#include "config/debug_config.h"
+#include "hardware/deviceConfig.h"
 #include "perf_tuning.h"
 #include "core/PerfTelemetry.h"
 
