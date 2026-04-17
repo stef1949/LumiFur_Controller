@@ -34,10 +34,10 @@
 #define DEBUG_VIDEO_PLAYER 0  // Set to 1 to enable video player debug logs and overlay
 #endif
 #ifndef DEBUG_DISABLE_BLE_INDICATOR_LIGHT
-#define DEBUG_DISABLE_BLE_INDICATOR_LIGHT 1 // Set to 1 to force the BLE NeoPixel indicator off
+#define DEBUG_DISABLE_BLE_INDICATOR_LIGHT 0 // Set to 1 to force the BLE NeoPixel indicator off
 #endif
 #ifndef DEBUG_DISABLE_BLE_STATUS_ICON
-#define DEBUG_DISABLE_BLE_STATUS_ICON 1 // Set to 1 to hide the on-screen BLE status icon
+#define DEBUG_DISABLE_BLE_STATUS_ICON 0 // Set to 1 to hide the on-screen BLE status icon
 #endif
 
 #if DEBUG_MODE
