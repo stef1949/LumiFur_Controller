@@ -3939,9 +3939,8 @@ void setup()
   pOtaCharacteristic = pService->createCharacteristic(
       OTA_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
-          NIMBLE_PROPERTY::WRITE |
           NIMBLE_PROPERTY::WRITE_ENC |
-          NIMBLE_PROPERTY::WRITE_NR |
+        NIMBLE_PROPERTY::WRITE_NR |
           NIMBLE_PROPERTY::NOTIFY);
   pOtaCharacteristic->setCallbacks(&otaCallbacks);
   NimBLEDescriptor *otaDesc = pOtaCharacteristic->createDescriptor(
