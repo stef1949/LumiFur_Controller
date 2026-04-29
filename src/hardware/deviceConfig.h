@@ -46,13 +46,13 @@ class VirtualMatrixPanel;
 #if defined(_VARIANT_MATRIXPORTAL_M4_) // MatrixPortal M4
 #define BUTTON_UP 2
 #define BUTTON_DOWN 3
-#elif defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3_Waveshare) // MatrixPortal ESP32-S3 with Waveshare Displays
+#elif defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3_Waveshare) // MatrixPortal ESP32-S3 with Waveshare Displays. Has to Be Placed Before ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3 or the hardware config will not apply properly.
 #define R1_PIN 42
-#define G1_PIN 40
-#define B1_PIN 41
+#define G1_PIN 40 //Swapped with 41
+#define B1_PIN 41 //Swapped wth 40
 #define R2_PIN 38
-#define G2_PIN 37
-#define B2_PIN 39
+#define G2_PIN 37 //Swapped with 39
+#define B2_PIN 39 //Swapped with 37
 #define A_PIN 45
 #define B_PIN 36
 #define C_PIN 48
