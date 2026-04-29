@@ -1,6 +1,9 @@
 #include "hardware/deviceConfig.h"
 
-#if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
+#if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3_Waveshare)
+Adafruit_APDS9960 apds;
+Adafruit_NeoPixel statusPixel(1, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
+#elif defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
 Adafruit_APDS9960 apds;
 Adafruit_NeoPixel statusPixel(1, STATUS_LED_PIN, NEO_GRB + NEO_KHZ800);
 #endif
