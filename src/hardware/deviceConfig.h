@@ -46,6 +46,40 @@ class VirtualMatrixPanel;
 #if defined(_VARIANT_MATRIXPORTAL_M4_) // MatrixPortal M4
 #define BUTTON_UP 2
 #define BUTTON_DOWN 3
+#elif defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3_Waveshare) // MatrixPortal ESP32-S3 with Waveshare Displays. Has to Be Placed Before ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3 or the hardware config will not apply properly.
+#define R1_PIN 42
+#define G1_PIN 40 //Swapped with 41
+#define B1_PIN 41 //Swapped wth 40
+#define R2_PIN 38
+#define G2_PIN 37 //Swapped with 39
+#define B2_PIN 39 //Swapped with 37
+#define A_PIN 45
+#define B_PIN 36
+#define C_PIN 48
+#define D_PIN 35
+#define E_PIN 21
+#define LAT_PIN 47
+#define OE_PIN 14
+#define CLK_PIN 2
+#define PIN_E 21 // E pin for 64px high panels
+// Button pins
+#define BUTTON_UP 6
+#define BUTTON_DOWN 7
+#include <Wire.h>              // For I2C sensors
+#define APDS_SDA_PIN 16 // STEMMA QT SDA on MatrixPortal S3
+#define APDS_SCL_PIN 17 // STEMMA QT SCL on MatrixPortal S3
+// #include <SPI.h>                  // For SPI sensors
+#include "Adafruit_APDS9960.h" // Library for built-in gesture sensor
+// the pin that the interrupt is attached to
+// #define INT_PIN 3
+#define APDS_AVAILABLE
+extern Adafruit_APDS9960 apds;
+#include <Adafruit_LIS3DH.h>   // Library for built-in For accelerometer
+#include <Adafruit_NeoPixel.h> // Library for built-in NeoPixel
+#define STATUS_LED_PIN 4
+extern Adafruit_NeoPixel statusPixel;
+#include "core/mic/mic_pins.h"
+#define ACCEL_AVAILABLE
 #elif defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3) // MatrixPortal ESP32-S3
 #define R1_PIN 42
 #define G1_PIN 41
