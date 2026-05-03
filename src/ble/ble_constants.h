@@ -20,11 +20,14 @@
 
 // #define ULTRASOUND_CHARACTERISTIC_UUID  "01931c44-3867-7b5d-9732-12460e3a35db"
 
+
+// MARK: Come back and fix this issue, maybe I dunno
+
 // Fallback defines in case PlatformIO doesn't inject them
 #define FIMRWARE_VERSION DFIRMWARE_VERSION
 #ifndef FIRMWARE_VERSION
 
-#define FIRMWARE_VERSION "3.6.0" // Default version if not defined
+#define FIRMWARE_VERSION "4.2.6" // Default version if not defined
 #endif
 
 #define GIT_COMMIT GIT_BRANCH

@@ -15,9 +15,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-extern uint8_t userBrightness;
-extern bool brightnessChanged;
-
 // Lux monitoring variables
 static unsigned long luxMillis = 0;
 static const unsigned long luxInterval = 500; // Update lux every 500ms
@@ -87,6 +84,7 @@ static void storeTemperatureInHistory(float tempC)
     }
 }
 
+// cppcheck-suppress unusedFunction
 void clearHistoryBuffer()
 {
     historyWriteIndex = 0;
@@ -98,6 +96,7 @@ void clearHistoryBuffer()
 
 static bool historyTransferInProgress = false;
 
+// cppcheck-suppress unusedFunction
 void triggerHistoryTransfer()
 {
     if (historyTransferInProgress)
@@ -183,6 +182,7 @@ void triggerHistoryTransfer()
         pkt[3] = pointsInChunk;
 
         // Payload begins at byte 4
+        // cppcheck-suppress knownConditionTrueFalse
         for (uint8_t i = 0; i < pointsInChunk; ++i)
         {
             const int16_t fixed10 = temperatureHistoryFixed10[readIndex];
@@ -220,6 +220,7 @@ void triggerHistoryTransfer()
     Serial.println("Finished sending history chunks.");
 }
 
+// cppcheck-suppress unusedFunction
 void updateTemperature()
 {
     const unsigned long now = millis();
@@ -232,7 +233,7 @@ void updateTemperature()
     // if (err != ESP_OK) return;
     temp_sensor_read_celsius(&result);
 
-    // ✅ Always record history, even if phone isn't connected.
+    // Always record history, even if phone isn't connected.
     storeTemperatureInHistory(result);
 
     // Only notify if connected + subscribed
@@ -255,6 +256,7 @@ void updateTemperature()
 #endif
 }
 
+// cppcheck-suppress unusedFunction
 void updateLux()
 {
     unsigned long currentMillis = millis();
@@ -295,22 +297,6 @@ void updateLux()
                 Serial.println("Warning: updateLux called while not connected.");
             if (pLuxCharacteristic == nullptr)
                 Serial.println("Error: pLuxCharacteristic is null!");
-        }
-    }
-}
-
-void checkBrightness()
-{
-    if (brightnessChanged)
-    {
-        if (pBrightnessCharacteristic != nullptr)
-        { // Null check
-            uint8_t v = userBrightness;
-            pBrightnessCharacteristic->setValue(&v, 1);
-            pBrightnessCharacteristic->notify();
-            #if DEBUG_BRIGHTNESS
-            Serial.printf("Manual brightness change (from ESP32) notified to app: %u\n", v);
-            #endif
         }
     }
 }

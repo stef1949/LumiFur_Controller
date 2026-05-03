@@ -11,6 +11,7 @@ constexpr std::uint16_t kMinSpeed = 1;
 constexpr std::uint16_t kMaxSpeed = 500;
 constexpr std::uint16_t kFastestInterval = 15;
 constexpr std::uint16_t kSlowestInterval = 250;
+static_assert(kMaxSpeed > kMinSpeed, "Scroll speed range must be non-zero");
 
 std::uint16_t clampSpeed(std::uint16_t speed)
 {
@@ -31,7 +32,7 @@ std::uint16_t computeInterval(std::uint16_t speed)
   const std::uint16_t range = kSlowestInterval - kFastestInterval;
   const std::uint16_t steps = static_cast<std::uint16_t>(kMaxSpeed - kMinSpeed);
   const std::uint16_t offset = static_cast<std::uint16_t>(
-      ((static_cast<std::uint32_t>(clampedSpeed - kMinSpeed) * range) / (steps == 0 ? 1 : steps)));
+      ((static_cast<std::uint32_t>(clampedSpeed - kMinSpeed) * range) / steps));
   return static_cast<std::uint16_t>(kFastestInterval + offset);
 }
 

@@ -5,6 +5,5 @@ void triggerHistoryTransfer();
 void clearHistoryBuffer();
 void updateTemperature();
 void updateLux();
-void checkBrightness();
 
 #endif // BLE_METRICS_H

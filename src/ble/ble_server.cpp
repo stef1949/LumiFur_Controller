@@ -114,11 +114,13 @@ void ServerCallbacks::onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connIn
     const bool resetPending = isPairingResetPending();
     if (resetPending && pServer->getConnectedCount() == 0)
     {
-        const bool cleared = NimBLEDevice::deleteAllBonds();
-        setPairingResetPending(false);
 #if DEBUG_BLE
+        const bool cleared = NimBLEDevice::deleteAllBonds();
         Serial.printf("BLE pairing reset: bonds cleared=%s\n", cleared ? "true" : "false");
+#else
+        NimBLEDevice::deleteAllBonds();
 #endif
+        setPairingResetPending(false);
     }
     refreshBleAdvertising();
 #if DEBUG_BLE

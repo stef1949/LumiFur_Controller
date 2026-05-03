@@ -17,8 +17,8 @@ void otaRebootTask(void *param)
 {
     (void)param;
     vTaskDelay(kOtaRebootDelayTicks);
-    esp_restart();
     vTaskDelete(nullptr);
+    esp_restart();
 }
 
 void scheduleOtaReboot()

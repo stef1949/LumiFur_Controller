@@ -347,8 +347,6 @@ volatile uint32_t gWorstFrameDurationMicros = 0;
 #endif
 // ---
 
-bool brightnessChanged = false;
-
 constexpr unsigned long LUX_UPDATE_INTERVAL_MS = 500;
 constexpr unsigned long SLEEP_CHECK_INTERVAL_MS = 60;
 constexpr unsigned long BUTTON_DEBOUNCE_MS = 50;
@@ -1464,7 +1462,6 @@ static void handleBleBrightnessWriteWork(const BleWorkItem &item)
   }
 
   userBrightness = item.data[0];
-  brightnessChanged = true;
   setUserBrightness(userBrightness);
 #if DEBUG_BRIGHTNESS
   Serial.printf("Brightness target set to %u\n", userBrightness);
@@ -3806,7 +3803,8 @@ void setup()
   NimBLECharacteristic *pDeviceInfoCharacteristic = pService->createCharacteristic(
       INFO_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
-          NIMBLE_PROPERTY::NOTIFY);
+      NIMBLE_PROPERTY::NOTIFY
+    );
 
   // Construct JSON string
   std::string jsonInfo = std::string("{") +
@@ -3842,8 +3840,9 @@ void setup()
   pCommandCharacteristic = pService->createCharacteristic(
       COMMAND_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::WRITE |
-          NIMBLE_PROPERTY::WRITE_ENC |
-          NIMBLE_PROPERTY::NOTIFY);
+      NIMBLE_PROPERTY::WRITE_ENC |
+      NIMBLE_PROPERTY::NOTIFY
+    );
   pCommandCharacteristic->setCallbacks(&cmdCallbacks);
   Serial.print("Command Characteristic created, UUID: ");
   Serial.println(pCommandCharacteristic->getUUID().toString().c_str());
@@ -3855,18 +3854,19 @@ void setup()
       pService->createCharacteristic(
           TEMPERATURE_CHARACTERISTIC_UUID,
           NIMBLE_PROPERTY::WRITE |
-              NIMBLE_PROPERTY::NOTIFY
-          // NIMBLE_PROPERTY::READ_ENC
+          NIMBLE_PROPERTY::NOTIFY
+          //NIMBLE_PROPERTY::READ_ENC
       );
 
   // Create a characteristic for configuration.
   pConfigCharacteristic = pService->createCharacteristic(
       CONFIG_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
-          NIMBLE_PROPERTY::WRITE |
-          NIMBLE_PROPERTY::WRITE_ENC |
-          // NIMBLE_PROPERTY::WRITE_NR |
-          NIMBLE_PROPERTY::NOTIFY);
+      NIMBLE_PROPERTY::WRITE |
+      NIMBLE_PROPERTY::WRITE_ENC |
+      //NIMBLE_PROPERTY::WRITE_NR |
+      NIMBLE_PROPERTY::NOTIFY
+    );
 
   // Set the callback to handle writes.
   pConfigCharacteristic->setCallbacks(&configCallbacks);
@@ -5480,9 +5480,6 @@ void loop()
                  PROFILE_SECTION("BLEStatusLED");
                  handleBLEStatusLED(); // Update status LED based on connection
                });
-
-  // Check for changes in brightness
-  // checkBrightness();
 
   // --- Frame Rate Calculation ---
   {

@@ -66,6 +66,7 @@ static uint32_t nextDinoRand()
 {
   // LCG constants for a simple, fast RNG local to dino view.
   gDinoGame.rngState = gDinoGame.rngState * 1664525u + 1013904223u;
+  // cppcheck-suppress knownConditionTrueFalse
   if (gDinoGame.rngState == 0)
   {
     gDinoGame.rngState = 0x6d2b79f5u;

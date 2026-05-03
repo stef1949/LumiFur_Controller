@@ -15,12 +15,15 @@ FluidEffect::FluidEffect(MatrixDisplayAdaptor* display, Adafruit_LIS3DH* accel, 
     : dma_display(display),
       accelerometer(accel),
       accelerometer_enabled(accelEnabled),
+      particles{},
       num_active_particles(0),
       pane_width(PANE_WIDTH_DEFAULT_FLUID),
       pane_height(PANE_HEIGHT_DEFAULT_FLUID),
       grid_cols(0),
       grid_rows(0),
-      grid_cell_count(0) {
+      grid_cell_count(0),
+      grid_head{},
+      grid_next{} {
     // Seed random number generator if not done globally, or if specific seed needed
     // randomSeed(analogRead(0)); // Usually done in main setup()
 }

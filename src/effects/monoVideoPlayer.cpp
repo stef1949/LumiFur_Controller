@@ -465,8 +465,7 @@ void MonoVideoPlayer::drawCurrentFrame(MatrixPanel_I2S_DMA *display) const
       if (runStart >= 0)
       {
         const uint16_t runLength = header_.width - runStart;
-        const uint16_t runEnd = header_.width - 1U;
-        const uint16_t mirroredRunStart = (header_.width - 1U) - runEnd;
+        const uint16_t mirroredRunStart = 0;
         for (uint16_t panelStart = 0; panelStart < expectedWidth_; panelStart += panelWidth_)
         {
           const int16_t horizontalOffset = static_cast<int16_t>(panelStart + ((panelWidth_ - header_.width) / 2U));

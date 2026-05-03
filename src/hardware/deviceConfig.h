@@ -96,19 +96,22 @@ extern Adafruit_NeoPixel statusPixel;
 #define OE_PIN 14
 #define CLK_PIN 2
 #define PIN_E 21 // E pin for 64px high panels
+
 // Button pins
 #define BUTTON_UP 6
 #define BUTTON_DOWN 7
+
 #include <Wire.h>              // For I2C sensors
 #define APDS_SDA_PIN 16 // STEMMA QT SDA on MatrixPortal S3
 #define APDS_SCL_PIN 17 // STEMMA QT SCL on MatrixPortal S3
-// #include <SPI.h>                  // For SPI sensors
+// #include <SPI.h>                  // FIX: Outdated library for SPI sensors
 #include "Adafruit_APDS9960.h" // Library for built-in gesture sensor
 // the pin that the interrupt is attached to
 // #define INT_PIN 3
 #define APDS_AVAILABLE
 extern Adafruit_APDS9960 apds;
 #include <Adafruit_LIS3DH.h>   // Library for built-in For accelerometer
+
 #include <Adafruit_NeoPixel.h> // Library for built-in NeoPixel
 #define STATUS_LED_PIN 4
 extern Adafruit_NeoPixel statusPixel;
@@ -215,7 +218,7 @@ extern MatrixPanel_I2S_DMA *dma_display;
 #endif
 
 // patten change delay
-#define PATTERN_DELAY 2000
+// #define PATTERN_DELAY 2000 //MARK: Old code?
 
 // LED array
 extern CRGB leds[1];

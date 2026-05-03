@@ -52,7 +52,7 @@ struct FluidParticle {
 // - Tunables below trade off look vs. performance (e.g., MAX_PARTICLES_FLUID).
 class FluidEffect {
 public:
-    FluidEffect(MatrixDisplayAdaptor* display, Adafruit_LIS3DH* accel = nullptr, bool* accelEnabled = nullptr);
+    explicit FluidEffect(MatrixDisplayAdaptor* display, Adafruit_LIS3DH* accel = nullptr, bool* accelEnabled = nullptr);
     ~FluidEffect();
 
     // Called when the effect starts or is switched to.

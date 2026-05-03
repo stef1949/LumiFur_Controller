@@ -28,6 +28,9 @@ public:
   MonoVideoPlayer(fs::FS &filesystem, const char *path, uint16_t width, uint16_t height, uint16_t panelWidth = 0, bool debugEnabled = false);
   ~MonoVideoPlayer();
 
+  MonoVideoPlayer(const MonoVideoPlayer &) = delete;
+  MonoVideoPlayer &operator=(const MonoVideoPlayer &) = delete;
+
   void begin();
   void updateAndDraw(MatrixPanel_I2S_DMA *display, uint32_t nowMicros);
 
