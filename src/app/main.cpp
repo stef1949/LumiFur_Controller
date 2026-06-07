@@ -30,6 +30,7 @@
 #include "effects/fluidEffect.h"
 #include "effects/monoVideoPlayer.h"
 #include "core/AnimationState.h"
+#include "core/InternalTemperature.h"
 #include "core/ScrollState.h"
 #include "ble/ble_worker.h"
 #include "perf_tuning.h"
@@ -3716,7 +3717,11 @@ void setup()
 
   gVideoStorageReady = initializeVideoStorage();
 
-  initTempSensor(); // Initialize Temperature Sensor
+  if (!internalTemperatureInit())
+  {
+    Serial.printf("Temperature sensor unavailable using %s; BLE temperature updates disabled.\n",
+                  internalTemperatureDriverName());
+  }
 
   initPreferences(); // Initialize Preferences
   userBrightness = static_cast<uint8_t>(constrain(getUserBrightness(), 0, 255));

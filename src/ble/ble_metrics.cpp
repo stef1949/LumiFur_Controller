@@ -2,8 +2,7 @@
 #include "ble/ble_state.h"
 
 #include "core/AdaptiveBrightness.h"
-
-#include "driver/temp_sensor.h"
+#include "core/InternalTemperature.h"
 
 #include <Arduino.h>
 #include <cmath>
@@ -228,10 +227,13 @@ void updateTemperature()
     temperatureMillis = now;
 
     float result = 0.0f;
-    // If your API returns an error code, handle it. If it doesn't, ignore this.
-    // esp_err_t err = temp_sensor_read_celsius(&result);
-    // if (err != ESP_OK) return;
-    temp_sensor_read_celsius(&result);
+    if (!internalTemperatureReadCelsius(result))
+    {
+#if DEBUG_MODE
+        Serial.printf("Temperature read failed using %s\n", internalTemperatureDriverName());
+#endif
+        return;
+    }
 
     // Always record history, even if phone isn't connected.
     storeTemperatureInHistory(result);
