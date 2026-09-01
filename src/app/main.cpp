@@ -5107,10 +5107,12 @@ void loop()
                  {
                    PERF_SCOPE(PerfBucket::Sensors);
                    PROFILE_SECTION("MotionDetection");
-                   #if defined(BUTTON_UP) && defined(BUTTON_DOWN)
-                   const bool buttonPhysicallyPressed = (digitalRead(BUTTON_UP) == LOW) || (digitalRead(BUTTON_DOWN) == LOW);
-                   #else
-                   const bool buttonPhysicallyPressed = false;
+                   bool buttonPhysicallyPressed = false;
+                   #ifdef BUTTON_UP
+                   buttonPhysicallyPressed = buttonPhysicallyPressed || (digitalRead(BUTTON_UP) == LOW);
+                   #endif
+                   #ifdef BUTTON_DOWN
+                   buttonPhysicallyPressed = buttonPhysicallyPressed || (digitalRead(BUTTON_DOWN) == LOW);
                    #endif
 
                    if (!buttonPhysicallyPressed &&
@@ -5142,23 +5144,42 @@ void loop()
                    }
                  });
 
-// --- Handle button inputs for view changes ---
-#if defined(BUTTON_UP) && defined(BUTTON_DOWN)
+// --- Handle button inputs for view changes and BLE pairing ---
+#if defined(BUTTON_UP) || defined(BUTTON_DOWN)
     PERF_SCOPE(PerfBucket::Io);
+#ifdef BUTTON_UP
     static ButtonState upButtonState;
+#endif
+#ifdef BUTTON_DOWN
     static ButtonState downButtonState;
+#endif
+#if defined(BUTTON_UP) && defined(BUTTON_DOWN)
     static bool pairingHoldActive = false;
     static bool pairingHoldTriggered = false;
     static unsigned long pairingHoldStartMs = 0;
+#endif
 
+#ifdef BUTTON_UP
     updateButtonState(upButtonState, digitalRead(BUTTON_UP) == LOW, loopNow, BUTTON_DEBOUNCE_MS);
+#endif
+#ifdef BUTTON_DOWN
     updateButtonState(downButtonState, digitalRead(BUTTON_DOWN) == LOW, loopNow, BUTTON_DEBOUNCE_MS);
+#endif
 
+#ifdef BUTTON_UP
     const bool upPressed = upButtonState.stablePressed;
+#endif
+#ifdef BUTTON_DOWN
     const bool downPressed = downButtonState.stablePressed;
-    const bool pairingHoldPressed = upPressed && downPressed;
+#endif
+#if defined(BUTTON_UP) && defined(BUTTON_DOWN)
+    const bool pairingResetHoldPressed = upPressed && downPressed;
+#else
+    const bool pairingResetHoldPressed = false;
+#endif
 
-    if (pairingHoldPressed)
+#if defined(BUTTON_UP) && defined(BUTTON_DOWN)
+    if (pairingResetHoldPressed)
     {
       suppressButtonPress(upButtonState);
       suppressButtonPress(downButtonState);
@@ -5180,33 +5201,39 @@ void loop()
       pairingHoldActive = false;
       pairingHoldTriggered = false;
     }
+#endif
 
     bool viewChangedByButton = false;
     bool pairingModeTriggered = false;
 
-    if (!pairingHoldPressed && upPressed && !downPressed &&
+    auto enablePairingModeFromHeldButton = [&]()
+    {
+      noteButtonInteraction(loopNow);
+      startPairingMode(PAIRING_MODE_WINDOW_MS);
+      refreshBleAdvertising();
+      lastActivityTime = loopNow;
+      pairingModeTriggered = true;
+      requestDisplayRefresh();
+    };
+
+#ifdef BUTTON_UP
+    if (!pairingResetHoldPressed && upPressed &&
         consumeButtonLongPress(upButtonState, loopNow, PAIRING_MODE_HOLD_MS))
     {
-      noteButtonInteraction(loopNow);
-      startPairingMode(PAIRING_MODE_WINDOW_MS);
-      refreshBleAdvertising();
-      lastActivityTime = loopNow;
-      pairingModeTriggered = true;
-      requestDisplayRefresh();
+      enablePairingModeFromHeldButton();
     }
+#endif
 
-    if (!pairingHoldPressed && downPressed && !upPressed &&
+#ifdef BUTTON_DOWN
+    if (!pairingResetHoldPressed && downPressed &&
         consumeButtonLongPress(downButtonState, loopNow, PAIRING_MODE_HOLD_MS))
     {
-      noteButtonInteraction(loopNow);
-      startPairingMode(PAIRING_MODE_WINDOW_MS);
-      refreshBleAdvertising();
-      lastActivityTime = loopNow;
-      pairingModeTriggered = true;
-      requestDisplayRefresh();
+      enablePairingModeFromHeldButton();
     }
+#endif
 
-    if (!pairingHoldPressed && consumeButtonShortPress(upButtonState))
+#ifdef BUTTON_UP
+    if (!pairingResetHoldPressed && consumeButtonShortPress(upButtonState))
     {
       noteButtonInteraction(loopNow);
       currentView = (currentView + 1);
@@ -5217,21 +5244,27 @@ void loop()
       lastActivityTime = loopNow;
       requestDisplayRefresh();
     }
+#endif
 
-    if (!pairingHoldPressed && consumeButtonShortPress(downButtonState))
+#ifdef BUTTON_DOWN
+    if (!pairingResetHoldPressed && consumeButtonShortPress(downButtonState))
     {
       PROFILE_SECTION("ButtonInputs");
       noteButtonInteraction(loopNow);
-      currentView = (currentView - 1);
-      if (currentView < 0)
+      if (currentView == 0)
       {
-        currentView = totalViews - 1;
+        currentView = static_cast<uint8_t>(totalViews - 1);
+      }
+      else
+      {
+        --currentView;
       }
       viewChangedByButton = true;
       scheduleLastViewPersist(currentView);
       lastActivityTime = loopNow;
       requestDisplayRefresh();
     }
+#endif
 
     if (pairingModeTriggered)
     {

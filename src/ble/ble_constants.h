@@ -24,10 +24,10 @@
 // MARK: Come back and fix this issue, maybe I dunno
 
 // Fallback defines in case PlatformIO doesn't inject them
-#define FIMRWARE_VERSION DFIRMWARE_VERSION
+#define FIRMWARE_VERSION DFIRMWARE_VERSION
 #ifndef FIRMWARE_VERSION
 
-#define FIRMWARE_VERSION "4.2.6" // Default version if not defined
+#define FIRMWARE_VERSION "4.2.7" // Version if not defined
 #endif
 
 #define GIT_COMMIT GIT_BRANCH
