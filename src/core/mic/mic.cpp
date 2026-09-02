@@ -13,6 +13,7 @@
 
 static TaskHandle_t s_micTaskHandle = nullptr;
 static volatile bool s_mouthOpen = false;
+static volatile uint8_t s_mouthOpenness = 0;
 static volatile uint8_t s_mouthBrightness = MIC_MIN_BRIGHTNESS;
 static volatile bool s_micEnabled = true;
 
@@ -147,15 +148,18 @@ static void micTask(void *param)
     smoothedEnvelope = 0.0f;
     dcPrevInput = 0.0f;
     dcPrevOutput = 0.0f;
+    s_mouthOpenness = 0;
     s_mouthBrightness = MIC_MIN_BRIGHTNESS;
     s_mouthOpen = false;
     lastSpeechTime = 0;
   };
 
-  auto updateBrightness = [&](float normalizedEnvelope)
+  auto updateMouthOutputs = [&](float normalizedEnvelope)
   {
     const float targetBrightness = micComputeBrightnessTarget(normalizedEnvelope);
     s_mouthBrightness = static_cast<uint8_t>(targetBrightness + 0.5f);
+    const float targetOpenness = micComputeMouthOpennessTarget(normalizedEnvelope);
+    s_mouthOpenness = static_cast<uint8_t>(targetOpenness * 255.0f + 0.5f);
   };
 
   for (;;)
@@ -206,7 +210,7 @@ static void micTask(void *param)
           MIC_SIGNAL_ATTACK_ALPHA,
           MIC_SIGNAL_RELEASE_ALPHA);
       peakReference = micUpdatePeakReference(peakReference, 0.0f);
-      updateBrightness(smoothedEnvelope);
+      updateMouthOutputs(smoothedEnvelope);
 
       if (s_mouthOpen && (now - lastSpeechTime > MIC_MOUTH_OPEN_HOLD_MS))
       {
@@ -222,6 +226,7 @@ static void micTask(void *param)
       Serial.printf(">mic_noise_floor:%.1f\n", noiseFloor);
       Serial.printf(">mic_speech_level:0\n");
       Serial.printf(">mic_smoothed_env:%.3f\n", smoothedEnvelope);
+      Serial.printf(">mic_mouth_openness:%u\n", s_mouthOpenness);
       Serial.printf(">mic_mouth_brightness:%u\n", s_mouthBrightness);
       Serial.printf(">mic_mouth_open:%d\n", s_mouthOpen ? 1 : 0);
 #endif
@@ -250,7 +255,7 @@ static void micTask(void *param)
         MIC_SIGNAL_ATTACK_ALPHA,
         MIC_SIGNAL_RELEASE_ALPHA);
 
-    updateBrightness(smoothedEnvelope);
+    updateMouthOutputs(smoothedEnvelope);
 
     if (micShouldOpenMouth(smoothedEnvelope, s_mouthOpen))
     {
@@ -271,6 +276,7 @@ static void micTask(void *param)
     Serial.printf(">mic_noise_floor:%.1f\n", noiseFloor);
     Serial.printf(">mic_speech_level:%.1f\n", speechLevel);
     Serial.printf(">mic_smoothed_env:%.3f\n", smoothedEnvelope);
+    Serial.printf(">mic_mouth_openness:%u\n", s_mouthOpenness);
     Serial.printf(">mic_mouth_brightness:%u\n", s_mouthBrightness);
     Serial.printf(">mic_mouth_open:%d\n", s_mouthOpen ? 1 : 0);
 #endif
@@ -319,6 +325,11 @@ void micSetEnabled(bool enabled)
 bool micIsMouthOpen()
 {
   return s_mouthOpen;
+}
+
+uint8_t micGetMouthOpenness()
+{
+  return s_mouthOpenness;
 }
 
 uint8_t micGetMouthBrightness()

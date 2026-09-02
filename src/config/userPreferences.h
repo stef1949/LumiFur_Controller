@@ -78,6 +78,17 @@ inline void setAutoBrightness(bool autoBrightness)
   getPrefs().putBool("autobrightness", autoBrightness);
 }
 
+// Let microphone-driven mouth activity temporarily override the panel
+// brightness. Disabled by default to preserve the user's power/brightness cap.
+inline bool getMouthMicBrightnessOverride()
+{
+  return getPrefs().getBool("mouthmicmax", false);
+}
+inline void setMouthMicBrightnessOverride(bool enabled)
+{
+  getPrefs().putBool("mouthmicmax", enabled);
+}
+
 // Accelerometer functions
 inline bool getAccelerometerEnabled()
 {

@@ -27,7 +27,7 @@ A real-time firmware for animating a HUB75 LED matrix Protogen mask with sensor-
 
 ## Features
 - 20+ animated faces and effects including plasma, flame, fluid, circle eyes, spiral overlays, starfields, and scrolling text purpose-built for dual 64×32 HUB75 panels.
-- Sensor-driven reactions: the APDS9960 manages adaptive brightness and proximity-triggered blush/eye bounce, the LIS3DH accelerometer powers shake gestures and PixelDust physics, and an I2S MEMS microphone drives audio-reactive mouth animation.
+- Sensor-driven reactions: the APDS9960 manages adaptive brightness and proximity-triggered blush/eye bounce, the LIS3DH accelerometer powers shake gestures and PixelDust physics, and an I2S MEMS microphone drives a 16-frame, audio-reactive mouth morph between the closed and open XBM assets.
 - Bluetooth Low Energy control via NimBLE with remote expression switching, brightness management, sensor feature toggles, temperature telemetry, and a command channel for log retrieval.
 - Wireless firmware delivery through a dedicated OTA characteristic plus runtime build metadata advertisement for companion apps.
 - Power-aware runtime with wake-on-motion, sleep dimming, ambient light scaling, and persistent user preferences stored in ESP32 NVS.
@@ -74,7 +74,7 @@ The PlatformIO helper scripts used by these environments now live under `tools/p
 ## BLE Control
 - The controller advertises as `LumiFur_Controller` and exposes a GATT service (`01931c44-3867-7740-9867-c822cb7df308`).
 - **Face characteristic:** write a view ID (0…`TOTAL_VIEWS`‑1) to switch expressions; read returns the current value.
-- **Config characteristic:** four boolean flags toggle auto-brightness, accelerometer features, sleep mode, and aurora overlays.
+- **Config characteristic:** six boolean bytes toggle auto-brightness, accelerometer features, sleep mode, aurora overlays, static-color mode, and the mouth-microphone maximum-brightness override. Older four- or five-byte writes remain supported; byte 5 (zero-based) enables the new override. While enabled on a microphone face, the HUB75 hardware ceiling stays at 255, normal face pixels retain the selected/automatic brightness through software scaling, and active mouth pixels alone bypass that scaling.
 - **Brightness characteristic:** write 0–255 to set manual brightness or subscribe for updates when auto-brightness adjusts.
 - **Temperature & logs:** subscribe for live temperature readings and request buffered history through the command characteristic (0x01 to stream, 0x02 to clear).
 - **OTA characteristic:** supports start/data packets for BLE firmware updates with status acknowledgements; pairing is recommended for production use.

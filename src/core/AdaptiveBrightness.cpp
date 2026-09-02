@@ -290,7 +290,6 @@ void updateAdaptiveBrightness()
     if (abs(smoothedBrightness - lastBrightness) >= brightnessThreshold)
     {
       const uint8_t brightnessToApply = static_cast<uint8_t>(smoothedBrightness);
-      dma_display->setBrightness8(brightnessToApply);
       updateGlobalBrightnessScale(brightnessToApply);
       lastBrightness = smoothedBrightness;
 #if DEBUG_BRIGHTNESS
@@ -311,7 +310,6 @@ void updateAdaptiveBrightness()
     }
     if (lastBrightness != userBrightness)
     {
-      dma_display->setBrightness8(userBrightness);
       updateGlobalBrightnessScale(userBrightness);
       lastBrightness = userBrightness;
     }
@@ -372,7 +370,6 @@ void updateAdaptiveBrightness()
   if (abs(smoothedBrightness - lastBrightness) >= brightnessThreshold)
   {
     const uint8_t brightnessToApply = static_cast<uint8_t>(smoothedBrightness);
-    dma_display->setBrightness8(brightnessToApply);
     updateGlobalBrightnessScale(brightnessToApply);
     lastBrightness = smoothedBrightness;
 #if DEBUG_BRIGHTNESS

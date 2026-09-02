@@ -73,6 +73,7 @@ bool accelerometerEnabled = true;
 bool sleepModeEnabled = true;
 bool auroraModeEnabled = true;
 bool staticColorModeEnabled = false;
+bool mouthMicBrightnessOverrideEnabled = false;
 bool constantColorConfig = false;
 CRGB constantColor = CRGB::Green; // Default color for constant color mode
 void ensureStaticColorLoaded();
@@ -280,7 +281,6 @@ void applyConfigOptions()
     #if DEBUG_MODE
     Serial.println("Auto brightness disabled. Applying user-set brightness.");
     #endif
-    dma_display->setBrightness8(userBrightness);
     updateGlobalBrightnessScale(userBrightness);
     syncBrightnessState(userBrightness);
     #if DEBUG_MODE

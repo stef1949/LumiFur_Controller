@@ -56,6 +56,10 @@
 #define MIC_MOUTH_OPEN_THRESHOLD 0.18f
 #define MIC_MOUTH_CLOSE_THRESHOLD 0.10f
 
+// Continuous mouth animation reaches its fully-open frame at this level.
+// Values between the close and full-open thresholds are eased across 16 frames.
+#define MIC_MOUTH_FULL_OPEN_THRESHOLD 0.75f
+
 #ifndef DEBUG_MICROPHONE
 #define DEBUG_MICROPHONE 0
 #endif

@@ -89,6 +89,47 @@ void test_mouth_hysteresis(void)
   TEST_ASSERT_FALSE(micShouldOpenMouth(MIC_MOUTH_CLOSE_THRESHOLD - 0.01f, true));
 }
 
+void test_continuous_mouth_openness_curve(void)
+{
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f,
+                           micComputeMouthOpennessTarget(MIC_MOUTH_CLOSE_THRESHOLD));
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f,
+                           micComputeMouthOpennessTarget(MIC_MOUTH_FULL_OPEN_THRESHOLD));
+
+  const float midpoint = (MIC_MOUTH_CLOSE_THRESHOLD + MIC_MOUTH_FULL_OPEN_THRESHOLD) * 0.5f;
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, micComputeMouthOpennessTarget(midpoint));
+  TEST_ASSERT_TRUE(micComputeMouthOpennessTarget(MIC_MOUTH_OPEN_THRESHOLD) > 0.0f);
+  TEST_ASSERT_TRUE(micComputeMouthOpennessTarget(MIC_MOUTH_OPEN_THRESHOLD) < 0.5f);
+}
+
+void test_mouth_brightness_override_requires_option_and_activity(void)
+{
+  TEST_ASSERT_FALSE(micShouldOverrideMouthBrightness(false, false));
+  TEST_ASSERT_FALSE(micShouldOverrideMouthBrightness(false, true));
+  TEST_ASSERT_FALSE(micShouldOverrideMouthBrightness(true, false));
+  TEST_ASSERT_TRUE(micShouldOverrideMouthBrightness(true, true));
+}
+
+void test_panel_headroom_depends_on_option_and_mic_face_not_mouth_activity(void)
+{
+  TEST_ASSERT_FALSE(micShouldApplyPanelHeadroom(false, false));
+  TEST_ASSERT_FALSE(micShouldApplyPanelHeadroom(false, true));
+  TEST_ASSERT_FALSE(micShouldApplyPanelHeadroom(true, false));
+  TEST_ASSERT_TRUE(micShouldApplyPanelHeadroom(true, true));
+
+  // Headroom is already maximum while the mouth is idle, so later activity
+  // cannot be capped by a user or auto-brightness hardware setting.
+  TEST_ASSERT_EQUAL_UINT8(255, micResolvePanelBrightness(32, true));
+  TEST_ASSERT_FALSE(micShouldOverrideMouthBrightness(true, false));
+}
+
+void test_mouth_override_resolves_hardware_brightness(void)
+{
+  TEST_ASSERT_EQUAL_UINT8(32, micResolvePanelBrightness(32, false));
+  TEST_ASSERT_EQUAL_UINT8(255, micResolvePanelBrightness(32, true));
+  TEST_ASSERT_EQUAL_UINT8(255, micResolvePanelBrightness(255, true));
+}
+
 void setup()
 {
   UNITY_BEGIN();
@@ -100,6 +141,10 @@ void setup()
   RUN_TEST(test_peak_reference_attack_release_and_clamp);
   RUN_TEST(test_brightness_target_bounds_and_shape);
   RUN_TEST(test_mouth_hysteresis);
+  RUN_TEST(test_continuous_mouth_openness_curve);
+  RUN_TEST(test_mouth_brightness_override_requires_option_and_activity);
+  RUN_TEST(test_panel_headroom_depends_on_option_and_mic_face_not_mouth_activity);
+  RUN_TEST(test_mouth_override_resolves_hardware_brightness);
   UNITY_END();
 }
 

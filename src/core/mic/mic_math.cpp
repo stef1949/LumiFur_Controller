@@ -95,6 +95,19 @@ float micComputeBrightnessTarget(float normalizedEnvelope)
          (static_cast<float>(MIC_MAX_BRIGHTNESS - MIC_MIN_BRIGHTNESS) * shapedEnvelope);
 }
 
+float micComputeMouthOpennessTarget(float normalizedEnvelope)
+{
+  const float thresholdRange = MIC_MOUTH_FULL_OPEN_THRESHOLD - MIC_MOUTH_CLOSE_THRESHOLD;
+  if (thresholdRange <= 0.0f)
+  {
+    return normalizedEnvelope >= MIC_MOUTH_FULL_OPEN_THRESHOLD ? 1.0f : 0.0f;
+  }
+
+  const float linear = micClamp01(
+      (normalizedEnvelope - MIC_MOUTH_CLOSE_THRESHOLD) / thresholdRange);
+  return linear * linear * (3.0f - 2.0f * linear);
+}
+
 bool micShouldOpenMouth(float normalizedEnvelope, bool mouthOpen)
 {
   if (mouthOpen)
@@ -102,4 +115,19 @@ bool micShouldOpenMouth(float normalizedEnvelope, bool mouthOpen)
     return normalizedEnvelope >= MIC_MOUTH_CLOSE_THRESHOLD;
   }
   return normalizedEnvelope >= MIC_MOUTH_OPEN_THRESHOLD;
+}
+
+bool micShouldApplyPanelHeadroom(bool overrideEnabled, bool micFaceActive)
+{
+  return overrideEnabled && micFaceActive;
+}
+
+bool micShouldOverrideMouthBrightness(bool overrideEnabled, bool mouthActive)
+{
+  return overrideEnabled && mouthActive;
+}
+
+std::uint8_t micResolvePanelBrightness(std::uint8_t requestedBrightness, bool panelHeadroomEnabled)
+{
+  return panelHeadroomEnabled ? 255U : requestedBrightness;
 }

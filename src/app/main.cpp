@@ -24,6 +24,8 @@
 #include "effects/basicRainbow.h"
 #include "effects/strobeEffect.h"
 #include "core/mic/mic.h"
+#include "core/mic/mic_math.h"
+#include "core/mouth/MouthMorph.h"
 #include "core/ColorParser.h"
 #include "core/PerfTelemetry.h"
 #include "effects/flameEffect.h"
@@ -508,6 +510,9 @@ volatile uint8_t &blushBrightness = gAnimationState.blushBrightness;
 
 float globalBrightnessScale = 0.0f;
 uint16_t globalBrightnessScaleFixed = 256;
+static volatile uint8_t gRequestedPanelBrightness = 255;
+static volatile bool gMouthMicPanelHeadroomApplied = false;
+static volatile bool gMouthMicPixelBrightnessOverrideActive = false;
 bool facePlasmaDirty = true;
 static portMUX_TYPE gLastViewPersistMux = portMUX_INITIALIZER_UNLOCKED;
 static volatile bool gLastViewPersistDirty = false;
@@ -579,8 +584,23 @@ static void flushPendingLastViewPersist(unsigned long nowMs)
 
 void updateGlobalBrightnessScale(uint8_t brightness)
 {
+  gRequestedPanelBrightness = brightness;
   globalBrightnessScale = brightness / 255.0f;
   globalBrightnessScaleFixed = static_cast<uint16_t>((static_cast<uint32_t>(brightness) * 256u + 127u) / 255u);
+  const uint8_t hardwareBrightness = micResolvePanelBrightness(
+      brightness,
+      gMouthMicPanelHeadroomApplied);
+#ifdef VIRTUAL_PANE
+  if (chain != nullptr)
+  {
+    chain->setBrightness8(hardwareBrightness);
+  }
+#else
+  if (dma_display != nullptr)
+  {
+    dma_display->setBrightness8(hardwareBrightness);
+  }
+#endif
   facePlasmaDirty = true;
   requestDisplayRefresh();
 }
@@ -1044,6 +1064,80 @@ static bool viewUsesMic(int view)
   }
 }
 
+static uint16_t getNormalFaceSoftwareBrightnessScale()
+{
+  uint16_t scale = globalBrightnessScaleFixed;
+  if (gMouthMicPanelHeadroomApplied)
+  {
+    // With the panel ceiling held at 255, reproduce the hardware brightness
+    // attenuation in software for every non-mouth face element.
+    scale = static_cast<uint16_t>(
+        (static_cast<uint32_t>(scale) * globalBrightnessScaleFixed + 128u) >> 8);
+  }
+  return scale;
+}
+
+static uint8_t scaleRawFaceComponentForPanelHeadroom(uint8_t value)
+{
+  if (!gMouthMicPanelHeadroomApplied)
+  {
+    return value;
+  }
+  return static_cast<uint8_t>(
+      (static_cast<uint16_t>(value) * globalBrightnessScaleFixed + 128u) >> 8);
+}
+
+static void applyMouthMicBrightnessPolicy(bool allowForCurrentView)
+{
+  const bool shouldApplyPanelHeadroom = micShouldApplyPanelHeadroom(
+      mouthMicBrightnessOverrideEnabled,
+      allowForCurrentView);
+  const bool shouldOverrideMouthPixels =
+      allowForCurrentView &&
+      micShouldOverrideMouthBrightness(
+          mouthMicBrightnessOverrideEnabled,
+          micGetMouthOpenness() > 0U);
+  const bool panelHeadroomChanged =
+      shouldApplyPanelHeadroom != gMouthMicPanelHeadroomApplied;
+  const bool mouthPixelOverrideChanged =
+      shouldOverrideMouthPixels != gMouthMicPixelBrightnessOverrideActive;
+
+  gMouthMicPanelHeadroomApplied = shouldApplyPanelHeadroom;
+  gMouthMicPixelBrightnessOverrideActive = shouldOverrideMouthPixels;
+
+  if (panelHeadroomChanged)
+  {
+    updateGlobalBrightnessScale(gRequestedPanelBrightness);
+#if DEBUG_BRIGHTNESS
+    if (shouldApplyPanelHeadroom)
+    {
+      Serial.println("Mouth microphone headroom enabled: panel output ceiling held at 255.");
+    }
+    else
+    {
+      Serial.printf("Mouth microphone headroom disabled: restored panel output to %u.\n",
+                    gRequestedPanelBrightness);
+    }
+#endif
+  }
+
+  if (mouthPixelOverrideChanged)
+  {
+    facePlasmaDirty = true;
+    requestDisplayRefresh();
+#if DEBUG_BRIGHTNESS
+    if (shouldOverrideMouthPixels)
+    {
+      Serial.println("Mouth microphone brightness override active: mouth pixels bypass normal scaling.");
+    }
+    else
+    {
+      Serial.println("Mouth microphone pixel brightness override ended.");
+    }
+#endif
+  }
+}
+
 static bool viewNeedsContinuousRefresh(int view)
 {
   switch (view)
@@ -1076,7 +1170,6 @@ void wakeFromSleepMode()
   sleepFrameInterval = 5; // Back to ~90 FPS
 
   // Restore normal brightness
-  dma_display->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
   syncBrightnessState(userBrightness);
 
@@ -1386,6 +1479,7 @@ static void handleBleConfigWriteWork(const BleWorkItem &item)
   const bool oldAutoBrightnessEnabled = autoBrightnessEnabled;
   const bool oldAuroraMode = auroraModeEnabled;
   const bool oldStaticColorMode = staticColorModeEnabled;
+  const bool oldMouthMicBrightnessOverride = mouthMicBrightnessOverrideEnabled;
 
   autoBrightnessEnabled = (item.data[0] != 0);
   accelerometerEnabled = (item.data[1] != 0);
@@ -1402,6 +1496,10 @@ static void handleBleConfigWriteWork(const BleWorkItem &item)
     Serial.println("Static color flag not provided, defaulting to disabled.");
 #endif
   }
+  if (item.length >= 6)
+  {
+    mouthMicBrightnessOverrideEnabled = (item.data[5] != 0);
+  }
 
   if (staticColorModeEnabled)
   {
@@ -1413,6 +1511,7 @@ static void handleBleConfigWriteWork(const BleWorkItem &item)
   setSleepMode(sleepModeEnabled);
   setAuroraMode(auroraModeEnabled);
   setStaticColorMode(staticColorModeEnabled);
+  setMouthMicBrightnessOverride(mouthMicBrightnessOverrideEnabled);
 
 #if defined(DEBUG_BLE)
   Serial.print("  Auto Brightness: ");
@@ -1425,7 +1524,21 @@ static void handleBleConfigWriteWork(const BleWorkItem &item)
   Serial.println(auroraModeEnabled ? "Enabled" : "Disabled");
   Serial.print("  Static Color:    ");
   Serial.println(staticColorModeEnabled ? "Enabled" : "Disabled");
+  Serial.print("  Mouth Mic Max:   ");
+  Serial.println(mouthMicBrightnessOverrideEnabled ? "Enabled" : "Disabled");
 #endif
+
+  if (item.characteristic != nullptr)
+  {
+    const uint8_t canonicalConfig[6] = {
+        static_cast<uint8_t>(autoBrightnessEnabled ? 1 : 0),
+        static_cast<uint8_t>(accelerometerEnabled ? 1 : 0),
+        static_cast<uint8_t>(sleepModeEnabled ? 1 : 0),
+        static_cast<uint8_t>(auroraModeEnabled ? 1 : 0),
+        static_cast<uint8_t>(staticColorModeEnabled ? 1 : 0),
+        static_cast<uint8_t>(mouthMicBrightnessOverrideEnabled ? 1 : 0)};
+    item.characteristic->setValue(canonicalConfig, sizeof(canonicalConfig));
+  }
 
   applyConfigOptions();
   if (oldAutoBrightnessEnabled != autoBrightnessEnabled)
@@ -1442,7 +1555,6 @@ static void handleBleConfigWriteWork(const BleWorkItem &item)
       Serial.println("Auto brightness has been DISABLED. Applying user-set brightness.");
       Serial.printf("Applied manual brightness: %u\n", userBrightness);
 #endif
-      dma_display->setBrightness8(userBrightness);
       updateGlobalBrightnessScale(userBrightness);
       syncBrightnessState(userBrightness);
     }
@@ -1452,6 +1564,11 @@ static void handleBleConfigWriteWork(const BleWorkItem &item)
   {
     facePlasmaDirty = true;
     requestDisplayRefresh();
+  }
+  if (oldMouthMicBrightnessOverride != mouthMicBrightnessOverrideEnabled)
+  {
+    requestDisplayRefresh();
+    notifyBleTask();
   }
 }
 
@@ -1889,20 +2006,20 @@ void drawBluetoothStatusIcon()
   }
 
   const uint16_t backgroundColor = dma_display->color565(
-      scaleColorComponent(5, intensity),
-      scaleColorComponent(90, intensity),
-      scaleColorComponent(180, intensity));
+      scaleRawFaceComponentForPanelHeadroom(scaleColorComponent(5, intensity)),
+      scaleRawFaceComponentForPanelHeadroom(scaleColorComponent(90, intensity)),
+      scaleRawFaceComponentForPanelHeadroom(scaleColorComponent(180, intensity)));
 
   // NEW: Brighter constant for ble pixel color
   const uint16_t blePixelColor = dma_display->color565(
-      scaleColorComponent(5, intensity + 0.8f),
-      scaleColorComponent(90, intensity + 0.8f),
-      scaleColorComponent(180, intensity + 0.8f));
+      scaleRawFaceComponentForPanelHeadroom(scaleColorComponent(5, intensity + 0.8f)),
+      scaleRawFaceComponentForPanelHeadroom(scaleColorComponent(90, intensity + 0.8f)),
+      scaleRawFaceComponentForPanelHeadroom(scaleColorComponent(180, intensity + 0.8f)));
 
   const uint16_t runeColor = dma_display->color565(
-      scaleColorComponent(255, intensity),
-      scaleColorComponent(255, intensity),
-      scaleColorComponent(255, intensity));
+      scaleRawFaceComponentForPanelHeadroom(scaleColorComponent(255, intensity)),
+      scaleRawFaceComponentForPanelHeadroom(scaleColorComponent(255, intensity)),
+      scaleRawFaceComponentForPanelHeadroom(scaleColorComponent(255, intensity)));
 
   // Clear the drawing area (pad by 1 px to avoid leftover pixels from other views)
   int clearX = iconX - 1;
@@ -2133,7 +2250,7 @@ uint16_t plasmaSpeed = 2; // Lower = slower animation
 
 void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
                    uint8_t time_offset = 0, float scale = 5.0f, float animSpeed = 0.2f,
-                   uint8_t brightnessScale = 255)
+                   uint8_t brightnessScale = 255, bool bypassGlobalBrightness = false)
 {
   const int byteWidth = (width + 7) >> 3;
   if (byteWidth <= 0)
@@ -2142,8 +2259,13 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
   }
 
   const bool useStaticColorMode = staticColorModeEnabled;
-  const uint16_t combinedBrightnessScale = static_cast<uint16_t>(
-      (static_cast<uint32_t>(globalBrightnessScaleFixed) * static_cast<uint16_t>(brightnessScale) + 128u) >> 8);
+  const uint16_t combinedBrightnessScale = bypassGlobalBrightness
+                                               ? 256U
+                                               : static_cast<uint16_t>(
+                                                     (static_cast<uint32_t>(getNormalFaceSoftwareBrightnessScale()) *
+                                                          static_cast<uint16_t>(brightnessScale) +
+                                                      128u) >>
+                                                     8);
   CRGB staticColorRgb = CRGB::Black;
   if (useStaticColorMode)
   {
@@ -2229,6 +2351,62 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
     }
   }
 }
+
+namespace
+{
+
+constexpr int MOUTH_WIDTH = 64;
+constexpr int MOUTH_HEIGHT = 22;
+constexpr int MOUTH_COLLAPSED_HEIGHT = 13;
+constexpr std::size_t MOUTH_BITMAP_BYTES =
+    static_cast<std::size_t>((MOUTH_WIDTH + 7) / 8) * MOUTH_HEIGHT;
+
+std::uint8_t gMouthFrameRight[MOUTH_BITMAP_BYTES] = {};
+std::uint8_t gMouthFrameLeft[MOUTH_BITMAP_BYTES] = {};
+std::uint8_t gCachedMouthFrameIndex = 0xff;
+
+void prepareInterpolatedMouthFrames(std::uint8_t rawOpenness)
+{
+  const std::uint8_t frameIndex = mouth::quantizeOpenness(rawOpenness);
+  if (frameIndex == gCachedMouthFrameIndex)
+  {
+    return;
+  }
+
+  const std::uint8_t frameOpenness = mouth::opennessForFrame(frameIndex);
+  const bool rightBuilt = mouth::buildInterpolatedXbm(
+      maw2Closed, maw2,
+      MOUTH_WIDTH, MOUTH_HEIGHT, MOUTH_COLLAPSED_HEIGHT,
+      frameOpenness, false,
+      gMouthFrameRight, sizeof(gMouthFrameRight));
+  const bool leftBuilt = mouth::buildInterpolatedXbm(
+      maw2ClosedL, maw2L,
+      MOUTH_WIDTH, MOUTH_HEIGHT, MOUTH_COLLAPSED_HEIGHT,
+      frameOpenness, true,
+      gMouthFrameLeft, sizeof(gMouthFrameLeft));
+
+  if (rightBuilt && leftBuilt)
+  {
+    gCachedMouthFrameIndex = frameIndex;
+  }
+}
+
+void drawInterpolatedMouthPlasma(std::uint8_t rightTimeOffset,
+                                 std::uint8_t leftTimeOffset,
+                                 float scale,
+                                 float animSpeed,
+                                 std::uint8_t brightness)
+{
+  prepareInterpolatedMouthFrames(micGetMouthOpenness());
+  const bool forceMaximumBrightness = gMouthMicPixelBrightnessOverrideActive;
+  const std::uint8_t effectiveBrightness = brightness;
+  drawPlasmaXbm(0, 10, MOUTH_WIDTH, MOUTH_HEIGHT, gMouthFrameRight,
+                rightTimeOffset, scale, animSpeed, effectiveBrightness, forceMaximumBrightness);
+  drawPlasmaXbm(64, 10, MOUTH_WIDTH, MOUTH_HEIGHT, gMouthFrameLeft,
+                leftTimeOffset, scale, animSpeed, effectiveBrightness, forceMaximumBrightness);
+}
+
+} // namespace
 
 void drawText(int colorWheelOffset)
 {
@@ -2328,7 +2506,8 @@ void drawBitmapAdvanced(int x, int y, int width, int height, const uint8_t *bitm
       continue;
     }
 
-    const uint16_t rowBrightnessScale = static_cast<uint16_t>(blinkBrightness * globalBrightnessScaleFixed);
+    const uint16_t rowBrightnessScale = static_cast<uint16_t>(
+        blinkBrightness * getNormalFaceSoftwareBrightnessScale());
     CRGB flatRowColor = CRGB::Black;
     if (!enablePlasma)
     {
@@ -2534,8 +2713,7 @@ void drawPlasmaFace()
   // drawPlasmaXbm(64, 16, 64, 16, mawL, 32, 2.0);
 
   const uint8_t mouthBrightness = micGetMouthBrightness();
-  drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 32, 0.5f, 0.2f, mouthBrightness);
-  drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 32, 0.5f, 0.2f, mouthBrightness);
+  drawInterpolatedMouthPlasma(32, 32, 0.5f, 0.2f, mouthBrightness);
 }
 
 void updatePlasmaFace()
@@ -2788,7 +2966,10 @@ void updateRotatingSpiral()
   static uint8_t colorIndex = 0;
   colorIndex += 2; // Slower color transition
   CRGB currentColor = ColorFromPalette(currentPalette, colorIndex);
-  uint16_t color = dma_display->color565(currentColor.r, currentColor.g, currentColor.b);
+  uint16_t color = dma_display->color565(
+      scaleRawFaceComponentForPanelHeadroom(currentColor.r),
+      scaleRawFaceComponentForPanelHeadroom(currentColor.g),
+      scaleRawFaceComponentForPanelHeadroom(currentColor.b));
 
   // Optimized rotation with pre-calculated values
   float radians = currentAngle * PI / 180.0;
@@ -2978,7 +3159,10 @@ void drawBlush()
   Serial.print("Blush brightness: ");
 #endif
   // Set blush color based on brightness
-  uint16_t blushColor = dma_display->color565(blushBrightness, 0, blushBrightness);
+  const uint8_t scaledBlushBrightness =
+      scaleRawFaceComponentForPanelHeadroom(blushBrightness);
+  uint16_t blushColor = dma_display->color565(
+      scaledBlushBrightness, 0, scaledBlushBrightness);
 
   const int blushWidth = 11;
   const int blushHeight = 13;
@@ -3054,7 +3238,10 @@ void baseFace()
 
   if (currentView == VIEW_ALT_FACE)
   {
-    const uint16_t blushColor = dma_display->color565(255, 110, 150);
+    const uint16_t blushColor = dma_display->color565(
+        scaleRawFaceComponentForPanelHeadroom(255),
+        scaleRawFaceComponentForPanelHeadroom(110),
+        scaleRawFaceComponentForPanelHeadroom(150));
     drawPlasmaXbm(22 + final_x_offset, 0 + final_y_offset, 9, 7, Alt_BrowR, 16, 2.0f);
     drawPlasmaXbm(96 + final_x_offset, 0 + final_y_offset, 9, 7, Alt_BrowL, 144, 2.0f);
     drawXbm565(8 + final_x_offset, 16 + final_y_offset, 9, 5, Alt_BlushR, blushColor);
@@ -3064,16 +3251,7 @@ void baseFace()
   blinkingEyes(); // This function now correctly uses the global offsets internally
 
   const uint8_t mouthBrightness = micGetMouthBrightness();
-  if (mouthOpen)
-  {
-    drawPlasmaXbm(0, 10, 64, 22, maw2, 0, 1.0f, 0.2f, mouthBrightness);
-    drawPlasmaXbm(64, 10, 64, 22, maw2L, 128, 1.0f, 0.2f, mouthBrightness); // Left eye open (phase offset)
-  }
-  else
-  {
-    drawPlasmaXbm(0, 10, 64, 22, maw2Closed, 0, 1.0f, 0.2f, mouthBrightness);     // Right eye
-    drawPlasmaXbm(64, 10, 64, 22, maw2ClosedL, 128, 1.0f, 0.2f, mouthBrightness); // Left eye (phase offset)
-  }
+  drawInterpolatedMouthPlasma(0, 128, 1.0f, 0.2f, mouthBrightness);
 
   if (currentView == VIEW_ALT_FACE)
   {
@@ -3209,7 +3387,6 @@ void displaySleepMode()
 
     // Apply breathing effect to overall brightness
     uint8_t currentBrightness = sleepBrightness * brightness;
-    dma_display->setBrightness8(currentBrightness);
     updateGlobalBrightnessScale(currentBrightness);
   }
 
@@ -3355,7 +3532,6 @@ static void displayTask(void *pvParameters)
   };
   auto applyTransitionBrightness = [](uint8_t brightness)
   {
-    dma_display->setBrightness8(brightness);
     updateGlobalBrightnessScale(brightness);
   };
   auto scaleTransitionBrightness = [](uint8_t baseBrightness, uint8_t level) -> uint8_t
@@ -3727,6 +3903,7 @@ void setup()
   userBrightness = static_cast<uint8_t>(constrain(getUserBrightness(), 0, 255));
   sliderBrightness = map(userBrightness, 1, 255, 1, 100);
   autoBrightnessEnabled = getAutoBrightness();
+  mouthMicBrightnessOverrideEnabled = getMouthMicBrightnessOverride();
   syncBrightnessState(userBrightness);
   accelerometerEnabled = getAccelerometerEnabled();
   sleepModeEnabled = getSleepMode();
@@ -3877,12 +4054,13 @@ void setup()
   pConfigCharacteristic->setCallbacks(&configCallbacks);
 
   // Optionally, set an initial value.
-  uint8_t initValue[5] = {
+  uint8_t initValue[6] = {
       static_cast<uint8_t>(autoBrightnessEnabled ? 1 : 0),
       static_cast<uint8_t>(accelerometerEnabled ? 1 : 0),
       static_cast<uint8_t>(sleepModeEnabled ? 1 : 0),
       static_cast<uint8_t>(auroraModeEnabled ? 1 : 0),
-      static_cast<uint8_t>(staticColorModeEnabled ? 1 : 0)};
+      static_cast<uint8_t>(staticColorModeEnabled ? 1 : 0),
+      static_cast<uint8_t>(mouthMicBrightnessOverrideEnabled ? 1 : 0)};
 
   pConfigCharacteristic->setValue(initValue, sizeof(initValue));
   if (pConfigCharacteristic != nullptr)
@@ -4075,14 +4253,12 @@ void setup()
 #ifndef VIRTUAL_PANE
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   dma_display->begin();
-  dma_display->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
   syncBrightnessState(userBrightness);
   initFlameEffect(dma_display);
 #else
   chain = new MatrixPanel_I2S_DMA(mxconfig);
   chain->begin();
-  chain->setBrightness8(userBrightness);
   updateGlobalBrightnessScale(userBrightness);
   syncBrightnessState(userBrightness);
   // create VirtualDisplay object based on our newly created dma_display object
@@ -4415,29 +4591,21 @@ void updateDVDLogos()
 
 void displayCurrentMaw()
 {
-  const uint8_t mawBrightness = micGetMouthBrightness();
+  uint8_t mawBrightness = gMouthMicPixelBrightnessOverrideActive
+                              ? 255U
+                              : micGetMouthBrightness();
+  if (!gMouthMicPixelBrightnessOverrideActive)
+  {
+    mawBrightness = scaleRawFaceComponentForPanelHeadroom(mawBrightness);
+  }
   mouthOpen = micIsMouthOpen();
   // build a gray-scale color from current mic level
   uint16_t col = dma_display->color565(mawBrightness,
                                        mawBrightness,
                                        mawBrightness);
-  // Draw open or closed based on the mic‐triggered flag
-  if (mouthOpen)
-  {
-#if DEBUG_MODE
-    Serial.println("Displaying open maw");
-#endif
-    drawXbm565(0, 10, 64, 22, maw2, col);
-    drawXbm565(64, 10, 64, 22, maw2L, col);
-  }
-  else
-  {
-#if DEBUG_MODE
-    Serial.println("Displaying Closed maw");
-#endif
-    drawXbm565(0, 10, 64, 22, maw2Closed, col);
-    drawXbm565(64, 10, 64, 22, maw2ClosedL, col);
-  }
+  prepareInterpolatedMouthFrames(micGetMouthOpenness());
+  drawXbm565(0, 10, MOUTH_WIDTH, MOUTH_HEIGHT, gMouthFrameRight, col);
+  drawXbm565(64, 10, MOUTH_WIDTH, MOUTH_HEIGHT, gMouthFrameLeft, col);
 }
 // Runs one frame of the Pixel Dust animation
 bool getLatestAcceleration(float &x, float &y, float &z, const unsigned long sampleInterval);
@@ -4754,6 +4922,7 @@ void displayCurrentView(int view)
   // If we're in sleep mode, don't display the normal view
   if (sleepModeActive)
   {
+    applyMouthMicBrightnessPolicy(false);
     displaySleepMode(); // This function handles its own flipDMABuffer or drawing rate
     return;
   }
@@ -4762,11 +4931,13 @@ void displayCurrentView(int view)
   const PairingSnapshot pairingSnapshot = getPairingSnapshot();
   if (pairingSnapshot.pairing && pairingSnapshot.passkeyValid)
   {
+    applyMouthMicBrightnessPolicy(false);
     dma_display->clearScreen();
     drawPairingPasskeyOverlay(pairingSnapshot.passkey);
     dma_display->flipDMABuffer();
     return;
   }
+  applyMouthMicBrightnessPolicy(viewUsesMic(view));
   mouthOpen = micIsMouthOpen();
 
   if (viewNeedsPreClear(view))
@@ -4861,7 +5032,9 @@ void displayCurrentView(int view)
   sprintf(fpsText, "FPS %d", fps);
   dma_display->setTextSize(1);                                     // Set text size for FPS counter
   dma_display->setFont(&TomThumb);                                 // Use default font
-  dma_display->setTextColor(dma_display->color565(255, 255, 255)); // White text
+  const uint8_t fpsBrightness = scaleRawFaceComponentForPanelHeadroom(255);
+  dma_display->setTextColor(dma_display->color565(
+      fpsBrightness, fpsBrightness, fpsBrightness)); // White text
   // Position the counter at a corner (adjust as needed)
   dma_display->setCursor(37, 5); // Adjust position
   dma_display->print(fpsText);
@@ -4972,8 +5145,8 @@ void enterSleepMode()
   #endif
   sleepModeActive = true;
   micSetEnabled(false);
+  applyMouthMicBrightnessPolicy(false);
   preSleepView = currentView;                   // Save current view
-  dma_display->setBrightness8(sleepBrightness); // Lower display brightness
   updateGlobalBrightnessScale(sleepBrightness);
   requestDisplayRefresh();
 
