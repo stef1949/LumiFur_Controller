@@ -1092,11 +1092,10 @@ static void applyMouthMicBrightnessPolicy(bool allowForCurrentView)
   const bool shouldApplyPanelHeadroom = micShouldApplyPanelHeadroom(
       mouthMicBrightnessOverrideEnabled,
       allowForCurrentView);
-  const bool shouldOverrideMouthPixels =
-      allowForCurrentView &&
-      micShouldOverrideMouthBrightness(
-          mouthMicBrightnessOverrideEnabled,
-          micGetMouthOpenness() > 0U);
+  // Keep the override curve active for the entire microphone face. At idle it
+  // starts at the current user/auto brightness floor, then rises to 255 with
+  // microphone activity.
+  const bool shouldOverrideMouthPixels = shouldApplyPanelHeadroom;
   const bool panelHeadroomChanged =
       shouldApplyPanelHeadroom != gMouthMicPanelHeadroomApplied;
   const bool mouthPixelOverrideChanged =
@@ -2260,7 +2259,7 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
 
   const bool useStaticColorMode = staticColorModeEnabled;
   const uint16_t combinedBrightnessScale = bypassGlobalBrightness
-                                               ? 256U
+                                               ? micBrightnessToFixedScale(brightnessScale)
                                                : static_cast<uint16_t>(
                                                      (static_cast<uint32_t>(getNormalFaceSoftwareBrightnessScale()) *
                                                           static_cast<uint16_t>(brightnessScale) +
@@ -2398,12 +2397,16 @@ void drawInterpolatedMouthPlasma(std::uint8_t rightTimeOffset,
                                  std::uint8_t brightness)
 {
   prepareInterpolatedMouthFrames(micGetMouthOpenness());
-  const bool forceMaximumBrightness = gMouthMicPixelBrightnessOverrideActive;
-  const std::uint8_t effectiveBrightness = brightness;
+  const bool useOverrideCurve = gMouthMicPixelBrightnessOverrideActive;
+  const std::uint8_t effectiveBrightness = useOverrideCurve
+                                               ? micComputeMouthOverrideBrightness(
+                                                     brightness,
+                                                     gRequestedPanelBrightness)
+                                               : brightness;
   drawPlasmaXbm(0, 10, MOUTH_WIDTH, MOUTH_HEIGHT, gMouthFrameRight,
-                rightTimeOffset, scale, animSpeed, effectiveBrightness, forceMaximumBrightness);
+                rightTimeOffset, scale, animSpeed, effectiveBrightness, useOverrideCurve);
   drawPlasmaXbm(64, 10, MOUTH_WIDTH, MOUTH_HEIGHT, gMouthFrameLeft,
-                leftTimeOffset, scale, animSpeed, effectiveBrightness, forceMaximumBrightness);
+                leftTimeOffset, scale, animSpeed, effectiveBrightness, useOverrideCurve);
 }
 
 } // namespace
@@ -4591,9 +4594,13 @@ void updateDVDLogos()
 
 void displayCurrentMaw()
 {
-  uint8_t mawBrightness = gMouthMicPixelBrightnessOverrideActive
-                              ? 255U
-                              : micGetMouthBrightness();
+  uint8_t mawBrightness = micGetMouthBrightness();
+  if (gMouthMicPixelBrightnessOverrideActive)
+  {
+    mawBrightness = micComputeMouthOverrideBrightness(
+        mawBrightness,
+        gRequestedPanelBrightness);
+  }
   if (!gMouthMicPixelBrightnessOverrideActive)
   {
     mawBrightness = scaleRawFaceComponentForPanelHeadroom(mawBrightness);

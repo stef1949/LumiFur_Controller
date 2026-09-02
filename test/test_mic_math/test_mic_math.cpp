@@ -102,14 +102,6 @@ void test_continuous_mouth_openness_curve(void)
   TEST_ASSERT_TRUE(micComputeMouthOpennessTarget(MIC_MOUTH_OPEN_THRESHOLD) < 0.5f);
 }
 
-void test_mouth_brightness_override_requires_option_and_activity(void)
-{
-  TEST_ASSERT_FALSE(micShouldOverrideMouthBrightness(false, false));
-  TEST_ASSERT_FALSE(micShouldOverrideMouthBrightness(false, true));
-  TEST_ASSERT_FALSE(micShouldOverrideMouthBrightness(true, false));
-  TEST_ASSERT_TRUE(micShouldOverrideMouthBrightness(true, true));
-}
-
 void test_panel_headroom_depends_on_option_and_mic_face_not_mouth_activity(void)
 {
   TEST_ASSERT_FALSE(micShouldApplyPanelHeadroom(false, false));
@@ -120,7 +112,6 @@ void test_panel_headroom_depends_on_option_and_mic_face_not_mouth_activity(void)
   // Headroom is already maximum while the mouth is idle, so later activity
   // cannot be capped by a user or auto-brightness hardware setting.
   TEST_ASSERT_EQUAL_UINT8(255, micResolvePanelBrightness(32, true));
-  TEST_ASSERT_FALSE(micShouldOverrideMouthBrightness(true, false));
 }
 
 void test_mouth_override_resolves_hardware_brightness(void)
@@ -128,6 +119,35 @@ void test_mouth_override_resolves_hardware_brightness(void)
   TEST_ASSERT_EQUAL_UINT8(32, micResolvePanelBrightness(32, false));
   TEST_ASSERT_EQUAL_UINT8(255, micResolvePanelBrightness(32, true));
   TEST_ASSERT_EQUAL_UINT8(255, micResolvePanelBrightness(255, true));
+}
+
+void test_mouth_override_uses_display_brightness_as_floor_and_reaches_maximum(void)
+{
+  constexpr uint8_t displayFloor = 80;
+  TEST_ASSERT_EQUAL_UINT8(
+      displayFloor,
+      micComputeMouthOverrideBrightness(MIC_MIN_BRIGHTNESS, displayFloor));
+  TEST_ASSERT_EQUAL_UINT8(
+      displayFloor,
+      micComputeMouthOverrideBrightness(0, displayFloor));
+  TEST_ASSERT_EQUAL_UINT8(
+      255,
+      micComputeMouthOverrideBrightness(MIC_MAX_BRIGHTNESS, displayFloor));
+
+  const uint8_t middleMicrophoneBrightness = static_cast<uint8_t>(
+      MIC_MIN_BRIGHTNESS + ((MIC_MAX_BRIGHTNESS - MIC_MIN_BRIGHTNESS) / 2));
+  const uint8_t middleOutput = micComputeMouthOverrideBrightness(
+      middleMicrophoneBrightness,
+      displayFloor);
+  TEST_ASSERT_GREATER_THAN_UINT8(displayFloor, middleOutput);
+  TEST_ASSERT_LESS_THAN_UINT8(255, middleOutput);
+}
+
+void test_mouth_override_fixed_scale_preserves_floor_and_true_maximum(void)
+{
+  TEST_ASSERT_EQUAL_UINT16(0, micBrightnessToFixedScale(0));
+  TEST_ASSERT_EQUAL_UINT16(80, micBrightnessToFixedScale(80));
+  TEST_ASSERT_EQUAL_UINT16(256, micBrightnessToFixedScale(255));
 }
 
 void setup()
@@ -142,9 +162,10 @@ void setup()
   RUN_TEST(test_brightness_target_bounds_and_shape);
   RUN_TEST(test_mouth_hysteresis);
   RUN_TEST(test_continuous_mouth_openness_curve);
-  RUN_TEST(test_mouth_brightness_override_requires_option_and_activity);
   RUN_TEST(test_panel_headroom_depends_on_option_and_mic_face_not_mouth_activity);
   RUN_TEST(test_mouth_override_resolves_hardware_brightness);
+  RUN_TEST(test_mouth_override_uses_display_brightness_as_floor_and_reaches_maximum);
+  RUN_TEST(test_mouth_override_fixed_scale_preserves_floor_and_true_maximum);
   UNITY_END();
 }
 

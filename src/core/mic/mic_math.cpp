@@ -122,12 +122,45 @@ bool micShouldApplyPanelHeadroom(bool overrideEnabled, bool micFaceActive)
   return overrideEnabled && micFaceActive;
 }
 
-bool micShouldOverrideMouthBrightness(bool overrideEnabled, bool mouthActive)
-{
-  return overrideEnabled && mouthActive;
-}
-
 std::uint8_t micResolvePanelBrightness(std::uint8_t requestedBrightness, bool panelHeadroomEnabled)
 {
   return panelHeadroomEnabled ? 255U : requestedBrightness;
+}
+
+std::uint8_t micComputeMouthOverrideBrightness(std::uint8_t microphoneBrightness,
+                                               std::uint8_t displayBrightnessFloor)
+{
+  constexpr std::uint16_t kOutputMaximum = 255U;
+  constexpr std::uint16_t kMicrophoneMinimum = MIC_MIN_BRIGHTNESS;
+  constexpr std::uint16_t kMicrophoneMaximum = MIC_MAX_BRIGHTNESS;
+
+  if (microphoneBrightness <= kMicrophoneMinimum ||
+      kMicrophoneMaximum <= kMicrophoneMinimum)
+  {
+    return displayBrightnessFloor;
+  }
+  if (microphoneBrightness >= kMicrophoneMaximum)
+  {
+    return static_cast<std::uint8_t>(kOutputMaximum);
+  }
+
+  const std::uint16_t microphoneRange =
+      kMicrophoneMaximum - kMicrophoneMinimum;
+  const std::uint16_t microphoneLevel =
+      static_cast<std::uint16_t>(microphoneBrightness) - kMicrophoneMinimum;
+  const std::uint16_t availableBoost =
+      kOutputMaximum - static_cast<std::uint16_t>(displayBrightnessFloor);
+  const std::uint32_t roundedBoost =
+      static_cast<std::uint32_t>(availableBoost) * microphoneLevel +
+      (microphoneRange / 2U);
+
+  return static_cast<std::uint8_t>(
+      static_cast<std::uint16_t>(displayBrightnessFloor) +
+      static_cast<std::uint16_t>(roundedBoost / microphoneRange));
+}
+
+std::uint16_t micBrightnessToFixedScale(std::uint8_t brightness)
+{
+  return static_cast<std::uint16_t>(
+      (static_cast<std::uint32_t>(brightness) * 256U + 127U) / 255U);
 }
