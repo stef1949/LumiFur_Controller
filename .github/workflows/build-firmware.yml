@@ -50,7 +50,8 @@ jobs:
             
       - name: Install PlatformIO
         run: |
-          pip install --upgrade platformio
+          # Work around PlatformIO Core 6.2.0 regression that breaks ESP32 firmware.bin generation.
+          pip install --upgrade "platformio<6.2.0"
           
       - name: Install dependencies
         run: |
