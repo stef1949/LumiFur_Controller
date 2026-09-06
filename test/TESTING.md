@@ -11,7 +11,21 @@ This directory contains comprehensive Unity framework tests for the LumiFur Cont
 
 ### test_animation_state
 Tests for the `AnimationState` module (`src/core/AnimationState.cpp`)
-- **7 tests** covering initialization, reset, blink timings, blush state, eye bounce, maw state, and idle hover offsets
+- **6 tests** covering initialization, reset, blink timings, blush state, eye bounce, and idle hover offsets
+
+### Current mouth and microphone tests
+- `test_mic`: slot selection, continuous mouth thresholds, speech gating, and peak release.
+- `test_mic_config`: microphone configuration bounds.
+- `test_mic_math`: production filtering, openness, and brightness functions in `src/core/mic/mic_math.cpp`.
+- `test_mouth_morph`: frame quantization, interpolation, and mirrored dithering.
+
+Run these with the animation-state tests after changing mouth control:
+
+```bash
+pio test -e native2_windows -f test_animation_state -f test_mic -f test_mic_config -f test_mic_math -f test_mouth_morph
+```
+
+Use `native2` instead of `native2_windows` on Linux. This focused set contains 35 test cases; hardware response and appearance still require a device check.
 
 ### test_scroll_state  
 Tests for the `ScrollState` module (`src/core/ScrollState.cpp`)
@@ -36,7 +50,7 @@ Tests for accelerometer motion detection (`src/app/main.cpp`)
 - Boundary condition testing for motion thresholds
 
 ### test_microphone
-Tests for microphone audio processing (`src/app/main.cpp`)
+Legacy tests containing a copied microphone implementation. These do not validate the current production microphone path; use the suites above for that.
 - **25 tests** covering maw brightness calculation, mouth state detection, and signal processing
 - Tests trigger threshold calculations and signal-to-brightness mapping
 - Validates Arduino map/constrain helper functions
@@ -87,9 +101,9 @@ g++ -std=c++11 \
 ./test_animation_state
 ```
 
-## Test Results (Latest Run)
+## Historical Test Results (Before Mouth-Control Cleanup)
 
-✅ **All 77 tests passing**
+The earlier recorded run reported **77 tests passing**. The counts below are historical, not the current suite inventory.
 
 - AnimationState: 7/7 ✅
 - ScrollState: 6/6 ✅  

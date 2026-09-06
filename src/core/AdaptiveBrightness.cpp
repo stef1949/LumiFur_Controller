@@ -1,4 +1,5 @@
 #include "core/AdaptiveBrightness.h"
+#include "core/BrightnessSmoothing.h"
 
 #include <Arduino.h>
 #include <cmath>
@@ -47,7 +48,8 @@ constexpr float APDS_LUX_REFERENCE_GAIN = 4.0f;
 float smoothedLux = 50.0f;
 constexpr float luxSmoothingFactor = 0.35f;
 float currentBrightness = 128.0f;
-constexpr float brightnessSmoothingFactor = 0.95f;
+uint32_t lastBrightnessStepMs = 0;
+bool brightnessStepClockInitialized = false;
 constexpr float manualBrightnessSmoothingFactor = 0.04f;
 int lastBrightness = 0;
 constexpr int brightnessThreshold = 1;
@@ -280,6 +282,11 @@ void updateAmbientLightSample()
 
 void updateAdaptiveBrightness()
 {
+  const uint32_t now = millis();
+  const uint32_t elapsedMs = brightnessStepClockInitialized ? now - lastBrightnessStepMs : 0;
+  lastBrightnessStepMs = now;
+  brightnessStepClockInitialized = true;
+
   if (!autoBrightnessEnabled)
   {
     const float targetManualBrightness = static_cast<float>(userBrightness);
@@ -301,7 +308,6 @@ void updateAdaptiveBrightness()
 
   if (!apdsInitialized || apdsFaulted)
   {
-    const unsigned long now = millis();
     if ((now - lastApdsInitRetry) >= APDS_INIT_RETRY_MS)
     {
       lastApdsInitRetry = now;
@@ -320,7 +326,6 @@ void updateAdaptiveBrightness()
   static float cachedLux = 0.0f;
   static bool hasCachedLux = false;
   static unsigned long lastBrightnessProcessMs = 0;
-  const unsigned long now = millis();
 
   if (!hasCachedLux || (now - lastBrightnessProcessMs) >= LF_APDS_LUX_SAMPLE_INTERVAL_MS)
   {
@@ -331,7 +336,7 @@ void updateAdaptiveBrightness()
   }
 
   const float currentLux = cachedLux;
-  const int min_brightness_output = 80;
+  const int min_brightness_output = 15; // Adjust to archieve lower brightness levels
   const int max_brightness_output = 255;
   const float min_lux_for_map = 5.0f;
   const float max_lux_for_map = 10000.0f;
@@ -352,36 +357,28 @@ void updateAdaptiveBrightness()
   targetBrightnessCalc = constrain(targetBrightnessCalc, min_brightness_output, max_brightness_output);
 
   const float targetBrightness = static_cast<float>(targetBrightnessCalc);
-  currentBrightness += brightnessSmoothingFactor * (targetBrightness - currentBrightness);
+  currentBrightness = brightness::smoothAutoBrightness(currentBrightness, targetBrightness, elapsedMs);
   int smoothedBrightness = static_cast<int>(currentBrightness + 0.5f);
   smoothedBrightness = constrain(smoothedBrightness, min_brightness_output, max_brightness_output);
-
-#if DEBUG_BRIGHTNESS
-  Serial.printf("ADAPT: Clear=%u, Lux=%.1f, SmoothLux=%.1f, TargetBr=%d, SmoothBr=%d, LastBr=%d, Thr=%d\n",
-                lastKnownClearValue,
-                currentLux,
-                smoothedLux,
-                targetBrightnessCalc,
-                smoothedBrightness,
-                lastBrightness,
-                brightnessThreshold);
-#endif
 
   if (abs(smoothedBrightness - lastBrightness) >= brightnessThreshold)
   {
     const uint8_t brightnessToApply = static_cast<uint8_t>(smoothedBrightness);
     updateGlobalBrightnessScale(brightnessToApply);
     lastBrightness = smoothedBrightness;
-#if DEBUG_BRIGHTNESS
-    Serial.printf(">>>> ADAPT: BRIGHTNESS SET TO %d <<<<\n", smoothedBrightness);
-#endif
   }
-  else
+#if DEBUG_BRIGHTNESS
+  // Keep diagnostics off the 50 Hz fade path, even when explicitly enabled.
+  static uint32_t lastAdaptiveLogMs = 0;
+  if (now - lastAdaptiveLogMs >= 500)
   {
-#if DEBUG_BRIGHTNESS
-    Serial.printf(">>>> ADAPT: BRIGHTNESS KEPT AT %d <<<<\n", lastBrightness);
-#endif
+    lastAdaptiveLogMs = now;
+    Serial.printf("ADAPT: Clear=%u Lux=%.1f SmoothLux=%.1f TargetBr=%d Br=%d StepMs=%lu\n",
+                  lastKnownClearValue, currentLux, smoothedLux,
+                  targetBrightnessCalc, lastBrightness,
+                  static_cast<unsigned long>(elapsedMs));
   }
+#endif
 }
 
 void configureApdsRuntime()
@@ -560,6 +557,8 @@ void syncBrightnessState(uint8_t brightness)
 {
   currentBrightness = static_cast<float>(brightness);
   lastBrightness = brightness;
+  lastBrightnessStepMs = millis();
+  brightnessStepClockInitialized = true;
 }
 
 int getLastAppliedBrightness()

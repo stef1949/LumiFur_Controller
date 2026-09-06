@@ -81,14 +81,6 @@ void test_brightness_target_bounds_and_shape(void)
   TEST_ASSERT_FLOAT_WITHIN(0.05f, expectedMid, micComputeBrightnessTarget(0.25f));
 }
 
-void test_mouth_hysteresis(void)
-{
-  TEST_ASSERT_TRUE(micShouldOpenMouth(MIC_MOUTH_OPEN_THRESHOLD, false));
-  TEST_ASSERT_FALSE(micShouldOpenMouth(MIC_MOUTH_OPEN_THRESHOLD - 0.01f, false));
-  TEST_ASSERT_TRUE(micShouldOpenMouth(MIC_MOUTH_CLOSE_THRESHOLD + 0.01f, true));
-  TEST_ASSERT_FALSE(micShouldOpenMouth(MIC_MOUTH_CLOSE_THRESHOLD - 0.01f, true));
-}
-
 void test_continuous_mouth_openness_curve(void)
 {
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f,
@@ -98,8 +90,9 @@ void test_continuous_mouth_openness_curve(void)
 
   const float midpoint = (MIC_MOUTH_CLOSE_THRESHOLD + MIC_MOUTH_FULL_OPEN_THRESHOLD) * 0.5f;
   TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, micComputeMouthOpennessTarget(midpoint));
-  TEST_ASSERT_TRUE(micComputeMouthOpennessTarget(MIC_MOUTH_OPEN_THRESHOLD) > 0.0f);
-  TEST_ASSERT_TRUE(micComputeMouthOpennessTarget(MIC_MOUTH_OPEN_THRESHOLD) < 0.5f);
+  const float belowMidpoint = (MIC_MOUTH_CLOSE_THRESHOLD + midpoint) * 0.5f;
+  TEST_ASSERT_TRUE(micComputeMouthOpennessTarget(belowMidpoint) > 0.0f);
+  TEST_ASSERT_TRUE(micComputeMouthOpennessTarget(belowMidpoint) < 0.5f);
 }
 
 void test_panel_headroom_depends_on_option_and_mic_face_not_mouth_activity(void)
@@ -150,6 +143,30 @@ void test_mouth_override_fixed_scale_preserves_floor_and_true_maximum(void)
   TEST_ASSERT_EQUAL_UINT16(256, micBrightnessToFixedScale(255));
 }
 
+void test_normal_face_brightness_is_applied_only_by_panel(void)
+{
+  // Preserve pixel colour precision across the entire manual slider range.
+  // Zero still blanks the panel; 255 preserves the original full output.
+  for (unsigned int brightness = 0; brightness <= 255; ++brightness)
+  {
+    TEST_ASSERT_EQUAL_UINT8(brightness, micResolvePanelBrightness(brightness, false));
+    TEST_ASSERT_EQUAL_UINT16(256, micResolveFaceBrightnessScale(brightness, false));
+  }
+}
+
+void test_boosted_face_brightness_is_applied_once_in_software(void)
+{
+  // A full-intensity face channel must retain the selected brightness with
+  // mouth boost enabled. The former squared scale turned e.g. 5 into zero.
+  for (unsigned int brightness = 0; brightness <= 255; ++brightness)
+  {
+    TEST_ASSERT_EQUAL_UINT8(255, micResolvePanelBrightness(brightness, true));
+    const uint16_t scale = micResolveFaceBrightnessScale(brightness, true);
+    const uint8_t channel = static_cast<uint8_t>((255U * scale + 128U) >> 8);
+    TEST_ASSERT_EQUAL_UINT8(brightness, channel);
+  }
+}
+
 void setup()
 {
   UNITY_BEGIN();
@@ -160,12 +177,13 @@ void setup()
   RUN_TEST(test_speech_level_and_normalization);
   RUN_TEST(test_peak_reference_attack_release_and_clamp);
   RUN_TEST(test_brightness_target_bounds_and_shape);
-  RUN_TEST(test_mouth_hysteresis);
   RUN_TEST(test_continuous_mouth_openness_curve);
   RUN_TEST(test_panel_headroom_depends_on_option_and_mic_face_not_mouth_activity);
   RUN_TEST(test_mouth_override_resolves_hardware_brightness);
   RUN_TEST(test_mouth_override_uses_display_brightness_as_floor_and_reaches_maximum);
   RUN_TEST(test_mouth_override_fixed_scale_preserves_floor_and_true_maximum);
+  RUN_TEST(test_normal_face_brightness_is_applied_only_by_panel);
+  RUN_TEST(test_boosted_face_brightness_is_applied_once_in_software);
   UNITY_END();
 }
 

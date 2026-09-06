@@ -10,7 +10,7 @@
 #define DEBUG_ACCELEROMETER 0 // Set to 1 to enable accelerometer debug outputs
 #endif
 #ifndef DEBUG_BRIGHTNESS
-#define DEBUG_BRIGHTNESS 1    // Set to 1 to enable brightness debug outputs
+#define DEBUG_BRIGHTNESS 0    // Opt in to brightness logs; serial output can stall animation.
 #endif
 #ifndef DEBUG_VIEWS
 #define DEBUG_VIEWS 1         // Set to 1 to enable views debug outputs

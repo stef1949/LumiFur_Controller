@@ -108,15 +108,6 @@ float micComputeMouthOpennessTarget(float normalizedEnvelope)
   return linear * linear * (3.0f - 2.0f * linear);
 }
 
-bool micShouldOpenMouth(float normalizedEnvelope, bool mouthOpen)
-{
-  if (mouthOpen)
-  {
-    return normalizedEnvelope >= MIC_MOUTH_CLOSE_THRESHOLD;
-  }
-  return normalizedEnvelope >= MIC_MOUTH_OPEN_THRESHOLD;
-}
-
 bool micShouldApplyPanelHeadroom(bool overrideEnabled, bool micFaceActive)
 {
   return overrideEnabled && micFaceActive;
@@ -163,4 +154,11 @@ std::uint16_t micBrightnessToFixedScale(std::uint8_t brightness)
 {
   return static_cast<std::uint16_t>(
       (static_cast<std::uint32_t>(brightness) * 256U + 127U) / 255U);
+}
+
+std::uint16_t micResolveFaceBrightnessScale(std::uint8_t requestedBrightness, bool panelHeadroomEnabled)
+{
+  // Normally the panel applies the requested brightness. Only dim pixels when
+  // mouth headroom holds the panel at full output; never apply both reductions.
+  return panelHeadroomEnabled ? micBrightnessToFixedScale(requestedBrightness) : 256U;
 }

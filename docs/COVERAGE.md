@@ -106,14 +106,15 @@ To improve test coverage:
 
 Current test suites contributing to coverage:
 
-- **test_animation_state** (7 tests) - `src/core/AnimationState.cpp`
+- **test_animation_state** (6 tests) - `src/core/AnimationState.cpp`
 - **test_scroll_state** (6 tests) - `src/core/ScrollState.cpp`
 - **test_easing_functions** (7 tests) - Easing functions in `src/app/main.h`
 - **test_ble** (13 tests) - BLE helper functions
 - **test_accelerometer** (19 tests) - Motion detection logic
-- **test_microphone** (25 tests) - Audio processing functions
+- **test_mic**, **test_mic_math** - Production microphone math in `src/core/mic/mic_math.cpp`
+- **test_mouth_morph** - `src/core/mouth/MouthMorph.cpp`
 
-Total: **77 tests** tracking coverage across core embedded functionality.
+Use the test runner and coverage reports for current counts. The legacy `test_microphone` suite tests a copied implementation and does not cover the current production microphone path.
 
 ## Troubleshooting
 

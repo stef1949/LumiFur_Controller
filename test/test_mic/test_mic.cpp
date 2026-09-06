@@ -35,9 +35,11 @@ void test_slot_selection_configuration(void)
 
 void test_mouth_threshold_relationships(void)
 {
-  TEST_ASSERT_TRUE(MIC_MOUTH_OPEN_THRESHOLD > MIC_MOUTH_CLOSE_THRESHOLD);
-  TEST_ASSERT_TRUE(micShouldOpenMouth(MIC_MOUTH_OPEN_THRESHOLD, false));
-  TEST_ASSERT_FALSE(micShouldOpenMouth(MIC_MOUTH_CLOSE_THRESHOLD - 0.01f, true));
+  TEST_ASSERT_TRUE(MIC_MOUTH_FULL_OPEN_THRESHOLD > MIC_MOUTH_CLOSE_THRESHOLD);
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f,
+                         micComputeMouthOpennessTarget(MIC_MOUTH_CLOSE_THRESHOLD - 0.01f));
+  TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f,
+                         micComputeMouthOpennessTarget(MIC_MOUTH_FULL_OPEN_THRESHOLD + 0.01f));
 }
 
 void test_speech_gate_requires_margin_above_floor(void)

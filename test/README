@@ -27,18 +27,20 @@ pio test -e native2 -f test_animation_state
 
 The LumiFur Controller project includes comprehensive Unity framework tests:
 
-- **test_animation_state** - AnimationState module tests (7 tests)
+- **test_animation_state** - AnimationState module tests (6 tests)
 - **test_scroll_state** - ScrollState module tests (6 tests)
 - **test_easing_functions** - Easing functions tests (7 tests)
 - **test_ble** - BLE module tests (13 tests)
 - **test_accelerometer** - Accelerometer motion detection tests (19 tests)
-- **test_microphone** - Microphone audio processing tests (25 tests)
+- **test_mic**, **test_mic_config**, **test_mic_math** - Current microphone configuration and production math tests
+- **test_mouth_morph** - Mouth frame interpolation tests
+- **test_microphone** - Legacy copied microphone implementation tests (25 tests; not current production coverage)
 - **test_main** - Main application tests
 - **test_timers** - Timer threshold tests
 - **test_bitmaps** - Bitmap validation tests
 - **color_parser** - Color parsing tests (GoogleTest)
 
-**Total: 77+ tests** ensuring code quality and correctness.
+Use the test runner summary for current counts and results.
 
 ## Documentation
 

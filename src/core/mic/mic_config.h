@@ -27,8 +27,7 @@
 #define MIC_POWER_UP_DELAY_MS 10
 
 // Mouth animation output range
-#define MIC_MOUTH_OPEN_HOLD_MS 80
-#define MIC_MIN_BRIGHTNESS 50
+#define MIC_MIN_BRIGHTNESS 25
 #define MIC_MAX_BRIGHTNESS 255
 
 // Envelope extraction and speech tracking
@@ -52,8 +51,7 @@
 #define MIC_PEAK_REF_ATTACK_ALPHA 0.03f
 #define MIC_PEAK_REF_RELEASE_ALPHA 0.001f
 
-// Binary mouth state hysteresis on the normalized envelope
-#define MIC_MOUTH_OPEN_THRESHOLD 0.18f
+// Continuous mouth animation stays closed below this normalized level.
 #define MIC_MOUTH_CLOSE_THRESHOLD 0.10f
 
 // Continuous mouth animation reaches its fully-open frame at this level.

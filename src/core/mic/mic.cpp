@@ -12,7 +12,6 @@
 #include "core/PerfTelemetry.h"
 
 static TaskHandle_t s_micTaskHandle = nullptr;
-static volatile bool s_mouthOpen = false;
 static volatile uint8_t s_mouthOpenness = 0;
 static volatile uint8_t s_mouthBrightness = MIC_MIN_BRIGHTNESS;
 static volatile bool s_micEnabled = true;
@@ -138,7 +137,6 @@ static void micTask(void *param)
   float smoothedEnvelope = 0.0f;
   float dcPrevInput = 0.0f;
   float dcPrevOutput = 0.0f;
-  unsigned long lastSpeechTime = 0;
   bool i2sRunning = true;
 
   auto resetMicState = [&]()
@@ -150,8 +148,6 @@ static void micTask(void *param)
     dcPrevOutput = 0.0f;
     s_mouthOpenness = 0;
     s_mouthBrightness = MIC_MIN_BRIGHTNESS;
-    s_mouthOpen = false;
-    lastSpeechTime = 0;
   };
 
   auto updateMouthOutputs = [&](float normalizedEnvelope)
@@ -200,8 +196,6 @@ static void micTask(void *param)
         &bytesRead,
         pdMS_TO_TICKS(MIC_READ_TIMEOUT_MS));
 
-    const unsigned long now = millis();
-
     if (err != ESP_OK || bytesRead == 0)
     {
       smoothedEnvelope = micApplyAttackReleaseEma(
@@ -211,11 +205,6 @@ static void micTask(void *param)
           MIC_SIGNAL_RELEASE_ALPHA);
       peakReference = micUpdatePeakReference(peakReference, 0.0f);
       updateMouthOutputs(smoothedEnvelope);
-
-      if (s_mouthOpen && (now - lastSpeechTime > MIC_MOUTH_OPEN_HOLD_MS))
-      {
-        s_mouthOpen = false;
-      }
 
 #if DEBUG_MICROPHONE
       Serial.printf(">mic_raw_min:0\n");
@@ -228,7 +217,6 @@ static void micTask(void *param)
       Serial.printf(">mic_smoothed_env:%.3f\n", smoothedEnvelope);
       Serial.printf(">mic_mouth_openness:%u\n", s_mouthOpenness);
       Serial.printf(">mic_mouth_brightness:%u\n", s_mouthBrightness);
-      Serial.printf(">mic_mouth_open:%d\n", s_mouthOpen ? 1 : 0);
 #endif
       perfTelemetryRecordDuration(PerfDurationId::MicBlock, micros() - loopStartMicros);
       vTaskDelay(1);
@@ -257,16 +245,6 @@ static void micTask(void *param)
 
     updateMouthOutputs(smoothedEnvelope);
 
-    if (micShouldOpenMouth(smoothedEnvelope, s_mouthOpen))
-    {
-      lastSpeechTime = now;
-      s_mouthOpen = true;
-    }
-    else if (s_mouthOpen && (now - lastSpeechTime > MIC_MOUTH_OPEN_HOLD_MS))
-    {
-      s_mouthOpen = false;
-    }
-
 #if DEBUG_MICROPHONE
     Serial.printf(">mic_raw_min:%ld\n", static_cast<long>(stats.rawMin));
     Serial.printf(">mic_raw_max:%ld\n", static_cast<long>(stats.rawMax));
@@ -278,7 +256,6 @@ static void micTask(void *param)
     Serial.printf(">mic_smoothed_env:%.3f\n", smoothedEnvelope);
     Serial.printf(">mic_mouth_openness:%u\n", s_mouthOpenness);
     Serial.printf(">mic_mouth_brightness:%u\n", s_mouthBrightness);
-    Serial.printf(">mic_mouth_open:%d\n", s_mouthOpen ? 1 : 0);
 #endif
 
     perfTelemetryRecordDuration(PerfDurationId::MicBlock, micros() - loopStartMicros);
@@ -320,11 +297,6 @@ void micInit()
 void micSetEnabled(bool enabled)
 {
   s_micEnabled = enabled;
-}
-
-bool micIsMouthOpen()
-{
-  return s_mouthOpen;
 }
 
 uint8_t micGetMouthOpenness()

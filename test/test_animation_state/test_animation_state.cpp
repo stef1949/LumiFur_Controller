@@ -45,7 +45,6 @@ void test_animation_state_reset(void)
   s.isBlinking = true;
   s.blinkProgress = 50;
   s.isEyeBouncing = true;
-  s.currentMaw = 5;
   
   // Reset the state
   reset(s);
@@ -55,7 +54,6 @@ void test_animation_state_reset(void)
   TEST_ASSERT_EQUAL_INT(0, s.blinkProgress);
   TEST_ASSERT_FALSE(s.isBlinking);
   TEST_ASSERT_FALSE(s.isEyeBouncing);
-  TEST_ASSERT_EQUAL_INT(1, s.currentMaw);
 }
 
 void test_blush_state_initialization(void)
@@ -81,18 +79,6 @@ void test_eye_bounce_state(void)
   TEST_ASSERT_EQUAL_INT(0, s.eyeBounceCount);
 }
 
-void test_maw_state_initialization(void)
-{
-  AnimationState &s = state();
-  reset(s);
-  
-  TEST_ASSERT_EQUAL_INT(1, s.currentMaw);
-  TEST_ASSERT_EQUAL_UINT(0, s.mawChangeTime);
-  TEST_ASSERT_FALSE(s.mawTemporaryChange);
-  TEST_ASSERT_FALSE(s.mouthOpen);
-  TEST_ASSERT_EQUAL_UINT(0, s.lastMouthTriggerTime);
-}
-
 void test_idle_hover_offsets(void)
 {
   AnimationState &s = state();
@@ -111,7 +97,6 @@ void setup()
   RUN_TEST(test_animation_state_reset);
   RUN_TEST(test_blush_state_initialization);
   RUN_TEST(test_eye_bounce_state);
-  RUN_TEST(test_maw_state_initialization);
   RUN_TEST(test_idle_hover_offsets);
   
   UNITY_END();

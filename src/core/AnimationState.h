@@ -47,13 +47,6 @@ struct AnimationState
   unsigned long spiralStartMillis = 0;
   int previousView = 0;
 
-  // Maw
-  int currentMaw = 1;
-  unsigned long mawChangeTime = 0;
-  bool mawTemporaryChange = false;
-  bool mouthOpen = false;
-  unsigned long lastMouthTriggerTime = 0;
-
   // Blush
   BlushState blushState = BlushState::Inactive;
   unsigned long blushStateStartTime = 0;

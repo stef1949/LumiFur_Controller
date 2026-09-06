@@ -13,11 +13,11 @@ float micUpdatePeakReference(float peakReference, float speechLevel);
 float micNormalizeSpeechLevel(float speechLevel, float peakReference);
 float micComputeBrightnessTarget(float normalizedEnvelope);
 float micComputeMouthOpennessTarget(float normalizedEnvelope);
-bool micShouldOpenMouth(float normalizedEnvelope, bool mouthOpen);
 bool micShouldApplyPanelHeadroom(bool overrideEnabled, bool micFaceActive);
 std::uint8_t micResolvePanelBrightness(std::uint8_t requestedBrightness, bool panelHeadroomEnabled);
 std::uint8_t micComputeMouthOverrideBrightness(std::uint8_t microphoneBrightness,
                                                std::uint8_t displayBrightnessFloor);
 std::uint16_t micBrightnessToFixedScale(std::uint8_t brightness);
+std::uint16_t micResolveFaceBrightnessScale(std::uint8_t requestedBrightness, bool panelHeadroomEnabled);
 
 #endif // MIC_MATH_H
