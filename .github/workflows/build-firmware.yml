@@ -64,7 +64,7 @@ jobs:
           echo "Available environments:"
           pio project config --json-output | grep -o '"env:[^"]*"' || true
           echo "Starting build..."
-          pio run -e ${{ matrix.environment }} --verbose
+          pio run -e ${{ matrix.environment }}
           
       - name: Prepare firmware artifacts
         run: |
