@@ -108,6 +108,7 @@ void ServerCallbacks::onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo)
 
 void ServerCallbacks::onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason)
 {
+    otaCallbacks.onDisconnect(connInfo.getConnHandle());
     removePairingCandidate(connInfo.getConnHandle());
     deviceConnected = pServer->getConnectedCount() > 0;
     setPairingState(false, false, 0, true);

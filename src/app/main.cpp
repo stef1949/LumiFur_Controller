@@ -990,6 +990,21 @@ bool bleQueueString(BleWorkType type, NimBLECharacteristic *characteristic, cons
                          value.size());
 }
 
+bool bleQueueOtaPacket(NimBLECharacteristic *characteristic, const uint8_t *data, size_t length, uint32_t sessionToken)
+{
+  if (data == nullptr || length == 0 || length > LF_BLE_WORK_ITEM_PAYLOAD_MAX)
+  {
+    return false;
+  }
+  BleWorkItem item{};
+  item.type = BleWorkType::OtaPacket;
+  item.characteristic = characteristic;
+  item.length = static_cast<uint16_t>(length);
+  item.otaSessionToken = sessionToken;
+  std::memcpy(item.data, data, length);
+  return bleQueueWorkInternal(item);
+}
+
 bool bleQueueByte(BleWorkType type, NimBLECharacteristic *characteristic, uint8_t value)
 {
   return bleQueuePayload(type, characteristic, &value, 1);
@@ -1650,6 +1665,7 @@ static void bleWorkerTask(void *param)
 
     const uint32_t workStartMicros = micros();
     PERF_SCOPE(PerfBucket::Ble);
+    otaCallbacks.cleanupDisconnectedSession();
     switch (item.type)
     {
     case BleWorkType::Command:
@@ -1674,7 +1690,9 @@ static void bleWorkerTask(void *param)
       handleScrollWritePayload(item.characteristic, item.data, item.length);
       break;
     case BleWorkType::OtaPacket:
-      otaCallbacks.processPacket(item.characteristic, item.data, item.length);
+      otaCallbacks.processPacket(item.characteristic, item.data, item.length, item.otaSessionToken);
+      break;
+    case BleWorkType::OtaCleanup:
       break;
     default:
       break;
@@ -4113,8 +4131,9 @@ void setup()
   pOtaCharacteristic = pService->createCharacteristic(
       OTA_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
+          NIMBLE_PROPERTY::WRITE |
           NIMBLE_PROPERTY::WRITE_ENC |
-        NIMBLE_PROPERTY::WRITE_NR |
+          NIMBLE_PROPERTY::WRITE_NR |
           NIMBLE_PROPERTY::NOTIFY);
   pOtaCharacteristic->setCallbacks(&otaCallbacks);
   NimBLEDescriptor *otaDesc = pOtaCharacteristic->createDescriptor(

@@ -17,7 +17,6 @@ void otaRebootTask(void *param)
 {
     (void)param;
     vTaskDelay(kOtaRebootDelayTicks);
-    vTaskDelete(nullptr);
     esp_restart();
 }
 
@@ -51,58 +50,106 @@ void OTACallbacks::onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo
         return;
     }
 
+    const uint16_t connHandle = connInfo.getConnHandle();
+    auto respond = [&](uint8_t code, uint8_t detail)
+    {
+        const uint8_t response[] = {code, detail};
+        pCharacteristic->notify(response, sizeof(response), connHandle);
+    };
     if (!connInfo.isEncrypted())
     {
-        Serial.println("OTA: Rejecting write from unencrypted connection.");
-        uint8_t response[] = {0xFF, 0x0F};
-        pCharacteristic->setValue(response, sizeof(response));
-        pCharacteristic->notify();
+        respond(0xFF, 0x0F);
         return;
     }
-
     if (value.size() > LF_BLE_WORK_ITEM_PAYLOAD_MAX)
     {
-        Serial.printf("OTA: Packet too large (%u > %u)\n",
-                      static_cast<unsigned int>(value.size()),
-                      static_cast<unsigned int>(LF_BLE_WORK_ITEM_PAYLOAD_MAX));
-        uint8_t response[] = {0xFF, 0x0B};
-        pCharacteristic->setValue(response, sizeof(response));
-        pCharacteristic->notify();
+        respond(0xFF, 0x0B);
+        return;
+    }
+    if (rebootPending.load())
+    {
+        respond(0xFF, 0x01);
         return;
     }
 
-    if (!bleQueuePayload(BleWorkType::OtaPacket, pCharacteristic,
-                         reinterpret_cast<const uint8_t *>(value.data()), value.length()))
+    uint32_t token = connectionToken.load();
+    if (token == 0)
     {
-        Serial.println("OTA: Worker queue unavailable/full, dropping packet.");
-        uint8_t response[] = {0xFF, 0x0A};
-        pCharacteristic->setValue(response, sizeof(response));
-        pCharacteristic->notify();
+        if (value[0] == 0x04)
+        {
+            respond(0x04, 0x00); // ABORT is idempotent, including cleanup after a failed START.
+            return;
+        }
+        if (value[0] != 0x01)
+        {
+            respond(0xFF, value[0] == 0x02 ? 0x05 : 0x07);
+            return;
+        }
+        if (++nextSessionId == 0) ++nextSessionId;
+        token = (static_cast<uint32_t>(nextSessionId) << 16) | connHandle;
+        connectionToken.store(token);
+    }
+    else if (static_cast<uint16_t>(token) != connHandle)
+    {
+        respond(0xFF, 0x10); // Another connection owns the update.
+        return;
+    }
+
+    if (!bleQueueOtaPacket(pCharacteristic, reinterpret_cast<const uint8_t *>(value.data()), value.length(), token))
+    {
+        respond(0xFF, 0x0A);
+        // Invalidate queued data too: a dropped chunk makes the entire image unusable.
+        connectionToken.compare_exchange_strong(token, 0);
+        bleQueueEmpty(BleWorkType::OtaCleanup);
     }
 }
 
-bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const uint8_t *data, size_t len)
+void OTACallbacks::onDisconnect(uint16_t connHandle)
 {
-    if (pCharacteristic == nullptr || data == nullptr || len == 0)
+    uint32_t token = connectionToken.load();
+    if (token != 0 && static_cast<uint16_t>(token) == connHandle &&
+        connectionToken.compare_exchange_strong(token, 0))
     {
-        Serial.println("OTA: Received empty packet");
+        // Flash operations stay on the worker. If the queue is full it is already awake.
+        bleQueueEmpty(BleWorkType::OtaCleanup);
+    }
+}
+
+void OTACallbacks::resetSession()
+{
+    uint32_t token = sessionToken;
+    connectionToken.compare_exchange_strong(token, 0);
+    ota_started.store(false, std::memory_order_relaxed);
+    sessionToken = 0;
+    ota_handle = 0;
+    update_partition = nullptr;
+    bytes_received = 0;
+    total_size = 0;
+    acknowledgeChunks = false;
+}
+
+void OTACallbacks::cleanupDisconnectedSession()
+{
+    if (sessionToken != 0 && sessionToken != connectionToken.load())
+    {
+        if (ota_started.load(std::memory_order_relaxed)) esp_ota_abort(ota_handle);
+        resetSession();
+    }
+}
+
+bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const uint8_t *data, size_t len, uint32_t token)
+{
+    cleanupDisconnectedSession();
+    if (pCharacteristic == nullptr || data == nullptr || len == 0 || token == 0 ||
+        token != connectionToken.load())
+    {
         return false;
     }
 
     auto sendResponse = [&](uint8_t code, uint8_t detail)
     {
         const uint8_t response[] = {code, detail};
-        pCharacteristic->setValue(response, sizeof(response));
-        pCharacteristic->notify();
-    };
-
-    auto resetSession = [&]()
-    {
-        ota_started.store(false, std::memory_order_relaxed);
-        ota_handle = 0;
-        update_partition = nullptr;
-        bytes_received = 0;
-        total_size = 0;
+        pCharacteristic->notify(response, sizeof(response), static_cast<uint16_t>(token));
     };
 
     const uint8_t command = data[0];
@@ -115,10 +162,12 @@ bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const ui
             sendResponse(0xFF, 0x01); // Error: Already started
             return false;
         }
-        if (len < 5)
+        sessionToken = token;
+        if (len != 5 && !(len == 6 && data[5] == 0x01))
         {
-            Serial.println("OTA: START command too short for size.");
-            sendResponse(0xFF, 0x02); // Error: Start packet too short
+            Serial.println("OTA: START command has an invalid payload.");
+            sendResponse(0xFF, 0x02); // Error: Invalid START payload
+            resetSession();
             return false;
         }
 
@@ -128,6 +177,7 @@ bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const ui
         {
             Serial.println("OTA: START command has invalid size 0.");
             sendResponse(0xFF, 0x02); // Error: Invalid start payload
+            resetSession();
             return false;
         }
 
@@ -136,6 +186,7 @@ bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const ui
         {
             Serial.println("OTA: No valid OTA partition found");
             sendResponse(0xFF, 0x03); // Error: No partition
+            resetSession();
             return false;
         }
 
@@ -145,7 +196,7 @@ bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const ui
                           static_cast<unsigned int>(declaredSize),
                           static_cast<unsigned int>(update_partition->size));
             sendResponse(0xFF, 0x03); // Error: Invalid partition/size combination
-            update_partition = nullptr;
+            resetSession();
             return false;
         }
 
@@ -159,14 +210,15 @@ bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const ui
         {
             Serial.printf("OTA: esp_ota_begin failed (%s)\n", esp_err_to_name(err));
             sendResponse(0xFF, 0x04); // Error: ota_begin failed
-            update_partition = nullptr;
+            resetSession();
             return false;
         }
 
         ota_started.store(true, std::memory_order_relaxed);
         bytes_received = 0;
         Serial.println("OTA: esp_ota_begin succeeded. Ready for data.");
-        sendResponse(0x01, 0x00); // ACK: OTA Started
+        acknowledgeChunks = len == 6;
+        sendResponse(0x01, acknowledgeChunks ? 0x01 : 0x00); // ACK only after flash is ready.
         return true;
     }
     if (command == 0x02)
@@ -185,7 +237,7 @@ bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const ui
         }
 
         const uint32_t payloadBytes = static_cast<uint32_t>(len - 1);
-        if (bytes_received + payloadBytes > total_size)
+        if (payloadBytes > total_size - bytes_received)
         {
             Serial.printf("OTA: DATA exceeds declared size (%u + %u > %u)\n",
                           static_cast<unsigned int>(bytes_received),
@@ -207,6 +259,7 @@ bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const ui
             return false;
         }
         bytes_received += payloadBytes;
+        if (acknowledgeChunks) sendResponse(0x02, 0x00);
 
 #if DEBUG_MODE
         Serial.printf("OTA: Received %u / %u bytes\n",
@@ -258,6 +311,7 @@ bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const ui
             return false;
         }
 
+        rebootPending.store(true);
         Serial.println("OTA: Update successful! Rebooting...");
         sendResponse(0x03, 0x00); // ACK: OTA Success
         resetSession();

@@ -15,10 +15,21 @@ class OTACallbacks : public NimBLECharacteristicCallbacks
     uint32_t bytes_received = 0;
     uint32_t total_size = 0;
     std::atomic<bool> ota_started{false};
+    // The BLE callback reserves ownership before enqueueing START. Tokens distinguish
+    // a reconnect from queued packets belonging to a previous connection/session.
+    std::atomic<uint32_t> connectionToken{0};
+    std::atomic<bool> rebootPending{false};
+    uint16_t nextSessionId = 0; // BLE callback queue only
+    uint32_t sessionToken = 0; // Worker task only
+    bool acknowledgeChunks = false;
+
+    void resetSession();
 
 public:
     void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override;
-    bool processPacket(NimBLECharacteristic *pCharacteristic, const uint8_t *data, size_t len);
+    bool processPacket(NimBLECharacteristic *pCharacteristic, const uint8_t *data, size_t len, uint32_t token);
+    void onDisconnect(uint16_t connHandle);
+    void cleanupDisconnectedSession();
     bool isActive() const;
 };
 
