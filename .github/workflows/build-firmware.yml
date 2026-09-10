@@ -286,6 +286,7 @@ jobs:
           echo "Prefixed raw files:"
           ls -la release-raw-prefixed
 
+      # Append firmware instructions while preserving existing release notes.
       - name: Attach to release
         uses: softprops/action-gh-release@v2
         with:
@@ -293,26 +294,27 @@ jobs:
             lumifur-firmware-*.tar.gz
             lumifur-firmware-*.zip
             release-raw-prefixed/*
+          append_body: true
           body: |
             ## Firmware Artifacts
-            
+
             This release includes pre-built firmware for the following environments:
             - `adafruit_matrixportal_esp32s3` - Primary target (Adafruit MatrixPortal ESP32-S3)
             - `esp32dev` - Generic ESP32 development boards
             - `dev` - Development build with extra instrumentation
-            
+
             Each environment folder contains:
             - `firmware.bin` - Main application firmware for OTA updates
             - `partitions.bin` - Partition table required for OTA functionality
             - `bootloader.bin` - ESP32 bootloader binary
             - `firmware.elf` - Debug symbols (if available)
             - `build-info.txt` - Build metadata and version information
-            
+
             ## Installation
-            
+
             For OTA updates, use `firmware.bin` and `partitions.bin`.
             For complete flashing, use all three .bin files.
-            
+
             Refer to the [README](https://github.com/stef1949/LumiFur_Controller#build--flash) for detailed installation instructions.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
