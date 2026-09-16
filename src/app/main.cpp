@@ -2256,7 +2256,7 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
     return;
   }
 
-  const bool useStaticColorMode = staticColorModeEnabled;
+  const bool enablePlasma = auroraModeEnabled && !staticColorModeEnabled;
   const uint16_t combinedBrightnessScale = bypassGlobalBrightness
                                                ? micBrightnessToFixedScale(brightnessScale)
                                                : static_cast<uint16_t>(
@@ -2265,10 +2265,15 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
                                                       128u) >>
                                                      8);
   CRGB staticColorRgb = CRGB::Black;
-  if (useStaticColorMode)
+  if (!enablePlasma)
   {
-    ensureStaticColorLoaded();
-    staticColorRgb = gStaticColorState.color;
+    // Match the default cyan used by the eyes when both color modes are off.
+    staticColorRgb = CRGB(0, 255, 255);
+    if (staticColorModeEnabled)
+    {
+      ensureStaticColorLoaded();
+      staticColorRgb = gStaticColorState.color;
+    }
     staticColorRgb.r = static_cast<uint8_t>((static_cast<uint16_t>(staticColorRgb.r) * combinedBrightnessScale + 128) >> 8);
     staticColorRgb.g = static_cast<uint8_t>((static_cast<uint16_t>(staticColorRgb.g) * combinedBrightnessScale + 128) >> 8);
     staticColorRgb.b = static_cast<uint8_t>((static_cast<uint16_t>(staticColorRgb.b) * combinedBrightnessScale + 128) >> 8);
@@ -2289,7 +2294,7 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
   const uint8_t t3 = static_cast<uint8_t>(((effectiveTimeFixed / 3U) >> 8) & 0xFF);
 
   const uint16_t brightnessScaleFixed = combinedBrightnessScale;
-  const CRGB *paletteLut = useStaticColorMode ? nullptr : getScaledPlasmaPaletteLut(brightnessScaleFixed);
+  const CRGB *paletteLut = enablePlasma ? getScaledPlasmaPaletteLut(brightnessScaleFixed) : nullptr;
 
   for (int j = 0; j < height; ++j)
   {
@@ -2326,7 +2331,7 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
         if (rowBits & static_cast<uint8_t>(0x80U >> bitIndex))
         {
           const int pixelX = x + pixelBase + bitIndex;
-          if (useStaticColorMode)
+          if (!enablePlasma)
           {
             drawPixelRgbFast(pixelX, yj, staticColorRgb.r, staticColorRgb.g, staticColorRgb.b);
           }
@@ -2471,7 +2476,7 @@ void drawBitmapAdvanced(int x, int y, int width, int height, const uint8_t *bitm
   // --- Blink Effect Calculation ---
   const float w = 0.005f + (1.0f - 0.005f) * (progress / 100.0f);
 
-  const bool enablePlasma = usePlasma && !staticColorModeEnabled;
+  const bool enablePlasma = usePlasma && auroraModeEnabled && !staticColorModeEnabled;
   CRGB staticColorValue;
   if (staticColorModeEnabled)
   {

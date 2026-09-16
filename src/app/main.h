@@ -338,18 +338,15 @@ void applyConfigOptions()
     if (auroraModeEnabled)
     {
       #if DEBUG_MODE
-      Serial.println("Aurora mode enabled: switching to aurora palette.");
+      Serial.println("Aurora mode enabled: animating face plasma.");
       #endif
-      // Assume auroraPalette and defaultPalette are defined globally.
-      // currentPalette = auroraPalette;
       configApplyAuroraMode = true;
     }
     else
     {
       #if DEBUG_MODE
-      Serial.println("Aurora mode disabled: using default palette.");
+      Serial.println("Aurora mode disabled: using solid face colors.");
       #endif
-      // currentPalette = defaultPalette;
       configApplyAuroraMode = false;
     }
   }
