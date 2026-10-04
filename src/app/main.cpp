@@ -31,6 +31,7 @@
 #include "effects/flameEffect.h"
 #include "effects/fluidEffect.h"
 #include "effects/monoVideoPlayer.h"
+#include "effects/matrixRainEffect.h"
 #include "core/AnimationState.h"
 #include "core/InternalTemperature.h"
 #include "core/ScrollState.h"
@@ -1066,6 +1067,7 @@ static bool viewUsesMic(int view)
   case VIEW_UWU_EYES:
   case VIEW_CIRCLE_EYES:
   case VIEW_ALT_FACE:
+  case VIEW_MATRIX_FACE:   // ADD — mouth mic on face rain
     return true;
   default:
     return false;
@@ -1868,6 +1870,8 @@ static unsigned long viewFrameIntervalMillis(int view)
   case VIEW_UWU_EYES:
   case VIEW_CIRCLE_EYES:
   case VIEW_ALT_FACE:
+    return PATTERN_PLASMA_FRAME_INTERVAL_MS;
+  case VIEW_MATRIX_FACE:   // ADD
     return PATTERN_PLASMA_FRAME_INTERVAL_MS;
   case VIEW_DVD_LOGO:
     return dvdUpdateInterval;
@@ -4263,6 +4267,7 @@ void setup()
   // create VirtualDisplay object based on our newly created dma_display object
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
   initFlameEffect(matrix);
+  initMatrixRainEffect(matrix);        // ← ADD (virtual pane path)
 #endif
 
   dma_display->clearScreen();
@@ -4759,6 +4764,31 @@ static void renderPixelDustView()
   PixelDustEffect();
 }
 
+static void renderMatrixRainView() {
+  updateAndDrawMatrixRainEffect();
+}
+
+static void renderMatrixFaceView() {
+  dma_display->fillScreen(0);
+
+  const int xOff = 0;
+  const int yOff = 0;
+  const int eyeW = 32;
+  const int eyeH = 16;
+  const int rightEyeX = 0 + xOff;
+  const int rightEyeY = 0 + yOff;
+  const int leftEyeX = 96 + xOff;
+  const int leftEyeY = 0 + yOff;
+
+  matrixRainAdvance();
+
+  drawPlasmaXbm(rightEyeX, rightEyeY, eyeW, eyeH, (const uint8_t *)Eye, 0);
+  drawPlasmaXbm(leftEyeX, leftEyeY, eyeW, eyeH, (const uint8_t *)EyeL, 80);
+
+  drawMatrixRainThroughXbm(rightEyeX, rightEyeY, eyeW, eyeH, (const uint8_t *)Eye);
+  drawMatrixRainThroughXbm(leftEyeX, leftEyeY, eyeW, eyeH, (const uint8_t *)EyeL);
+}
+
 static void renderFullscreenSpiralPalette()
 {
   updateAndDrawFullScreenSpiral(SPIRAL_COLOR_PALETTE);
@@ -4873,6 +4903,8 @@ static const ViewRenderFunc VIEW_RENDERERS[TOTAL_VIEWS] = {
     patternRainbowLinearBand,      // VIEW_RAINBOW_LINEAR_BAND
     renderFaceWithPlasma,          // VIEW_ALT_FACE
     renderVideoPlayerView,         // VIEW_VIDEO_PLAYER
+    renderMatrixRainView,          // VIEW_MATRIX_RAIN
+    renderMatrixFaceView,          // VIEW_MATRIX_FACE
 };
 
 static_assert(sizeof(VIEW_RENDERERS) / sizeof(ViewRenderFunc) == TOTAL_VIEWS, "View renderer table mismatch");
@@ -4890,6 +4922,7 @@ static bool viewNeedsPreClear(int view)
   case VIEW_STATIC_COLOR:
   case VIEW_RAINBOW_GRADIENT:
   case VIEW_RAINBOW_LINEAR_BAND:
+  case VIEW_MATRIX_RAIN:   // ADD — effect clears the screen itself
     return false;
   default:
     return true;

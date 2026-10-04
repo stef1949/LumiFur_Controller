@@ -37,10 +37,10 @@
 #define DEBUG_DISABLE_BLE_INDICATOR_LIGHT 0 // Set to 1 to force the BLE NeoPixel indicator off
 #endif
 #ifndef DEBUG_DISABLE_BLE_STATUS_ICON
-#define DEBUG_DISABLE_BLE_STATUS_ICON 0 // Set to 1 to hide the on-screen BLE status icon
+#define DEBUG_DISABLE_BLE_STATUS_ICON 1 // Set to 1 to hide the on-screen BLE status icon
 #endif
 #ifndef DEBUG_ENABLE_BRIGTHNESS_BOOST_WAVESHARE
-#define DEBUG_ENABLE_BRIGTHNESS_BOOST_WAVESHARE 0 // Set to 1 to enable brightness boost for Waveshare displays. This mayy introduce some flicker wth sme faces, particularly video player. 
+#define DEBUG_ENABLE_BRIGTHNESS_BOOST_WAVESHARE 1 // Set to 1 to enable brightness boost for Waveshare displays. This mayy introduce some flicker wth sme faces, particularly video player. 
 #endif
 
 #if DEBUG_MODE
