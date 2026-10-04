@@ -1,11 +1,11 @@
 #include "effects/flameEffect.h"
 
-#include <new>
+#include <esp_task_wdt.h>
+#include <string.h>
 
 extern uint16_t globalBrightnessScaleFixed;
 
 static DisplayOutputType *g_display_ptr = nullptr;
-static uint16_t *g_scanline_buffer = nullptr;
 static int32_t g_display_width = 0;
 static int32_t g_display_height = 0;
 
@@ -21,12 +21,10 @@ namespace
     {
       return CRGB(static_cast<uint8_t>(index << 1), 0, 0);
     }
-
     if (index < 224)
     {
       return CRGB(255, static_cast<uint8_t>((static_cast<uint16_t>(index - 128) * 8u) / 3u), 0);
     }
-
     return CRGB(255, 255, static_cast<uint8_t>((index - 224) << 3));
   }
 
@@ -48,17 +46,7 @@ namespace
       }
       cachedBrightnessScale = scale;
     }
-
     return heatTo565;
-  }
-
-  void freeFlameBuffers()
-  {
-    if (g_scanline_buffer)
-    {
-      delete[] g_scanline_buffer;
-      g_scanline_buffer = nullptr;
-    }
   }
 } // namespace
 
@@ -69,79 +57,57 @@ void initFlameEffect(DisplayOutputType *display)
   {
     return;
   }
-
   g_display_width = (int32_t)g_display_ptr->width();
   g_display_height = (int32_t)g_display_ptr->height();
-
-  if (g_display_width <= 0 || g_display_height <= 0)
-  {
-    return;
-  }
-
-  freeFlameBuffers();
-
-  g_scanline_buffer = new (std::nothrow) uint16_t[g_display_width];
-
-  if (!g_scanline_buffer)
-  {
-    Serial.println("FlameEffect: RAM Allocation Failed!");
-    freeFlameBuffers();
-    return;
-  }
-
-  memset(g_scanline_buffer, 0, g_display_width * sizeof(uint16_t));
-
   Serial.printf("Flame initialized: %dx%d\n", g_display_width, g_display_height);
 }
 
 void updateAndDrawFlameEffect()
 {
-  if (!g_display_ptr || !g_scanline_buffer)
+  if (!g_display_ptr || g_display_width <= 0 || g_display_height <= 0)
   {
     return;
   }
 
-  if ((int32_t)g_display_ptr->width() != g_display_width ||
-      (int32_t)g_display_ptr->height() != g_display_height)
-  {
-    initFlameEffect(g_display_ptr);
-    if (!g_scanline_buffer)
-    {
-      return;
-    }
-  }
-
   const uint16_t *heatTo565 = getHeatLutForBrightness(g_display_ptr);
   const uint32_t timeOffset = (micros() >> 10) * kFireSpeed;
+  const int32_t w = g_display_width;
+  const int32_t h = g_display_height;
 
-  for (int32_t y = 0; y < g_display_height; ++y)
+  for (int32_t y = 0; y < h; ++y)
   {
-    const uint32_t heightFromBase = static_cast<uint32_t>((g_display_height - 1) - y);
+    const uint32_t heightFromBase = static_cast<uint32_t>((h - 1) - y);
     const uint32_t noiseY = heightFromBase * kFireDetail;
     const uint32_t cooling = heightFromBase * kFireCooling;
+    uint8_t leftHeat = 0;
 
-    for (int32_t x = 0; x < g_display_width; ++x)
+    for (int32_t x = 0; x < w; ++x)
     {
-      uint8_t heat = static_cast<uint8_t>(
-          inoise16(noiseY - timeOffset, static_cast<uint32_t>(x) * kFireDetail) >> 8);
-
-      if (cooling >= heat)
+      uint8_t heat;
+      if ((x & 1) == 0)
       {
-        heat = 0;
+        heat = static_cast<uint8_t>(
+            inoise16(noiseY - timeOffset, static_cast<uint32_t>(x) * kFireDetail) >> 8);
+        if (cooling >= heat)
+        {
+          heat = 0;
+        }
+        else
+        {
+          heat = static_cast<uint8_t>(heat - cooling);
+        }
+        leftHeat = heat;
       }
       else
       {
-        heat = static_cast<uint8_t>(heat - cooling);
+        heat = leftHeat;
       }
-
-      g_scanline_buffer[x] = heatTo565[heat];
+      g_display_ptr->drawPixel(x, y, heatTo565[heat]);
     }
 
-    g_display_ptr->drawRGBBitmap(0, y, g_scanline_buffer, g_display_width, 1);
-
-    if ((y & 0x7) == 0)
-    {
-      yield();
-    }
+    yield();
+    esp_task_wdt_reset();
   }
+
+  vTaskDelay(pdMS_TO_TICKS(1));
 }
