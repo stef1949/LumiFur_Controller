@@ -6,8 +6,10 @@
 
 extern uint16_t globalBrightnessScaleFixed;
 
-static constexpr int kGlyphW = MATRIX_GLYPH_STEP_W;
-static constexpr int kGlyphH = MATRIX_GLYPH_STEP_H;
+static constexpr int kGlyphW = 2;
+static constexpr int kGlyphH = 3;
+static constexpr int kDrawW = 2;
+static constexpr int kDrawH = 3;
 
 static DisplayOutputType *g_display = nullptr;
 static int g_w = 0;
@@ -69,21 +71,39 @@ static int pickGlyph(uint8_t seed, int index, bool isHead) {
   return n % MATRIX_CODE_GLYPH_COUNT;
 }
 
-static void drawGlyphAt(int x, int y, int index, uint16_t color) {
+static void stampGlyph(int x, int y, int index, uint16_t color, bool toMap) {
   MatrixGlyph g;
   matrixCodeLoadGlyph(index, &g);
-  for (int row = 0; row < MATRIX_GLYPH_PX_H; ++row) {
-    const uint8_t bits = g.rows[row];
-    for (int col = 0; col < MATRIX_GLYPH_PX_W; ++col) {
-      if (bits & (1 << (MATRIX_GLYPH_PX_W - 1 - col))) {
-        const int px = x + col;
-        const int py = y + row;
-        if ((unsigned)px < (unsigned)g_w && (unsigned)py < (unsigned)g_h) {
-          g_display->drawPixel(px, py, color);
-        }
+  for (int row = 0; row < kDrawH; ++row) {
+    const int srcRow = (row * MATRIX_GLYPH_PX_H) / kDrawH;
+    const uint8_t bits = g.rows[srcRow];
+    for (int col = 0; col < kDrawW; ++col) {
+      const int srcCol = (col * MATRIX_GLYPH_PX_W) / kDrawW;
+      if (!(bits & (1 << (MATRIX_GLYPH_PX_W - 1 - srcCol)))) {
+        continue;
+      }
+      const int px = x + col;
+      const int py = y + row;
+      if ((unsigned)px >= (unsigned)g_w || (unsigned)py >= (unsigned)g_h) {
+        continue;
+      }
+      if (toMap) {
+        g_rainMap[py * g_w + px] = color;
+      } else {
+        g_display->drawPixel(px, py, color);
       }
     }
   }
+}
+
+static uint8_t trailLevel(int i, int length) {
+  if (i == 0) {
+    return 255;
+  }
+  if (i == 1) {
+    return 220;
+  }
+  return (uint8_t)((180 * (length - i)) / length);
 }
 
 static void rebuildRainMap() {
@@ -105,43 +125,23 @@ static void rebuildRainMap() {
     const int px = col * kGlyphW;
     for (int i = 0; i < c.length; ++i) {
       const int py = c.y - i * kGlyphH;
-      if (py < -MATRIX_GLYPH_PX_H || py >= g_h) {
+      if (py < -kDrawH || py >= g_h) {
         continue;
       }
-      const bool isHead = (i == 0);
-      const int gi = pickGlyph(c.seed, i, isHead);
-      uint8_t level;
-      if (isHead) {
-        level = 255;
-      } else if (i == 1) {
-        level = 220;
-      } else {
-        level = (uint8_t)((180 * (c.length - i)) / c.length);
-      }
-      const uint16_t color = matrixColor(level);
-
-      MatrixGlyph g;
-      matrixCodeLoadGlyph(gi, &g);
-      for (int row = 0; row < MATRIX_GLYPH_PX_H; ++row) {
-        const int gy = py + row;
-        if ((unsigned)gy >= (unsigned)g_h) {
-          continue;
-        }
-        const uint8_t bits = g.rows[row];
-        for (int gc = 0; gc < MATRIX_GLYPH_PX_W; ++gc) {
-          if (!(bits & (1 << (MATRIX_GLYPH_PX_W - 1 - gc)))) {
-            continue;
-          }
-          const int gx = px + gc;
-          if ((unsigned)gx >= (unsigned)g_w) {
-            continue;
-          }
-          g_rainMap[gy * g_w + gx] = color;
-        }
-      }
+      stampGlyph(px, py, pickGlyph(c.seed, i, i == 0),
+                 matrixColor(trailLevel(i, c.length)), true);
     }
   }
   g_rainMapValid = true;
+}
+
+static void spawnColumn(RainColumn &c) {
+  c.active = 1;
+  c.y = (int16_t)random(-g_h / 3, 0);
+  c.speed = (uint8_t)(1 + random(3));
+  c.length = (uint8_t)(14 + random((g_h / kGlyphH) + 8));
+  c.tick = 0;
+  c.seed = (uint8_t)random(256);
 }
 
 static void advanceColumnsOnly() {
@@ -151,33 +151,18 @@ static void advanceColumnsOnly() {
   for (int col = 0; col < g_numCols; ++col) {
     RainColumn &c = g_cols[col];
     if (!c.active) {
-      if (random(160) == 0) {
-        c.active = 1;
-        c.y = (int16_t)random(-g_h / 2, 0);
-        c.speed = (uint8_t)(1 + random(3));
-        c.length = (uint8_t)(4 + random((g_h / kGlyphH) + 2));
-        c.tick = 0;
-        c.seed = (uint8_t)random(256);
-      }
+      spawnColumn(c);
       continue;
     }
-    if (++c.tick >= (4 - c.speed)) {
+    if (++c.tick >= (uint8_t)(8 + (3 - c.speed) * 4)) {
       c.tick = 0;
-      c.y = (int16_t)(c.y + kGlyphH);
-      if (random(10) == 0) {
+      c.y = (int16_t)(c.y + 1);
+      if (random(18) == 0) {
         c.seed ^= (uint8_t)random(256);
       }
     }
     if (c.y - c.length * kGlyphH > g_h) {
-      if (random(100) < 28) {
-        c.active = 0;
-        c.length = 0;
-      } else {
-        c.y = (int16_t)random(-g_h / 2, 0);
-        c.speed = (uint8_t)(1 + random(3));
-        c.length = (uint8_t)(4 + random((g_h / kGlyphH) + 2));
-        c.seed = (uint8_t)random(256);
-      }
+      spawnColumn(c);
     }
   }
 }
@@ -205,15 +190,10 @@ void initMatrixRainEffect(DisplayOutputType *display) {
   }
 
   for (int i = 0; i < g_numCols; ++i) {
-    if (random(100) >= 70) {
-      g_cols[i].active = 0;
-      g_cols[i].length = 0;
-      continue;
-    }
     g_cols[i].active = 1;
-    g_cols[i].y = (int16_t)random(-g_h, 0);
+    g_cols[i].y = (int16_t)random(-g_h, g_h);
     g_cols[i].speed = (uint8_t)(1 + random(3));
-    g_cols[i].length = (uint8_t)(4 + random((g_h / kGlyphH) + 2));
+    g_cols[i].length = (uint8_t)(14 + random((g_h / kGlyphH) + 8));
     g_cols[i].tick = 0;
     g_cols[i].seed = (uint8_t)random(256);
   }
@@ -222,7 +202,6 @@ void initMatrixRainEffect(DisplayOutputType *display) {
                 g_numCols, MATRIX_CODE_GLYPH_COUNT);
 }
 
-// ---------- Face 1: full-panel rain ----------
 void updateAndDrawMatrixRainEffect() {
   if (!g_display || !g_cols || g_numCols <= 0) {
     return;
@@ -239,36 +218,55 @@ void updateAndDrawMatrixRainEffect() {
     const int px = col * kGlyphW;
     for (int i = 0; i < c.length; ++i) {
       const int py = c.y - i * kGlyphH;
-      if (py < -MATRIX_GLYPH_PX_H || py >= g_h) {
+      if (py < -kDrawH || py >= g_h) {
         continue;
       }
-      const bool isHead = (i == 0);
-      const int gi = pickGlyph(c.seed, i, isHead);
-      uint8_t level;
-      if (isHead) {
-        level = 255;
-      } else if (i == 1) {
-        level = 220;
-      } else {
-        level = (uint8_t)((180 * (c.length - i)) / c.length);
-      }
-      drawGlyphAt(px, py, gi, matrixColor(level));
+      stampGlyph(px, py, pickGlyph(c.seed, i, i == 0),
+                 matrixColor(trailLevel(i, c.length)), false);
     }
   }
 }
 
-// ---------- Face 2 helpers: stencil rain ----------
 void matrixRainAdvance() {
   advanceColumnsOnly();
   rebuildRainMap();
 }
 
 uint16_t matrixRainColorAt(int x, int y) {
-  if (!g_rainMapValid || (unsigned)x >= (unsigned)g_w ||
-      (unsigned)y >= (unsigned)g_h) {
+  if ((unsigned)x >= (unsigned)g_w || (unsigned)y >= (unsigned)g_h) {
     return 0;
   }
-  return g_rainMap[y * g_w + x];
+  if (g_rainMapValid) {
+    const uint16_t exact = g_rainMap[y * g_w + x];
+    if (exact) {
+      return exact;
+    }
+  }
+  if (!g_cols || g_numCols <= 0 || kGlyphW <= 0) {
+    return 0;
+  }
+  int col = x / kGlyphW;
+  if (col >= g_numCols) {
+    col = g_numCols - 1;
+  }
+  RainColumn &c = g_cols[col];
+  if (!c.active || c.length == 0) {
+    return 0;
+  }
+  const int head = c.y;
+  const int tail = c.y - c.length * kGlyphH;
+  if (y > head + 1 || y < tail) {
+    return 0;
+  }
+  const int dist = head - y;
+  const int span = head - tail;
+  uint8_t level = 40;
+  if (dist <= 1) {
+    level = 255;
+  } else if (span > 0) {
+    level = (uint8_t)(40 + (180 * (span - dist)) / span);
+  }
+  return matrixColor(level);
 }
 
 void drawMatrixRainThroughXbm(int x, int y, int width, int height,
@@ -286,9 +284,8 @@ void drawMatrixRainThroughXbm(int x, int y, int width, int height,
     }
     const uint8_t *rowPtr = xbm + j * byteWidth;
     for (int i = 0; i < width; ++i) {
-      // Adafruit / common XBM: LSB first in each byte
       const uint8_t b = pgm_read_byte(&rowPtr[i >> 3]);
-      if (!(b & (1 << (i & 7)))) {
+      if (!(b & (uint8_t)(0x80U >> (i & 7)))) {
         continue;
       }
       const int px = x + i;

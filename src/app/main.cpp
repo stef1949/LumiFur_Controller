@@ -4259,15 +4259,15 @@ void setup()
   updateGlobalBrightnessScale(userBrightness);
   syncBrightnessState(userBrightness);
   initFlameEffect(dma_display);
+  initMatrixRainEffect(dma_display);   // ADD — this branch is what MatrixPortal uses
 #else
   chain = new MatrixPanel_I2S_DMA(mxconfig);
   chain->begin();
   updateGlobalBrightnessScale(userBrightness);
   syncBrightnessState(userBrightness);
-  // create VirtualDisplay object based on our newly created dma_display object
   matrix = new VirtualMatrixPanel((*chain), NUM_ROWS, NUM_COLS, PANEL_WIDTH, PANEL_HEIGHT, CHAIN_TOP_LEFT_DOWN);
   initFlameEffect(matrix);
-  initMatrixRainEffect(matrix);        // ← ADD (virtual pane path)
+  initMatrixRainEffect(matrix);        // already present (~line 4270)
 #endif
 
   dma_display->clearScreen();
@@ -4771,22 +4771,34 @@ static void renderMatrixRainView() {
 static void renderMatrixFaceView() {
   dma_display->fillScreen(0);
 
-  const int xOff = 0;
-  const int yOff = 0;
   const int eyeW = 32;
   const int eyeH = 16;
-  const int rightEyeX = 0 + xOff;
-  const int rightEyeY = 0 + yOff;
-  const int leftEyeX = 96 + xOff;
-  const int leftEyeY = 0 + yOff;
+  const int rightEyeX = 0;
+  const int rightEyeY = 0;
+  const int leftEyeX = 96;
+  const int leftEyeY = 0;
+
+  const int noseW = 8;
+  const int noseH = 8;
+  const int rightNoseX = 56;
+  const int leftNoseX = 64;
+  const int noseY = 14;
+
+  const int mouthW = 64;
+  const int mouthH = 22;
+  const int mouthY = 10;
 
   matrixRainAdvance();
 
-  drawPlasmaXbm(rightEyeX, rightEyeY, eyeW, eyeH, (const uint8_t *)Eye, 0);
-  drawPlasmaXbm(leftEyeX, leftEyeY, eyeW, eyeH, (const uint8_t *)EyeL, 80);
-
   drawMatrixRainThroughXbm(rightEyeX, rightEyeY, eyeW, eyeH, (const uint8_t *)Eye);
   drawMatrixRainThroughXbm(leftEyeX, leftEyeY, eyeW, eyeH, (const uint8_t *)EyeL);
+
+  drawMatrixRainThroughXbm(rightNoseX, noseY, noseW, noseH, (const uint8_t *)nose);
+  drawMatrixRainThroughXbm(leftNoseX, noseY, noseW, noseH, (const uint8_t *)noseL);
+
+  prepareInterpolatedMouthFrames(micGetMouthOpenness());
+  drawMatrixRainThroughXbm(0, mouthY, mouthW, mouthH, gMouthFrameRight);
+  drawMatrixRainThroughXbm(64, mouthY, mouthW, mouthH, gMouthFrameLeft);
 }
 
 static void renderFullscreenSpiralPalette()
@@ -4981,6 +4993,10 @@ void displayCurrentView(int view)
     if (view == VIEW_FLAME_EFFECT)
     {
       initFlameEffect(dma_display);
+    }
+    if (view == VIEW_MATRIX_RAIN || view == VIEW_MATRIX_FACE)
+    {
+      initMatrixRainEffect(dma_display);
     }
     if (view == VIEW_PIXEL_DUST)
     {
