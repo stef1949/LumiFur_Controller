@@ -62,6 +62,8 @@ enum View
   VIEW_RAINBOW_LINEAR_BAND,
   VIEW_ALT_FACE,
   VIEW_VIDEO_PLAYER,
+  VIEW_MATRIX_RAIN,
+  VIEW_MATRIX_FACE,
   //VIEW_LGBT_FLAG
 
   TOTAL_VIEWS // Special entry will automatically hold the total number of views.
