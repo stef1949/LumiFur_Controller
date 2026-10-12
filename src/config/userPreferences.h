@@ -216,18 +216,18 @@ inline uint8_t getAutoBrightnessFloor()
 {
   return getPrefs().getUChar("autobrightfloor", 15);
 }
-inline void setAutoBrightnessFloor(uint8_t floor)
+inline void setAutoBrightnessFloor(uint8_t flohttps://grok.com/projector)
 {
   getPrefs().putUChar("autobrightfloor", floor);
 }
 // Global face fill. False keeps plasma. True stamps matrix rain into the same masks.
 inline bool getMatrixRainInsteadOfPlasma()
 {
-  return getPrefs().getBool("matrixoverplasma", false);
+  return getPrefs().getBool("matrixrain", false);
 }
 inline void setMatrixRainInsteadOfPlasma(bool v)
 {
-  getPrefs().putBool("matrixoverplasma", v);
+  getPrefs().putBool("matrixrain", v);
 }
 // 0 default, 1 advanced boop 1, 2 advanced boop 2, 3 advanced boop 4.
 inline uint8_t getBoopMode()

@@ -18,6 +18,7 @@ void updateAndDrawMatrixRainEffect();
 
 // Face 2 support: advance sim + stencil helpers
 void matrixRainAdvance();
+void matrixRainAdvanceColumns(); // face masks: no 128x32 map rebuild
 uint16_t matrixRainColorAt(int x, int y);
 void drawMatrixRainThroughXbm(int x, int y, int width, int height,
                               const uint8_t *xbm);

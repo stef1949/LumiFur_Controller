@@ -2348,7 +2348,7 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
   // Global toggle: same mask, matrix rain instead of the plasma fill.
   if (matrixRainInsteadOfPlasma)
   {
-    matrixRainAdvance();
+    matrixRainAdvanceColumns();
     drawMatrixRainThroughXbm(x, y, width, height, xbm);
     return;
   }
@@ -2569,9 +2569,10 @@ void drawBitmapAdvanced(int x, int y, int width, int height, const uint8_t *bitm
                         uint8_t time_offset = 0, float scale = 5.0, float animSpeed = 0.2f)
 {
   // Byte 9. Eyes use this path, not drawPlasmaXbm.
+  // Byte 9. Eyes use this path, not drawPlasmaXbm.
   if (matrixRainInsteadOfPlasma && usePlasma && bitmap != nullptr)
   {
-    matrixRainAdvance();
+    matrixRainAdvanceColumns();
     drawMatrixRainThroughXbm(x, y, width, height, bitmap);
     return;
   }
@@ -4210,13 +4211,18 @@ void setup()
   pConfigCharacteristic->setCallbacks(&configCallbacks);
 
   // Optionally, set an initial value.
-  uint8_t initValue[6] = {
-      static_cast<uint8_t>(autoBrightnessEnabled ? 1 : 0),
-      static_cast<uint8_t>(accelerometerEnabled ? 1 : 0),
-      static_cast<uint8_t>(sleepModeEnabled ? 1 : 0),
-      static_cast<uint8_t>(auroraModeEnabled ? 1 : 0),
-      static_cast<uint8_t>(staticColorModeEnabled ? 1 : 0),
-      static_cast<uint8_t>(mouthMicBrightnessOverrideEnabled ? 1 : 0)};
+  uint8_t initValue[11] = {
+      static_cast<uint8_t>(autoBrightnessEnabled ? 1 : 0),             // 0
+      static_cast<uint8_t>(accelerometerEnabled ? 1 : 0),              // 1
+      static_cast<uint8_t>(sleepModeEnabled ? 1 : 0),                  // 2
+      static_cast<uint8_t>(auroraModeEnabled ? 1 : 0),                 // 3
+      static_cast<uint8_t>(staticColorModeEnabled ? 1 : 0),            // 4
+      static_cast<uint8_t>(mouthMicBrightnessOverrideEnabled ? 1 : 0), // 5
+      static_cast<uint8_t>(disableBleIndicatorLight ? 1 : 0),          // 6
+      static_cast<uint8_t>(disableBleStatusIcon ? 1 : 0),              // 7
+      static_cast<uint8_t>(waveshareBrightnessBoost ? 1 : 0),          // 8
+      static_cast<uint8_t>(matrixRainInsteadOfPlasma ? 1 : 0),         // 9
+      static_cast<uint8_t>(boopMode)};                                 // 10
 
   pConfigCharacteristic->setValue(initValue, sizeof(initValue));
   if (pConfigCharacteristic != nullptr)
@@ -4962,7 +4968,7 @@ static void renderMatrixFaceView() {
   const int mouthH = 22;
   const int mouthY = 10;
 
-  matrixRainAdvance();
+    matrixRainAdvanceColumns();
 
   drawMatrixRainThroughXbm(rightEyeX, rightEyeY, eyeW, eyeH, (const uint8_t *)Eye);
   drawMatrixRainThroughXbm(leftEyeX, leftEyeY, eyeW, eyeH, (const uint8_t *)EyeL);

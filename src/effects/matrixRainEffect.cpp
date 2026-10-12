@@ -33,6 +33,9 @@ static uint16_t g_rainMap[kMaxW * kMaxH];
 static bool g_rainMapValid = false;
 
 static uint16_t matrixColor(uint8_t level) {
+  if (!g_display) {
+    return 0;
+  }
   const uint16_t s = globalBrightnessScaleFixed;
   uint8_t r, g, b;
   if (level >= 240) {
@@ -230,6 +233,18 @@ void updateAndDrawMatrixRainEffect() {
 void matrixRainAdvance() {
   advanceColumnsOnly();
   rebuildRainMap();
+}
+
+// Face path. Column sampler only, once per frame.
+void matrixRainAdvanceColumns() {
+  static unsigned long lastMs = 0;
+  const unsigned long now = millis();
+  if (now == lastMs) {
+    return;
+  }
+  lastMs = now;
+  advanceColumnsOnly();
+  g_rainMapValid = false;
 }
 
 uint16_t matrixRainColorAt(int x, int y) {
