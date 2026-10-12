@@ -862,6 +862,7 @@ const unsigned long fadeOutDuration = 2000; // Duration for fade-out (2 seconds)
 static unsigned long boopHits[16] = {};
 static uint8_t boopHitCount = 0;
 static uint8_t boopSavedView = 0;
+static uint8_t userSelectedView = 0; // only set by the user, never by blush/bounce/boop
 static unsigned long boopRevertAt = 0;
 static bool boopLoadingActive = false;
 // Non-blocking sensor read interval
@@ -1472,6 +1473,7 @@ static void handleBleFaceWriteWork(const BleWorkItem &item)
   }
 
   currentView = newView;
+  userSelectedView = currentView;
   scheduleLastViewPersist(currentView);
   requestDisplayRefresh();
 #if defined(DEBUG_BLE)
@@ -3152,36 +3154,71 @@ void blinkingEyes()
     // Values are already set by default
     break;
     case VIEW_ANGRY_FACE:
-  {
-    // Narrowed slant eyes, pulled down toward the nose.
-    rightEyeBitmap = (const uint8_t *)slanteyes;
-    leftEyeBitmap = (const uint8_t *)slanteyes;
-    eyeWidth = 32;
-    eyeHeight = 16;
-    rightEyeX = 2;
-    rightEyeY = 6;
-    leftEyeX = 94;
-    leftEyeY = 6;
+    {
+      // Drawn face. Narrowed slash eyes, heavy furrowed brows, short snarl.
+      const uint16_t eye = usePlasma
+                               ? 0
+                               : (staticColorModeEnabled
+                                      ? solidColor
+                                      : dma_display->color565(40, 255, 70));
+      const uint16_t brow = dma_display->color565(255, 40, 0);
+      const uint16_t fang = dma_display->color565(230, 255, 230);
 
-    drawBitmapAdvanced(rightEyeX + final_x_offset, rightEyeY + final_y_offset,
-                       eyeWidth, eyeHeight, rightEyeBitmap, solidColor,
-                       blinkProgress, usePlasma, 0);
-    drawBitmapAdvanced(leftEyeX + final_x_offset, leftEyeY + final_y_offset,
-                       eyeWidth, eyeHeight, leftEyeBitmap, solidColor,
-                       blinkProgress, usePlasma, 128);
+      // Right eye: high at the temple, low toward the nose.
+      for (int t = 0; t < 28; ++t)
+      {
+        const int x = 4 + t;
+        const int y = 6 + t / 6;
+        const int thick = (t < 22) ? 3 : 2;
+        for (int k = 0; k < thick; ++k)
+        {
+          dma_display->drawPixel(x, y + k, eye);
+        }
+      }
+      dma_display->drawPixel(8, 6, fang);
+      dma_display->drawPixel(9, 6, fang);
 
-    // Brows peak at the nose and drop toward the temples.
-    const uint16_t brow = dma_display->color565(255, 40, 0);
-    dma_display->drawLine(4, 2, 30, 7, brow);
-    dma_display->drawLine(4, 3, 30, 8, brow);
-    dma_display->drawLine(124, 2, 98, 7, brow);
-    dma_display->drawLine(124, 3, 98, 8, brow);
+      // Left eye, mirrored.
+      for (int t = 0; t < 28; ++t)
+      {
+        const int x = 123 - t;
+        const int y = 6 + t / 6;
+        const int thick = (t < 22) ? 3 : 2;
+        for (int k = 0; k < thick; ++k)
+        {
+          dma_display->drawPixel(x, y + k, eye);
+        }
+      }
+      dma_display->drawPixel(118, 6, fang);
+      dma_display->drawPixel(119, 6, fang);
 
-    // Short snarl under the nose. Plasma toggle still fills the eyes.
-    dma_display->drawLine(52, 20, 64, 24, brow);
-    dma_display->drawLine(76, 20, 64, 24, brow);
-    return;
-  }
+      // Furrowed brows, three pixels thick.
+      for (int k = 0; k < 3; ++k)
+      {
+        for (int t = 0; t < 30; ++t)
+        {
+          dma_display->drawPixel(2 + t, 1 + k + t / 10, brow);
+          dma_display->drawPixel(125 - t, 1 + k + t / 10, brow);
+        }
+      }
+
+      // Snarl and fangs.
+      for (int t = 0; t < 14; ++t)
+      {
+        dma_display->drawPixel(50 + t, 24 - t / 4, brow);
+        dma_display->drawPixel(77 - t, 24 - t / 4, brow);
+        dma_display->drawPixel(50 + t, 25 - t / 4, brow);
+        dma_display->drawPixel(77 - t, 25 - t / 4, brow);
+      }
+      for (int k = 0; k < 4; ++k)
+      {
+        dma_display->drawPixel(56, 22 + k, fang);
+        dma_display->drawPixel(57, 22 + k, fang);
+        dma_display->drawPixel(70, 22 + k, fang);
+        dma_display->drawPixel(71, 22 + k, fang);
+      }
+      return;
+    }
   case VIEW_SPIRAL_EYES: // Spiral eyes
     return;              // Spiral view handles its own drawing, so we exit here.
   case VIEW_CIRCLE_EYES: // Circle eyes
@@ -4097,6 +4134,7 @@ void setup()
 
   // - LOAD LAST VIEW -
   currentView = getLastView();
+  userSelectedView = currentView;
   previousView = currentView;
   gLastPersistedView = currentView;
   Serial.printf("Loaded last view: %d\n", currentView);
@@ -5446,6 +5484,23 @@ void checkSleepMode()
 // Count a proximity boop. Higher thresholds win on the same hit.
     static void handleBoop(unsigned long now)
     {
+         uint8_t hits10s = 0;
+  uint8_t hits15s = 0;
+  for (uint8_t i = 0; i < boopHitCount; ++i)
+  {
+    if (now - boopHits[i] <= 10000UL)
+    {
+      ++hits10s;
+    }
+    if (now - boopHits[i] <= 15000UL)
+    {
+      ++hits15s;
+    }
+  }
+
+  Serial.printf("Boop mode=%u hits10=%u hits15=%u\n", boopMode, hits10s, hits15s);
+
+  const unsigned long blushSpan = fadeInDuration + fullDuration + fadeOutDuration;
       uint8_t kept = 0;
       for (uint8_t i = 0; i < boopHitCount; ++i)
       {
@@ -5460,21 +5515,6 @@ void checkSleepMode()
         boopHits[boopHitCount++] = now;
       }
 
-      uint8_t hits10s = 0;
-      uint8_t hits15s = 0;
-      for (uint8_t i = 0; i < boopHitCount; ++i)
-      {
-        if (now - boopHits[i] <= 10000UL)
-        {
-          ++hits10s;
-        }
-        if (now - boopHits[i] <= 15000UL)
-        {
-          ++hits15s;
-        }
-      }
-
-      const unsigned long blushSpan = fadeInDuration + fullDuration + fadeOutDuration;
       int specialView = -1;
       if (boopMode >= 3 && hits15s >= 15)
       {
@@ -5493,7 +5533,7 @@ void checkSleepMode()
       {
         blushState = BlushState::Inactive;
         wasBlushOverlay = false;
-        boopSavedView = currentView;
+        boopSavedView = userSelectedView;
         currentView = static_cast<uint8_t>(specialView);
         boopRevertAt = now + (specialView == VIEW_LOADING_BAR ? 3000UL : blushSpan);
         notifyBleTask();
@@ -5505,7 +5545,7 @@ void checkSleepMode()
       {
         blushState = BlushState::FadeIn;
         blushStateStartTime = now;
-        originalViewBeforeBlush = currentView;
+        originalViewBeforeBlush = userSelectedView;
         wasBlushOverlay = true;
       }
     }
@@ -5578,14 +5618,14 @@ void loop()
                      if (detectMotion())
                      { // detectMotion uses the current useShakeSensitivity
                        if (currentView != VIEW_SPIRAL_EYES)
-                       {                                 // Prevent re-triggering if already spiral
-                         previousView = currentView;     // Save the current view.
-                         currentView = VIEW_SPIRAL_EYES; // Switch to spiral eyes view
-                         spiralStartMillis = loopNow;    // Record the trigger time.
+                       {
+                         previousView = userSelectedView;
+                         currentView = VIEW_SPIRAL_EYES;
+                         spiralStartMillis = loopNow;
                          requestDisplayRefresh();
                          LOG_DEBUG_LN("Shake detected! Switching to Spiral View.");
                          notifyBleTask();
-                         lastActivityTime = loopNow; // Shake is activity
+                         lastActivityTime = loopNow;
                        }
                      }
                      useShakeSensitivity = false; // Switch back to low threshold for general sleep/wake checks
@@ -5673,10 +5713,23 @@ void loop()
 #endif
 
 #ifdef BUTTON_DOWN
-    if (!pairingResetHoldPressed && downPressed &&
-        consumeButtonLongPress(downButtonState, loopNow, PAIRING_MODE_HOLD_MS))
+    if (!pairingResetHoldPressed && consumeButtonShortPress(downButtonState))
     {
-      enablePairingModeFromHeldButton();
+      PROFILE_SECTION("ButtonInputs");
+      noteButtonInteraction(loopNow);
+      if (currentView == 0)
+      {
+        currentView = static_cast<uint8_t>(totalViews - 1);
+      }
+      else
+      {
+        --currentView;
+      }
+      userSelectedView = currentView;
+      viewChangedByButton = true;
+      scheduleLastViewPersist(currentView);
+      lastActivityTime = loopNow;
+      requestDisplayRefresh();
     }
 #endif
 
@@ -5687,6 +5740,7 @@ void loop()
       currentView = (currentView + 1);
       if (currentView >= totalViews)
         currentView = 0;
+      userSelectedView = currentView;
       viewChangedByButton = true;
       scheduleLastViewPersist(currentView);
       lastActivityTime = loopNow;
@@ -5835,6 +5889,17 @@ void loop()
                      return;
                    }
 
+                   // Count this proximity hit. A threshold replaces the bounce.
+                   if (boopMode > 0)
+                   {
+                     handleBoop(sensorNow);
+                     if (boopRevertAt != 0)
+                     {
+                       lastActivityTime = sensorNow;
+                       return;
+                     }
+                   }
+
                    // Eye Bounce Trigger - Switch to View 17 (Circle Eyes) (MODIFIED)
                    if (!isEyeBouncing)
                    {
@@ -5843,10 +5908,10 @@ void loop()
                      LOG_PROX("Bounce trigger prox=%u view=%d\n", proximity, currentView);
 #endif
 
-                     // Store current view and switch to Circle Eyes (view 17)
+                      // Store the user face and switch to Circle Eyes (view 17)
                      if (currentView != VIEW_CIRCLE_EYES)
                      {
-                       viewBeforeEyeBounce = currentView;
+                       viewBeforeEyeBounce = userSelectedView;
                        currentView = VIEW_CIRCLE_EYES; // Switch to "Circle Eyes" view
                        requestDisplayRefresh();
                        // saveLastView(currentView); // Optional: save temporary view 17
