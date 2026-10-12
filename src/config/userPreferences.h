@@ -216,7 +216,7 @@ inline uint8_t getAutoBrightnessFloor()
 {
   return getPrefs().getUChar("autobrightfloor", 15);
 }
-inline void setAutoBrightnessFloor(uint8_t flohttps://grok.com/projector)
+inline void setAutoBrightnessFloor(uint8_t floor)
 {
   getPrefs().putUChar("autobrightfloor", floor);
 }

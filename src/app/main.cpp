@@ -5478,7 +5478,7 @@ void checkSleepMode()
       int specialView = -1;
       if (boopMode >= 3 && hits15s >= 15)
       {
-        specialView = -2; // loading bar, not a view
+        specialView = VIEW_LOADING_BAR;
       }
       else if (boopMode >= 2 && hits15s >= 10)
       {
@@ -5489,20 +5489,11 @@ void checkSleepMode()
         specialView = VIEW_SPIRAL_EYES;
       }
 
-      if (specialView == -2)
-      {
-        boopSavedView = currentView;
-        boopLoadingActive = true;
-        boopRevertAt = now + 3000UL;
-        loadingProgress = 0;
-        return;
-      }
       if (specialView >= 0)
       {
         boopSavedView = currentView;
         currentView = static_cast<uint8_t>(specialView);
-        boopRevertAt = now + blushSpan;
-        boopLoadingActive = false;
+        boopRevertAt = now + (specialView == VIEW_LOADING_BAR ? 3000UL : blushSpan);
         notifyBleTask();
         requestDisplayRefresh();
         return;
@@ -5889,18 +5880,9 @@ void loop()
                      //    AND current view is NOT the temporary bounce/circle view (17)
                      if (currentView != VIEW_BLUSH_FACE && currentView != VIEW_CIRCLE_EYES)
                      {
-                       LOG_DEBUG_LN("Proximity! Triggering blush overlay effect.");
-#if DEBUG_PROXIMITY
-                       LOG_PROX("Blush overlay prox=%u view=%d\n", proximity, currentView);
-#endif
-                       blushState = BlushState::FadeIn;
-                       blushStateStartTime = sensorNow;
+                       LOG_DEBUG_LN("Proximity! Triggering boop.");
                        handleBoop(sensorNow);
-                       lastActivityTime = sensorNow;
-
-                       // This is a blush overlay on the current stable view
-                       originalViewBeforeBlush = currentView; // Store the view that is getting the overlay
-                       wasBlushOverlay = true;                // Mark that this blush is an overlay
+                       lastActivityTime = sensorNow;           // Mark that this blush is an overlay
                      }
                    }
 #endif
