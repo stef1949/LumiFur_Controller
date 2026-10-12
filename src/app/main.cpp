@@ -5491,6 +5491,8 @@ void checkSleepMode()
 
       if (specialView >= 0)
       {
+        blushState = BlushState::Inactive;
+        wasBlushOverlay = false;
         boopSavedView = currentView;
         currentView = static_cast<uint8_t>(specialView);
         boopRevertAt = now + (specialView == VIEW_LOADING_BAR ? 3000UL : blushSpan);
@@ -5499,12 +5501,14 @@ void checkSleepMode()
         return;
       }
 
-      blushState = BlushState::FadeIn;
-      blushStateStartTime = now;
-      originalViewBeforeBlush = currentView;
-      wasBlushOverlay = true;
+      if (blushState == BlushState::Inactive)
+      {
+        blushState = BlushState::FadeIn;
+        blushStateStartTime = now;
+        originalViewBeforeBlush = currentView;
+        wasBlushOverlay = true;
+      }
     }
-
 void loop()
 {
   const uint32_t loopStartMicros = micros();
@@ -5870,19 +5874,13 @@ void loop()
                    }
 
                    
-                   if (blushState == BlushState::Inactive && !bounceJustTriggered)
+                   if (!bounceJustTriggered)
                    {
-                     // Trigger blush if:
-                     // 1. Proximity detected
-                     // 2. Not already blushing
-                     // 3. Bounce wasn't *just* triggered (which might have handled its own blush)
-                     // 4. Current view is NOT the dedicated blush view (5)
-                     //    AND current view is NOT the temporary bounce/circle view (17)
                      if (currentView != VIEW_BLUSH_FACE && currentView != VIEW_CIRCLE_EYES)
                      {
                        LOG_DEBUG_LN("Proximity! Triggering boop.");
                        handleBoop(sensorNow);
-                       lastActivityTime = sensorNow;           // Mark that this blush is an overlay
+                       lastActivityTime = sensorNow;
                      }
                    }
 #endif
