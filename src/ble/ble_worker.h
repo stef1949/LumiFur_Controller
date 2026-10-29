@@ -14,6 +14,7 @@ enum class BleWorkType : uint8_t
   FaceWrite,
   ConfigWrite,
   BrightnessWrite,
+  AutoBrightnessFloorWrite,
   StaticColorWrite,
   StrobeSettingsWrite,
   ScrollWrite,

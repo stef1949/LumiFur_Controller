@@ -64,6 +64,7 @@ enum View
   VIEW_VIDEO_PLAYER,
   VIEW_MATRIX_RAIN,
   VIEW_MATRIX_FACE,
+  VIEW_ANGRY_FACE, // furrowed brows, narrowed eyes
   //VIEW_LGBT_FLAG
 
   TOTAL_VIEWS // Special entry will automatically hold the total number of views.
@@ -76,6 +77,10 @@ bool sleepModeEnabled = true;
 bool auroraModeEnabled = true;
 bool staticColorModeEnabled = false;
 bool mouthMicBrightnessOverrideEnabled = false;
+// BLE config bytes 6, 7, 8. Loaded in setup() after initPreferences().
+bool disableBleIndicatorLight = false; // byte 6, DEBUG_DISABLE_BLE_INDICATOR_LIGHT
+bool disableBleStatusIcon = false;     // byte 7, DEBUG_DISABLE_BLE_STATUS_ICON
+bool waveshareBrightnessBoost = false; // byte 8, DEBUG_ENABLE_BRIGTHNESS_BOOST_WAVESHARE
 bool constantColorConfig = false;
 CRGB constantColor = CRGB::Green; // Default color for constant color mode
 void ensureStaticColorLoaded();
@@ -86,6 +91,12 @@ bool configApplySleepMode = false;
 bool configApplyAuroraMode = false;
 bool configApplyAccelerometer = true;
 bool configApplyConstantColor = false; // Variable to track constant color application
+// BLE slider. Raises the auto-brightness minimum. 15 is the old floor.
+// Config byte 9. When true, face plasma masks render matrix rain instead of aurora.
+bool matrixRainInsteadOfPlasma = false;
+uint8_t autoBrightnessFloor = 15;
+// Config byte 10. 0 default, 1 advanced 1, 2 advanced 2, 3 advanced 4.
+uint8_t boopMode = 0;
 
 /*------------------------------------------------------------------------------
   OTA instances & variables

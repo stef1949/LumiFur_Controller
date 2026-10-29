@@ -1,5 +1,6 @@
 #pragma once
 #include <Preferences.h>
+#include "config/debug_config.h"
 
 static constexpr char NAMESPACE[] = "LumiFur";
 static constexpr char KEY_LAST[] = "lastView";
@@ -178,6 +179,65 @@ inline String getSelectedColor()
   return getPrefs().getString("selectedColor", "");
 }
 
+// Unwritten NVS keys return the compile-time flag, so first boot matches the old #define.
+
+// DEBUG_DISABLE_BLE_INDICATOR_LIGHT
+inline bool getDisableBleIndicatorLight()
+{
+  return getPrefs().getBool("bleindoff", DEBUG_DISABLE_BLE_INDICATOR_LIGHT);
+}
+inline void setDisableBleIndicatorLight(bool v)
+{
+  getPrefs().putBool("bleindoff", v);
+}
+
+// DEBUG_DISABLE_BLE_STATUS_ICON
+inline bool getDisableBleStatusIcon()
+{
+  return getPrefs().getBool("blestatusoff", DEBUG_DISABLE_BLE_STATUS_ICON);
+}
+inline void setDisableBleStatusIcon(bool v)
+{
+  getPrefs().putBool("blestatusoff", v);
+}
+
+// DEBUG_ENABLE_BRIGTHNESS_BOOST_WAVESHARE
+inline bool getWaveshareBrightnessBoost()
+{
+  return getPrefs().getBool("wsbrightboost", DEBUG_ENABLE_BRIGTHNESS_BOOST_WAVESHARE);
+}
+inline void setWaveshareBrightnessBoost(bool v)
+{
+  getPrefs().putBool("wsbrightboost", v);
+}
+
+// Auto-brightness floor, 0–255. 15 matches the old hardcoded minimum.
+inline uint8_t getAutoBrightnessFloor()
+{
+  return getPrefs().getUChar("autobrightfloor", 15);
+}
+inline void setAutoBrightnessFloor(uint8_t floor)
+{
+  getPrefs().putUChar("autobrightfloor", floor);
+}
+// Global face fill. False keeps plasma. True stamps matrix rain into the same masks.
+inline bool getMatrixRainInsteadOfPlasma()
+{
+  return getPrefs().getBool("matrixrain", false);
+}
+inline void setMatrixRainInsteadOfPlasma(bool v)
+{
+  getPrefs().putBool("matrixrain", v);
+}
+// 0 default, 1 advanced boop 1, 2 advanced boop 2, 3 advanced boop 4.
+inline uint8_t getBoopMode()
+{
+  return getPrefs().getUChar("boopmode", 0);
+}
+inline void setBoopMode(uint8_t mode)
+{
+  getPrefs().putUChar("boopmode", mode);
+}
 // Clear all preferences - Implement feature to reset controller to default settings
 inline void clearPreferences()
 {

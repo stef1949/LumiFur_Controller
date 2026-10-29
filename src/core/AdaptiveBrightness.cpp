@@ -18,6 +18,7 @@
 extern bool autoBrightnessEnabled;
 extern uint8_t userBrightness;
 extern void updateGlobalBrightnessScale(uint8_t brightness);
+extern uint8_t autoBrightnessFloor;
 
 namespace
 {
@@ -336,7 +337,8 @@ void updateAdaptiveBrightness()
   }
 
   const float currentLux = cachedLux;
-  const int min_brightness_output = 15; // Adjust to archieve lower brightness levels
+    // Slider can only raise the floor.
+  const int min_brightness_output = max(0, static_cast<int>(autoBrightnessFloor));
   const int max_brightness_output = 255;
   const float min_lux_for_map = 5.0f;
   const float max_lux_for_map = 10000.0f;
