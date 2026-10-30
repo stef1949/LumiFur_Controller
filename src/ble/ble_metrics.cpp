@@ -5,6 +5,7 @@
 #include "core/TemperatureHistory.h"
 
 #include <Arduino.h>
+#include <atomic>
 #include <cmath>
 #include <cstdlib>
 #include "freertos/FreeRTOS.h"
@@ -17,6 +18,9 @@ unsigned long luxMillis = 0;
 constexpr unsigned long luxInterval = 500;
 uint16_t lastSentLuxValue = 0;
 constexpr uint16_t luxChangeThreshold = 10;
+// Set when a client (re)subscribes, so it gets the current reading even if lux
+// has not moved by luxChangeThreshold since the last notification.
+std::atomic<bool> luxResendRequested{true};
 uint32_t temperatureMillis = 0;
 uint32_t lastHistoryTransferMillis = 0;
 bool historyTransferred = false;
@@ -90,6 +94,11 @@ void updateTemperature()
     }
 }
 
+void requestLuxResend()
+{
+    luxResendRequested = true;
+}
+
 void updateLux()
 {
     unsigned long currentMillis = millis();
@@ -105,15 +114,16 @@ void updateLux()
             // Get current lux value from the APDS9960 sensor (in lux)
             uint16_t currentLux = getAmbientLuxU16();
 
-            // Only send update if lux has changed significantly to avoid spam
-            if (abs(static_cast<int>(currentLux) - static_cast<int>(lastSentLuxValue)) >= luxChangeThreshold)
-            {
-                // Send as 2-byte value (uint16_t)
-                uint8_t luxBytes[2];
-                luxBytes[0] = currentLux & 0xFF;        // Low byte
-                luxBytes[1] = (currentLux >> 8) & 0xFF; // High byte
+            // Keep the readable value current so a client read on connect is not stale.
+            uint8_t luxBytes[2];
+            luxBytes[0] = currentLux & 0xFF;        // Low byte
+            luxBytes[1] = (currentLux >> 8) & 0xFF; // High byte
+            pLuxCharacteristic->setValue(luxBytes, 2);
 
-                pLuxCharacteristic->setValue(luxBytes, 2);
+            // Only notify if lux has changed significantly (or a client just subscribed) to avoid spam
+            const bool resend = luxResendRequested.exchange(false);
+            if (resend || abs(static_cast<int>(currentLux) - static_cast<int>(lastSentLuxValue)) >= luxChangeThreshold)
+            {
                 pLuxCharacteristic->notify();
 
                 lastSentLuxValue = currentLux;

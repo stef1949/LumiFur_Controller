@@ -2,6 +2,7 @@
 #include "ble/ble.h"
 #include "ble/ble_worker.h"
 #include "ble/ble_constants.h"
+#include "ble/ble_metrics.h"
 #include "app/AppRuntime.h"
 #include "app/AppStateSync.h"
 #include "app/PowerManagement.h"
@@ -61,6 +62,22 @@ public:
   }
 };
 TemperatureLogsCallbacks logsCallbacks;
+
+// Push the current lux reading to each new subscriber instead of waiting for the
+// ambient light to change by the notification threshold.
+class LuxCallbacks : public NimBLECharacteristicCallbacks
+{
+  void onSubscribe(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo, uint16_t subValue) override
+  {
+    (void)pCharacteristic;
+    (void)connInfo;
+    if (subValue != 0)
+    {
+      requestLuxResend();
+    }
+  }
+};
+static LuxCallbacks luxCallbacks;
 
 // Class to handle characteristic callbacks
 class CharacteristicCallbacks : public NimBLECharacteristicCallbacks
@@ -781,6 +798,7 @@ void setupBleControl()
       LUX_CHARACTERISTIC_UUID,
       NIMBLE_PROPERTY::READ |
           NIMBLE_PROPERTY::NOTIFY);
+  pLuxCharacteristic->setCallbacks(&luxCallbacks);
 
   // Initialize with current lux value
   uint16_t initialLux = getAmbientLuxU16();
