@@ -140,8 +140,7 @@ void updateLux()
             lastSentLuxValue = currentLux;
 
 #if DEBUG_MODE
-            Serial.printf("Lux level sent: %u
-", currentLux);
+            Serial.printf("Lux level sent: %u\n", currentLux);
 #endif
         }
     }
