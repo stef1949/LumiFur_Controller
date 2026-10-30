@@ -1,0 +1,26 @@
+name: Host regression checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  regressions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Production firmware controller regressions
+        run: python -m unittest discover -s tools -p 'test_*.py'
+      - name: Updater page checks
+        run: python -m unittest discover -s docs/firmware-updater/tests
+      - name: Updater transport regressions
+        run: node --test docs/firmware-updater/tests/ota-transfer.test.js

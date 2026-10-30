@@ -41,6 +41,15 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Test updater before publication
+        run: |
+          python -m unittest discover -s "${{ steps.updater-dir.outputs.path }}/tests"
+          node --test "${{ steps.updater-dir.outputs.path }}/tests/ota-transfer.test.js"
+
       - name: Upload firmware updater artifact
         uses: actions/upload-pages-artifact@v3
         with:

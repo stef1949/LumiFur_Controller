@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <cmath>
+#include <atomic>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/i2s.h"
@@ -12,9 +13,9 @@
 #include "core/PerfTelemetry.h"
 
 static TaskHandle_t s_micTaskHandle = nullptr;
-static volatile uint8_t s_mouthOpenness = 0;
-static volatile uint8_t s_mouthBrightness = MIC_MIN_BRIGHTNESS;
-static volatile bool s_micEnabled = true;
+static std::atomic<uint8_t> s_mouthOpenness{0};
+static std::atomic<uint8_t> s_mouthBrightness{MIC_MIN_BRIGHTNESS};
+static std::atomic<bool> s_micEnabled{true};
 
 struct MicBlockStats
 {
@@ -215,8 +216,8 @@ static void micTask(void *param)
       Serial.printf(">mic_noise_floor:%.1f\n", noiseFloor);
       Serial.printf(">mic_speech_level:0\n");
       Serial.printf(">mic_smoothed_env:%.3f\n", smoothedEnvelope);
-      Serial.printf(">mic_mouth_openness:%u\n", s_mouthOpenness);
-      Serial.printf(">mic_mouth_brightness:%u\n", s_mouthBrightness);
+      Serial.printf(">mic_mouth_openness:%u\n", s_mouthOpenness.load());
+      Serial.printf(">mic_mouth_brightness:%u\n", s_mouthBrightness.load());
 #endif
       perfTelemetryRecordDuration(PerfDurationId::MicBlock, micros() - loopStartMicros);
       vTaskDelay(1);
@@ -254,8 +255,8 @@ static void micTask(void *param)
     Serial.printf(">mic_noise_floor:%.1f\n", noiseFloor);
     Serial.printf(">mic_speech_level:%.1f\n", speechLevel);
     Serial.printf(">mic_smoothed_env:%.3f\n", smoothedEnvelope);
-    Serial.printf(">mic_mouth_openness:%u\n", s_mouthOpenness);
-    Serial.printf(">mic_mouth_brightness:%u\n", s_mouthBrightness);
+    Serial.printf(">mic_mouth_openness:%u\n", s_mouthOpenness.load());
+    Serial.printf(">mic_mouth_brightness:%u\n", s_mouthBrightness.load());
 #endif
 
     perfTelemetryRecordDuration(PerfDurationId::MicBlock, micros() - loopStartMicros);

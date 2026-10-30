@@ -1,396 +1,124 @@
 #include <unity.h>
-#include <cstring>
-#include <cstdint>
 
-// Mock definitions for BLE testing
-#define HISTORY_BUFFER_SIZE 50
+#include "core/TemperatureHistory.h"
+#include <climits>
+#include <limits>
+using namespace telemetry;
 
-// Test globals - simulating BLE module state
-float temperatureHistory[HISTORY_BUFFER_SIZE];
-int historyWriteIndex = 0;
-int validHistoryCount = 0;
-bool bufferFull = false;
 
-// Mock packet structure constants
-const uint8_t PKT_TYPE_HISTORY = 0x01;
-const uint8_t MAX_FLOATS_PER_CHUNK = 4;
 
-// Function under test - temperature history management
-void storeTemperatureInHistory(float temp)
+void setUp() {}
+
+void tearDown() {}
+
+void test_empty_history()
 {
-    temperatureHistory[historyWriteIndex] = temp;
-    historyWriteIndex++;
-    if (!bufferFull)
-    {
-        validHistoryCount++;
-    }
-    if (historyWriteIndex >= HISTORY_BUFFER_SIZE)
-    {
-        historyWriteIndex = 0; // Wrap around
-        bufferFull = true;
-    }
+  TemperatureHistory h; auto s=h.snapshot(); TEST_ASSERT_EQUAL_UINT(0,s.count); TEST_ASSERT_EQUAL_UINT(0,historyChunkCount(s));
 }
 
-void clearHistoryBuffer()
+void test_fixed10_conversion()
 {
-    memset(temperatureHistory, 0, sizeof(temperatureHistory));
-    historyWriteIndex = 0;
-    validHistoryCount = 0;
-    bufferFull = false;
+  TEST_ASSERT_EQUAL_INT16(253,temperatureToFixed10(25.3f)); TEST_ASSERT_EQUAL_INT16(-105,temperatureToFixed10(-10.5f));
 }
 
-// Helper function to clamp scroll speed
-uint8_t clampScrollSpeed(uint8_t speed)
+void test_fixed10_clamps_before_rounding()
 {
-    if (speed < 1)
-        return 1;
-    if (speed > 100)
-        return 100;
-    return speed;
+  TEST_ASSERT_EQUAL_INT16(INT16_MAX,temperatureToFixed10(1e30f)); TEST_ASSERT_EQUAL_INT16(INT16_MIN,temperatureToFixed10(-1e30f));
 }
 
-void setUp(void)
+void test_nonfinite_temperature()
 {
-    // Reset history buffer before each test
-    clearHistoryBuffer();
+  TEST_ASSERT_EQUAL_INT16(0,temperatureToFixed10(std::numeric_limits<float>::quiet_NaN()));
 }
 
-void tearDown(void)
+void test_history_is_chronological_after_multiple_wraps()
 {
-    // Clean up after each test
+  TemperatureHistory h; for(int i=0;i<113;++i)h.append(i,i*1000); auto s=h.snapshot(); TEST_ASSERT_EQUAL_UINT(50,s.count); for(int i=0;i<50;++i)TEST_ASSERT_EQUAL_INT16(i+63,s.samples[i]);
 }
 
-void test_temperature_history_initialization(void)
+void test_clear_after_wrap()
 {
-    TEST_ASSERT_EQUAL_INT(0, historyWriteIndex);
-    TEST_ASSERT_EQUAL_INT(0, validHistoryCount);
-    TEST_ASSERT_FALSE(bufferFull);
+  TemperatureHistory h; for(int i=0;i<60;++i)h.append(i,i); h.clear(); h.clear(); auto s=h.snapshot(); TEST_ASSERT_EQUAL_UINT(0,s.count); h.append(-22,999); s=h.snapshot(); TEST_ASSERT_EQUAL_INT16(-22,s.samples[0]); TEST_ASSERT_EQUAL_UINT(999,s.newestSampleMs);
 }
 
-void test_temperature_history_single_entry(void)
+void test_snapshot_does_not_change_when_history_is_updated()
 {
-    float temp = 25.5f;
-    storeTemperatureInHistory(temp);
-    
-    TEST_ASSERT_EQUAL_INT(1, historyWriteIndex);
-    TEST_ASSERT_EQUAL_INT(1, validHistoryCount);
-    TEST_ASSERT_FALSE(bufferFull);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, temp, temperatureHistory[0]);
+  TemperatureHistory h; h.append(250,1000); auto s=h.snapshot(); h.append(300,2000); h.clear(); TEST_ASSERT_EQUAL_UINT(1,s.count); TEST_ASSERT_EQUAL_INT16(250,s.samples[0]);
 }
 
-void test_temperature_history_multiple_entries(void)
+void test_start_packet_uses_sampling_interval()
 {
-    float temps[] = {20.0f, 21.5f, 22.3f, 23.8f, 24.2f};
-    int numTemps = sizeof(temps) / sizeof(temps[0]);
-    
-    for (int i = 0; i < numTemps; i++)
-    {
-        storeTemperatureInHistory(temps[i]);
-    }
-    
-    TEST_ASSERT_EQUAL_INT(numTemps, historyWriteIndex);
-    TEST_ASSERT_EQUAL_INT(numTemps, validHistoryCount);
-    TEST_ASSERT_FALSE(bufferFull);
-    
-    // Verify all temperatures were stored correctly
-    for (int i = 0; i < numTemps; i++)
-    {
-        TEST_ASSERT_FLOAT_WITHIN(0.01f, temps[i], temperatureHistory[i]);
-    }
+  TemperatureHistory h; h.append(250,1000); auto s=h.snapshot(); uint8_t b[8]; TEST_ASSERT_EQUAL_UINT(8,encodeHistoryStart(s,1000,b,8)); const uint8_t expected[]={0xA0,1,kTemperatureIntervalSeconds,0,1,0,0,0}; TEST_ASSERT_EQUAL_UINT8_ARRAY(expected,b,8); TEST_ASSERT_EQUAL_UINT(1000,kTemperatureIntervalMs);
 }
 
-void test_temperature_history_pre_wrap_state(void)
+void test_start_packet_includes_age_since_last_sample()
 {
-    for (int i = 0; i < HISTORY_BUFFER_SIZE - 1; i++)
-    {
-        storeTemperatureInHistory(static_cast<float>(i));
-    }
-
-    TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE - 1, historyWriteIndex);
-    TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE - 1, validHistoryCount);
-    TEST_ASSERT_FALSE(bufferFull);
+  TemperatureHistory h; h.append(250,1000); uint8_t b[8]; encodeHistoryStart(h.snapshot(),121000,b,8); TEST_ASSERT_EQUAL_UINT8(2,b[6]);
 }
 
-void test_temperature_history_buffer_wraparound(void)
+void test_start_packet_age_across_clock_rollover()
 {
-    // Fill the buffer completely
-    for (int i = 0; i < HISTORY_BUFFER_SIZE; i++)
-    {
-        storeTemperatureInHistory((float)i);
-    }
-    
-    TEST_ASSERT_EQUAL_INT(0, historyWriteIndex); // Should wrap to 0
-    TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE, validHistoryCount);
-    TEST_ASSERT_TRUE(bufferFull);
-    
-    // Add one more entry - should overwrite index 0
-    float newTemp = 99.9f;
-    storeTemperatureInHistory(newTemp);
-    
-    TEST_ASSERT_EQUAL_INT(1, historyWriteIndex); // Should be at index 1
-    TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE, validHistoryCount); // Count stays at max
-    TEST_ASSERT_TRUE(bufferFull);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, newTemp, temperatureHistory[0]); // Verify overwrite
+  TemperatureHistory h; h.append(250,UINT32_MAX-999); uint8_t b[8]; encodeHistoryStart(h.snapshot(),59000,b,8); TEST_ASSERT_EQUAL_UINT8(1,b[6]);
 }
 
-void test_temperature_history_no_growth_after_full(void)
+void test_empty_history_has_start_packet()
 {
-    for (int i = 0; i < HISTORY_BUFFER_SIZE; i++)
-    {
-        storeTemperatureInHistory(static_cast<float>(i));
-    }
-
-    TEST_ASSERT_TRUE(bufferFull);
-    TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE, validHistoryCount);
-
-    storeTemperatureInHistory(100.0f);
-    storeTemperatureInHistory(101.0f);
-
-    TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE, validHistoryCount);
-    TEST_ASSERT_TRUE(bufferFull);
+  TemperatureHistory h; uint8_t b[8]; TEST_ASSERT_EQUAL_UINT(8,encodeHistoryStart(h.snapshot(),5000,b,8)); TEST_ASSERT_EQUAL_UINT8(0,b[4]);
 }
 
-void test_temperature_history_circular_buffer_behavior(void)
+void test_chunk_fits_default_mtu()
 {
-    // Fill buffer to capacity
-    for (int i = 0; i < HISTORY_BUFFER_SIZE; i++)
-    {
-        storeTemperatureInHistory((float)i);
-    }
-    
-    // Add 10 more entries
-    for (int i = 0; i < 10; i++)
-    {
-        storeTemperatureInHistory(100.0f + i);
-    }
-    
-    TEST_ASSERT_EQUAL_INT(10, historyWriteIndex); // Should wrap around to index 10
-    TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE, validHistoryCount);
-    TEST_ASSERT_TRUE(bufferFull);
-    
-    // Verify the last 10 entries were written correctly
-    for (int i = 0; i < 10; i++)
-    {
-        TEST_ASSERT_FLOAT_WITHIN(0.01f, 100.0f + i, temperatureHistory[i]);
-    }
+  TemperatureHistory h; for(int i=0;i<50;++i)h.append(i,1000*i); auto s=h.snapshot(); uint8_t b[kHistoryPacketMaxBytes]; TEST_ASSERT_EQUAL_UINT(7,historyChunkCount(s)); TEST_ASSERT_EQUAL_UINT(20,encodeHistoryChunk(s,0,b,sizeof(b))); TEST_ASSERT_EQUAL_UINT8(8,b[3]); TEST_ASSERT_EQUAL_UINT(8,encodeHistoryChunk(s,6,b,sizeof(b))); TEST_ASSERT_EQUAL_UINT8(2,b[3]);
 }
 
-void test_temperature_history_overwrite_preserves_tail(void)
+void test_chunk_signed_little_endian_encoding()
 {
-    for (int i = 0; i < HISTORY_BUFFER_SIZE; i++)
-    {
-        storeTemperatureInHistory(static_cast<float>(i));
-    }
-
-    storeTemperatureInHistory(200.0f);
-    storeTemperatureInHistory(201.0f);
-    storeTemperatureInHistory(202.0f);
-
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 200.0f, temperatureHistory[0]);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 201.0f, temperatureHistory[1]);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 202.0f, temperatureHistory[2]);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, 3.0f, temperatureHistory[3]);
+  TemperatureHistory h; h.append(-105,0); h.append(253,1000); uint8_t b[8]; encodeHistoryChunk(h.snapshot(),0,b,sizeof(b)); const uint8_t expected[]={0xA1,0,1,2,0x97,0xFF,0xFD,0}; TEST_ASSERT_EQUAL_UINT8_ARRAY(expected,b,8);
 }
 
-void test_temperature_history_multiple_wrap_cycles(void)
+void test_bad_chunk_and_short_output_are_rejected()
 {
-    int totalWrites = HISTORY_BUFFER_SIZE * 2 + 3;
-    for (int i = 0; i < totalWrites; i++)
-    {
-        storeTemperatureInHistory(static_cast<float>(i));
-    }
-
-    TEST_ASSERT_TRUE(bufferFull);
-    TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE, validHistoryCount);
-    TEST_ASSERT_EQUAL_INT(3, historyWriteIndex);
-
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, static_cast<float>(totalWrites - 3), temperatureHistory[0]);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, static_cast<float>(totalWrites - 2), temperatureHistory[1]);
-    TEST_ASSERT_FLOAT_WITHIN(0.01f, static_cast<float>(totalWrites - 1), temperatureHistory[2]);
+  TemperatureHistory h; h.append(25,0); auto s=h.snapshot(); uint8_t b[8]={99}; TEST_ASSERT_EQUAL_UINT(0,encodeHistoryChunk(s,1,b,8)); TEST_ASSERT_EQUAL_UINT(0,encodeHistoryChunk(s,0,b,5)); TEST_ASSERT_EQUAL_UINT(0,encodeHistoryChunk(s,0,nullptr,8)); TEST_ASSERT_EQUAL_UINT8(99,b[0]); TEST_ASSERT_EQUAL_UINT(0,encodeHistoryStart(s,0,b,7));
 }
 
-void test_clear_history_buffer(void)
+void test_invalid_snapshot_count_is_rejected()
 {
-    // Add some entries
-    for (int i = 0; i < 10; i++)
-    {
-        storeTemperatureInHistory((float)i);
-    }
-    
-    // Clear the buffer
-    clearHistoryBuffer();
-    
-    TEST_ASSERT_EQUAL_INT(0, historyWriteIndex);
-    TEST_ASSERT_EQUAL_INT(0, validHistoryCount);
-    TEST_ASSERT_FALSE(bufferFull);
-}
-
-void test_clear_history_zeroes_contents(void)
-{
-    for (int i = 0; i < 5; i++)
-    {
-        storeTemperatureInHistory(static_cast<float>(i + 1));
-    }
-
-    clearHistoryBuffer();
-
-    for (int i = 0; i < 5; i++)
-    {
-        TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, temperatureHistory[i]);
-    }
-}
-
-void test_clear_history_is_idempotent(void)
-{
-    clearHistoryBuffer();
-    clearHistoryBuffer();
-
-    TEST_ASSERT_EQUAL_INT(0, historyWriteIndex);
-    TEST_ASSERT_EQUAL_INT(0, validHistoryCount);
-    TEST_ASSERT_FALSE(bufferFull);
-}
-
-void test_clear_history_after_wrap(void)
-{
-    for (int i = 0; i < HISTORY_BUFFER_SIZE + 5; i++)
-    {
-        storeTemperatureInHistory(static_cast<float>(i));
-    }
-
-    TEST_ASSERT_TRUE(bufferFull);
-    clearHistoryBuffer();
-
-    TEST_ASSERT_EQUAL_INT(0, historyWriteIndex);
-    TEST_ASSERT_EQUAL_INT(0, validHistoryCount);
-    TEST_ASSERT_FALSE(bufferFull);
-}
-
-void test_scroll_speed_clamping_valid_range(void)
-{
-    // Test valid range values
-    TEST_ASSERT_EQUAL_UINT8(1, clampScrollSpeed(1));
-    TEST_ASSERT_EQUAL_UINT8(50, clampScrollSpeed(50));
-    TEST_ASSERT_EQUAL_UINT8(100, clampScrollSpeed(100));
-}
-
-void test_scroll_speed_clamping_below_minimum(void)
-{
-    // Test values below minimum
-    TEST_ASSERT_EQUAL_UINT8(1, clampScrollSpeed(0));
-}
-
-void test_scroll_speed_clamping_above_maximum(void)
-{
-    // Test values above maximum
-    TEST_ASSERT_EQUAL_UINT8(100, clampScrollSpeed(101));
-    TEST_ASSERT_EQUAL_UINT8(100, clampScrollSpeed(150));
-    TEST_ASSERT_EQUAL_UINT8(100, clampScrollSpeed(255));
-}
-
-void test_ble_packet_constants(void)
-{
-    // Verify packet structure constants are correctly defined
-    TEST_ASSERT_EQUAL_UINT8(0x01, PKT_TYPE_HISTORY);
-    TEST_ASSERT_EQUAL_UINT8(4, MAX_FLOATS_PER_CHUNK);
-}
-
-void test_temperature_history_capacity(void)
-{
-    // Verify buffer size constant
-    TEST_ASSERT_EQUAL_INT(50, HISTORY_BUFFER_SIZE);
-    
-    // Verify we can store exactly HISTORY_BUFFER_SIZE entries
-    for (int i = 0; i < HISTORY_BUFFER_SIZE; i++)
-    {
-        storeTemperatureInHistory((float)i);
-    }
-    
-    TEST_ASSERT_EQUAL_INT(HISTORY_BUFFER_SIZE, validHistoryCount);
-}
-
-void test_temperature_values_precision(void)
-{
-    // Test storing various temperature values with precision
-    float testTemps[] = {-10.5f, 0.0f, 25.3f, 37.7f, 100.2f};
-    
-    for (size_t i = 0; i < sizeof(testTemps) / sizeof(testTemps[0]); i++)
-    {
-        storeTemperatureInHistory(testTemps[i]);
-        TEST_ASSERT_FLOAT_WITHIN(0.01f, testTemps[i], temperatureHistory[i]);
-    }
-}
-
-void test_temperature_values_negative(void)
-{
-    float temps[] = {-40.0f, -5.75f, -0.01f};
-    for (size_t i = 0; i < sizeof(temps) / sizeof(temps[0]); i++)
-    {
-        storeTemperatureInHistory(temps[i]);
-        TEST_ASSERT_FLOAT_WITHIN(0.01f, temps[i], temperatureHistory[i]);
-    }
-}
-
-void test_chunk_calculation_logic(void)
-{
-    // Test chunk calculation for different history sizes
-    // Formula: totalChunks = (validHistoryCount + MAX_FLOATS_PER_CHUNK - 1) / MAX_FLOATS_PER_CHUNK
-    
-    int testCases[][2] = {
-        {0, 0},   // 0 entries -> 0 chunks
-        {1, 1},   // 1 entry -> 1 chunk
-        {4, 1},   // 4 entries -> 1 chunk
-        {5, 2},   // 5 entries -> 2 chunks
-        {8, 2},   // 8 entries -> 2 chunks
-        {9, 3},   // 9 entries -> 3 chunks
-        {50, 13}  // 50 entries -> 13 chunks
-    };
-    
-    for (size_t i = 0; i < sizeof(testCases) / sizeof(testCases[0]); i++)
-    {
-        int entries = testCases[i][0];
-        int expectedChunks = testCases[i][1];
-        
-        int calculatedChunks = (entries + MAX_FLOATS_PER_CHUNK - 1) / MAX_FLOATS_PER_CHUNK;
-        TEST_ASSERT_EQUAL_INT(expectedChunks, calculatedChunks);
-    }
-}
-
-void setup()
-{
-    UNITY_BEGIN();
-    
-    RUN_TEST(test_temperature_history_initialization);
-    RUN_TEST(test_temperature_history_single_entry);
-    RUN_TEST(test_temperature_history_multiple_entries);
-    RUN_TEST(test_temperature_history_pre_wrap_state);
-    RUN_TEST(test_temperature_history_buffer_wraparound);
-    RUN_TEST(test_temperature_history_no_growth_after_full);
-    RUN_TEST(test_temperature_history_circular_buffer_behavior);
-    RUN_TEST(test_temperature_history_overwrite_preserves_tail);
-    RUN_TEST(test_temperature_history_multiple_wrap_cycles);
-    RUN_TEST(test_clear_history_buffer);
-    RUN_TEST(test_clear_history_zeroes_contents);
-    RUN_TEST(test_clear_history_is_idempotent);
-    RUN_TEST(test_clear_history_after_wrap);
-    RUN_TEST(test_scroll_speed_clamping_valid_range);
-    RUN_TEST(test_scroll_speed_clamping_below_minimum);
-    RUN_TEST(test_scroll_speed_clamping_above_maximum);
-    RUN_TEST(test_ble_packet_constants);
-    RUN_TEST(test_temperature_history_capacity);
-    RUN_TEST(test_temperature_values_precision);
-    RUN_TEST(test_temperature_values_negative);
-    RUN_TEST(test_chunk_calculation_logic);
-    
-    UNITY_END();
+  TemperatureSnapshot s; s.count=kHistoryCapacity+1; uint8_t b[20]; TEST_ASSERT_EQUAL_UINT(0,encodeHistoryStart(s,0,b,20)); TEST_ASSERT_EQUAL_UINT(0,encodeHistoryChunk(s,0,b,20));
 }
 
 int main()
 {
-    setup();
-    return 0;
-}
+  UNITY_BEGIN();
 
-void loop()
-{
-    // Unity tests run once
+  RUN_TEST(test_empty_history);
+
+  RUN_TEST(test_fixed10_conversion);
+
+  RUN_TEST(test_fixed10_clamps_before_rounding);
+
+  RUN_TEST(test_nonfinite_temperature);
+
+  RUN_TEST(test_history_is_chronological_after_multiple_wraps);
+
+  RUN_TEST(test_clear_after_wrap);
+
+  RUN_TEST(test_snapshot_does_not_change_when_history_is_updated);
+
+  RUN_TEST(test_start_packet_uses_sampling_interval);
+
+  RUN_TEST(test_start_packet_includes_age_since_last_sample);
+
+  RUN_TEST(test_start_packet_age_across_clock_rollover);
+
+  RUN_TEST(test_empty_history_has_start_packet);
+
+  RUN_TEST(test_chunk_fits_default_mtu);
+
+  RUN_TEST(test_chunk_signed_little_endian_encoding);
+
+  RUN_TEST(test_bad_chunk_and_short_output_are_rejected);
+
+  RUN_TEST(test_invalid_snapshot_count_is_rejected);
+
+  return UNITY_END();
 }

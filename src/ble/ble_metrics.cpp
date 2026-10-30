@@ -1,264 +1,95 @@
 #include "ble/ble_metrics.h"
 #include "ble/ble_state.h"
-
 #include "core/AdaptiveBrightness.h"
 #include "core/InternalTemperature.h"
+#include "core/TemperatureHistory.h"
 
 #include <Arduino.h>
 #include <cmath>
 #include <cstdlib>
-#include <cstring>
-#include <cstdio>
-#include <string>
-
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/portmacro.h"
 
-// Lux monitoring variables
-static unsigned long luxMillis = 0;
-static const unsigned long luxInterval = 500; // Update lux every 500ms
-static uint16_t lastSentLuxValue = 0;
-static const uint16_t luxChangeThreshold = 10; // Only send updates if lux changes by more than this amount
-
-// Temp Non-Blocking Variables
-static unsigned long temperatureMillis = 0;
-static const unsigned long temperatureInterval = 1000; // 1 second interval for temperature update
-
-static unsigned long lastHistoryTransferMillis = 0;
-static const unsigned long historyTransferCooldownMs = 1500;
-
-const bool tempNotifyEnabled = true;
-
-// Buffer (store fixed10 samples to match Swift decoding)
-#define HISTORY_BUFFER_SIZE 50
-static int16_t temperatureHistoryFixed10[HISTORY_BUFFER_SIZE];
-static int historyWriteIndex = 0;
-static int validHistoryCount = 0; // Track how many valid entries are in buffer
-static bool bufferFull = false;   // Flag to know when buffer has wrapped around
-
-// --- History protocol (matches Swift) ---
-static const uint8_t HIST_PKT_START = 0xA0;
-static const uint8_t HIST_PKT_DATA  = 0xA1;
-static const uint8_t HIST_PKT_END   = 0xA2;
-static const uint8_t HIST_VERSION   = 0x01;
-
-// fixed10 samples per DATA chunk.
-// Keep modest; BLE notify payload depends on MTU.
-// Header is 4 bytes; 16 samples = 32 bytes payload; total 36 bytes.
-static const uint8_t HIST_SAMPLES_PER_CHUNK = 16;
-static constexpr size_t HIST_DATA_PACKET_MAX_LEN = 4u + (static_cast<size_t>(HIST_SAMPLES_PER_CHUNK) * sizeof(int16_t));
-static_assert(HIST_DATA_PACKET_MAX_LEN <= 255u, "History packet must remain within a single BLE notification payload");
-
-static inline void write_u16_le(uint8_t* out, uint16_t v) {
-    out[0] = (uint8_t)(v & 0xFF);
-    out[1] = (uint8_t)((v >> 8) & 0xFF);
-}
-
-static inline int16_t temp_to_fixed10(float c) {
-    int32_t v = lroundf(c * 10.0f);
-    if (v > INT16_MAX) v = INT16_MAX;
-    if (v < INT16_MIN) v = INT16_MIN;
-    return (int16_t)v;
-}
-
-// If you want a known sampling interval for history timestamps (Swift uses it):
-// Put your real sampling period here. If you sample every 5 seconds, set 5.
-// If you later move to 1 second, set 1.
-static const uint8_t HISTORY_INTERVAL_SECONDS = 1;
-
-static void storeTemperatureInHistory(float tempC)
+namespace
 {
-    // Convert once and store in the ring buffer as fixed10 (int16 little-endian on the wire)
-    temperatureHistoryFixed10[historyWriteIndex] = temp_to_fixed10(tempC);
-
-    historyWriteIndex++;
-    if (!bufferFull)
-    {
-        validHistoryCount++;
-    }
-    if (historyWriteIndex >= HISTORY_BUFFER_SIZE)
-    {
-        historyWriteIndex = 0; // Wrap around
-        bufferFull = true;
-    }
+unsigned long luxMillis = 0;
+constexpr unsigned long luxInterval = 500;
+uint16_t lastSentLuxValue = 0;
+constexpr uint16_t luxChangeThreshold = 10;
+uint32_t temperatureMillis = 0;
+uint32_t lastHistoryTransferMillis = 0;
+bool historyTransferred = false;
+constexpr uint32_t historyTransferCooldownMs = 1500;
+telemetry::TemperatureHistory history;
+portMUX_TYPE historyMux = portMUX_INITIALIZER_UNLOCKED;
 }
 
-// cppcheck-suppress unusedFunction
 void clearHistoryBuffer()
 {
-    historyWriteIndex = 0;
-    validHistoryCount = 0;
-    bufferFull = false;
-    memset(temperatureHistoryFixed10, 0, sizeof(temperatureHistoryFixed10));
-    Serial.println("Temperature history buffer cleared.");
+    portENTER_CRITICAL(&historyMux);
+    history.clear();
+    portEXIT_CRITICAL(&historyMux);
 }
 
-static bool historyTransferInProgress = false;
-
-// cppcheck-suppress unusedFunction
 void triggerHistoryTransfer()
 {
-    if (historyTransferInProgress)
-    {
-        Serial.println("History transfer already in progress; ignoring trigger.");
-        return;
-    }
-    historyTransferInProgress = true;
-
-    // Ensure we always clear the flag on exit
-    struct _HistoryTransferGuard {
-        bool* flag;
-        ~_HistoryTransferGuard() { if (flag) *flag = false; }
-    } _guard{ &historyTransferInProgress };
-
-    const unsigned long now = millis();
-    if (now - lastHistoryTransferMillis < historyTransferCooldownMs)
-    {
-        Serial.println("History transfer requested too soon; cooling down.");
-        return;
-    }
+    // Called only by the BLE worker. No state lock is held during notifications.
+    const uint32_t now = millis();
+    if (historyTransferred && now - lastHistoryTransferMillis < historyTransferCooldownMs) return;
+    if (!deviceConnected || !pTemperatureLogsCharacteristic) return;
     lastHistoryTransferMillis = now;
+    historyTransferred = true;
 
-    if (!deviceConnected || pTemperatureLogsCharacteristic == nullptr)
-    {
-        Serial.println("Cannot send history: Not connected or characteristic is null.");
-        return;
-    }
+    portENTER_CRITICAL(&historyMux);
+    const auto snapshot = history.snapshot();
+    portEXIT_CRITICAL(&historyMux);
 
-    Serial.printf("Starting history transfer. Total valid points: %d\n", validHistoryCount);
-
-    if (validHistoryCount == 0)
-    {
-        Serial.println("History buffer is empty.");
-        return;
-    }
-
-    // Chunks are fixed10 int16 samples. Swift expects:
-    // START: [0]=0xA0 [1]=version [2]=intervalSeconds [3]=reserved [4..5]=totalPoints(u16 LE) [6..7]=startAgeMinutes(u16 LE)
-    // DATA : [0]=0xA1 [1]=chunkIndex [2]=totalChunks [3]=pointsInChunk [4..]=pointsInChunk * int16 LE
-    // END  : [0]=0xA2
-
-    const uint16_t totalPoints = (uint16_t)validHistoryCount;
-    const uint8_t intervalSeconds = HISTORY_INTERVAL_SECONDS;
-
-    // Age of oldest point in minutes (rounded). Oldest sample is (totalPoints-1) intervals ago.
-    const uint32_t oldestAgeSeconds = (totalPoints > 0) ? (uint32_t)(totalPoints - 1) * (uint32_t)intervalSeconds : 0;
-    uint16_t startAgeMinutes = (uint16_t)((oldestAgeSeconds + 30) / 60); // round-to-nearest minute
-
-    const uint8_t totalChunks = (uint8_t)((validHistoryCount + HIST_SAMPLES_PER_CHUNK - 1) / HIST_SAMPLES_PER_CHUNK);
-
-    Serial.printf("History: interval=%us totalPoints=%u totalChunks=%u startAgeMinutes=%u\n",
-                  intervalSeconds, totalPoints, totalChunks, startAgeMinutes);
-
-    // ---- START packet ----
-    uint8_t startPkt[8];
-    startPkt[0] = HIST_PKT_START;
-    startPkt[1] = HIST_VERSION;
-    startPkt[2] = intervalSeconds;
-    startPkt[3] = 0x00; // reserved
-    write_u16_le(&startPkt[4], totalPoints);
-    write_u16_le(&startPkt[6], startAgeMinutes);
-
-    pTemperatureLogsCharacteristic->setValue(startPkt, sizeof(startPkt));
-    pTemperatureLogsCharacteristic->notify();
+    // Send an empty START as well, so clients can finish an empty-history request.
+    uint8_t packet[telemetry::kHistoryPacketMaxBytes];
+    size_t length = telemetry::encodeHistoryStart(snapshot, now, packet, sizeof(packet));
+    pTemperatureLogsCharacteristic->setValue(packet, length);
+    if (!pTemperatureLogsCharacteristic->notify()) return;
     vTaskDelay(pdMS_TO_TICKS(20));
-
-    // Oldest entry index in ring buffer
-    int readIndex = bufferFull ? historyWriteIndex : 0;
-    int pointsSent = 0;
-
-    // Fixed-size stack buffer avoids heap churn during repeated history transfers.
-    uint8_t pkt[HIST_DATA_PACKET_MAX_LEN];
-
-    for (uint8_t chunkIndex = 0; chunkIndex < totalChunks; ++chunkIndex)
+    for (size_t chunk = 0; chunk < telemetry::historyChunkCount(snapshot); ++chunk)
     {
-        const int remaining = validHistoryCount - pointsSent;
-        const uint8_t pointsInChunk = (uint8_t)((remaining > (int)HIST_SAMPLES_PER_CHUNK) ? HIST_SAMPLES_PER_CHUNK : remaining);
-
-        pkt[0] = HIST_PKT_DATA;
-        pkt[1] = chunkIndex;
-        pkt[2] = totalChunks;
-        pkt[3] = pointsInChunk;
-
-        // Payload begins at byte 4
-        // cppcheck-suppress knownConditionTrueFalse
-        for (uint8_t i = 0; i < pointsInChunk; ++i)
-        {
-            const int16_t fixed10 = temperatureHistoryFixed10[readIndex];
-
-            // Write little-endian int16
-            const size_t off = 4 + (size_t)i * 2;
-            pkt[off + 0] = (uint8_t)(fixed10 & 0xFF);
-            pkt[off + 1] = (uint8_t)((fixed10 >> 8) & 0xFF);
-
-            // advance ring buffer
-            readIndex++;
-            if (readIndex >= HISTORY_BUFFER_SIZE) readIndex = 0;
-        }
-
-        const size_t pktLen = 4 + (size_t)pointsInChunk * 2;
-        pTemperatureLogsCharacteristic->setValue(pkt, pktLen);
-        pTemperatureLogsCharacteristic->notify();
-
-        pointsSent += pointsInChunk;
-
-        Serial.printf("Sent history DATA chunk %u/%u (points=%u, bytes=%u)\n",
-                      (unsigned)(chunkIndex + 1), (unsigned)totalChunks,
-                      (unsigned)pointsInChunk, (unsigned)pktLen);
-
+        if (!deviceConnected) return;
+        length = telemetry::encodeHistoryChunk(snapshot, chunk, packet, sizeof(packet));
+        pTemperatureLogsCharacteristic->setValue(packet, length);
+        if (!pTemperatureLogsCharacteristic->notify()) return;
         vTaskDelay(pdMS_TO_TICKS(20));
     }
-
-    // ---- END packet (optional; Swift currently ignores but harmless) ----
-    uint8_t endPkt[1] = { HIST_PKT_END };
-    pTemperatureLogsCharacteristic->setValue(endPkt, sizeof(endPkt));
+    const uint8_t end[] = {0xA2};
+    pTemperatureLogsCharacteristic->setValue(end, sizeof(end));
     pTemperatureLogsCharacteristic->notify();
-
-    historyTransferInProgress = false;
-
-    Serial.println("Finished sending history chunks.");
 }
 
-// cppcheck-suppress unusedFunction
 void updateTemperature()
 {
-    const unsigned long now = millis();
-    if (now - temperatureMillis < temperatureInterval) return;
+    // The Arduino loop owns sampling, in both awake and sleep states.
+    const uint32_t now = millis();
+    if (now - temperatureMillis < telemetry::kTemperatureIntervalMs) return;
     temperatureMillis = now;
+    float celsius = 0.0f;
+    if (!internalTemperatureReadCelsius(celsius) || !std::isfinite(celsius)) return;
+    const int16_t fixed10 = telemetry::temperatureToFixed10(celsius);
 
-    float result = 0.0f;
-    if (!internalTemperatureReadCelsius(result))
+    portENTER_CRITICAL(&historyMux);
+    const auto previous = history.snapshot();
+    // The wire format describes evenly spaced samples. Start a new contiguous
+    // history after a sensor outage or stalled loop rather than inventing samples.
+    if (previous.count && now - previous.newestSampleMs >= 2 * telemetry::kTemperatureIntervalMs) history.clear();
+    history.append(fixed10, now);
+    portEXIT_CRITICAL(&historyMux);
+
+    if (pTemperatureCharacteristic)
     {
-#if DEBUG_MODE
-        Serial.printf("Temperature read failed using %s\n", internalTemperatureDriverName());
-#endif
-        return;
+        const uint8_t bytes[] = {static_cast<uint8_t>(fixed10), static_cast<uint8_t>(static_cast<uint16_t>(fixed10) >> 8)};
+        pTemperatureCharacteristic->setValue(bytes, sizeof(bytes));
+        if (deviceConnected) pTemperatureCharacteristic->notify();
     }
-
-    // Always record history, even if phone isn't connected.
-    storeTemperatureInHistory(result);
-
-    // Only notify if connected + subscribed
-    if (!deviceConnected || !tempNotifyEnabled || pTemperatureCharacteristic == nullptr) {
-        return;
-    }
-
-    const int16_t fixed10 = temp_to_fixed10(result);
-
-    uint8_t b[2];
-    b[0] = (uint8_t)(fixed10 & 0xFF);
-    b[1] = (uint8_t)((fixed10 >> 8) & 0xFF);
-
-    pTemperatureCharacteristic->setValue(b, sizeof(b));
-    pTemperatureCharacteristic->notify();
-
-#if DEBUG_MODE
-    Serial.printf("Temp fixed10=%d -> %.1f°C bytes=%02X %02X\n",
-                  fixed10, fixed10 / 10.0f, b[0], b[1]);
-#endif
 }
 
-// cppcheck-suppress unusedFunction
 void updateLux()
 {
     unsigned long currentMillis = millis();

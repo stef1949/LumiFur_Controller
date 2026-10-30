@@ -20,6 +20,13 @@
 
 #include <Adafruit_PixelDust.h> // For sand simulation
 #include "main.h"
+#include "app/AppStateSync.h"
+#include "app/AppRuntime.h"
+#include "app/PowerManagement.h"
+#include "app/ViewState.h"
+#include "app/InputController.h"
+#include "ble/ble_control.h"
+#include "config/StaticColor.h"
 #include "effects/dinoGame.h"
 #include "effects/basicRainbow.h"
 #include "effects/strobeEffect.h"
@@ -54,17 +61,8 @@
 #include "freertos/queue.h"
 #include "freertos/task.h"
 
-struct BleWorkQueueStats
-{
-  uint32_t drops = 0;
-  UBaseType_t highWaterDepth = 0;
-};
-
 static TaskHandle_t displayTaskHandle = NULL;
 static TaskHandle_t bleNotifyTaskHandle = NULL;
-static TaskHandle_t bleWorkerTaskHandle = NULL;
-static QueueHandle_t bleWorkQueue = nullptr;
-static BleWorkQueueStats bleTakeQueueStats();
 
 // #define PIXEL_COLOR_DEPTH_BITS 16 // 16 bits per pixel
 #if DEBUG_MODE
@@ -176,7 +174,7 @@ static void perfMaybeReport(unsigned long nowMs)
   const uint32_t minFreeHeap = ESP.getMinFreeHeap();
   const PerfTelemetrySnapshot telemetry = perfTelemetryTakeSnapshot();
   const BleWorkQueueStats bleQueueStats = bleTakeQueueStats();
-  const unsigned long bleQueueDepth = bleWorkQueue ? static_cast<unsigned long>(uxQueueMessagesWaiting(bleWorkQueue)) : 0UL;
+  const unsigned long queueDepth = bleQueueDepth();
   const unsigned long bleQueueHighWater = static_cast<unsigned long>(bleQueueStats.highWaterDepth);
   const unsigned long bleQueueDrops = static_cast<unsigned long>(bleQueueStats.drops);
   const unsigned long displayStackMin = displayTaskHandle ? static_cast<unsigned long>(uxTaskGetStackHighWaterMark(displayTaskHandle)) : 0UL;
@@ -244,7 +242,7 @@ static void perfMaybeReport(unsigned long nowMs)
       static_cast<unsigned long>(bleWorkerBusy.calls),
       static_cast<unsigned long>(avgMicros(bleWorkerBusy.totalMicros, bleWorkerBusy.calls)),
       static_cast<unsigned long>(bleWorkerBusy.maxMicros),
-      bleQueueDepth,
+      queueDepth,
       bleQueueHighWater,
       bleQueueDrops,
       displayStackMin,
@@ -290,11 +288,9 @@ MonoVideoPlayer *videoPlayerInstance = nullptr;
 // PixelDustEffect* pixelDustEffectInstance = nullptr; // Add this
 // Brightness control
 //  Retrieve the brightness value from preferences
-bool g_accelerometer_initialized = false;
 static constexpr char BAD_APPLE_VIDEO_PATH[] = "/videos/bad_apple.lfv";
 static bool gVideoStorageReady = false;
 
-constexpr unsigned long MOTION_SAMPLE_INTERVAL_FAST = 15; // ms between accel reads when looking for shakes
 
 // --- Performance Tuning ---
 // Target ~50-60 FPS. Adjust as needed based on view complexity.
@@ -355,10 +351,6 @@ volatile uint32_t gWorstFrameDurationMicros = 0;
 
 constexpr unsigned long LUX_UPDATE_INTERVAL_MS = 500;
 constexpr unsigned long SLEEP_CHECK_INTERVAL_MS = 60;
-constexpr unsigned long BUTTON_DEBOUNCE_MS = 50;
-constexpr unsigned long PAIRING_MODE_HOLD_MS = 3000;
-constexpr unsigned long PAIRING_MODE_WINDOW_MS = 60000;
-constexpr unsigned long PAIRING_RESET_HOLD_MS = 3000;
 constexpr unsigned long BLE_STATUS_LED_INTERVAL_MS = 25;
 constexpr unsigned long PROX_LUX_READ_GUARD_MS = 20;
 constexpr unsigned long ANIMATION_UPDATE_INTERVAL_MS = 8;
@@ -374,77 +366,6 @@ static unsigned long lastBrightnessUpdateTime = 0;
 
 namespace
 {
-struct ButtonState
-{
-  bool rawPressed = false;
-  bool stablePressed = false;
-  bool longPressHandled = false;
-  bool shortPressPending = false;
-  unsigned long lastChangeMs = 0;
-  unsigned long pressedAtMs = 0;
-};
-
-void updateButtonState(ButtonState &button, bool pressedSample, unsigned long nowMs, unsigned long debounceMs)
-{
-  if (pressedSample != button.rawPressed)
-  {
-    button.rawPressed = pressedSample;
-    button.lastChangeMs = nowMs;
-  }
-
-  if ((nowMs - button.lastChangeMs) < debounceMs || button.stablePressed == button.rawPressed)
-  {
-    return;
-  }
-
-  button.stablePressed = button.rawPressed;
-  if (button.stablePressed)
-  {
-    button.pressedAtMs = nowMs;
-    button.longPressHandled = false;
-    button.shortPressPending = false;
-    return;
-  }
-
-  if (!button.longPressHandled)
-  {
-    button.shortPressPending = true;
-  }
-}
-
-void suppressButtonPress(ButtonState &button)
-{
-  button.shortPressPending = false;
-  if (button.stablePressed)
-  {
-    button.longPressHandled = true;
-  }
-}
-
-bool consumeButtonShortPress(ButtonState &button)
-{
-  const bool pending = button.shortPressPending;
-  button.shortPressPending = false;
-  return pending;
-}
-
-bool consumeButtonLongPress(ButtonState &button, unsigned long nowMs, unsigned long holdMs)
-{
-  if (!button.stablePressed || button.longPressHandled)
-  {
-    return false;
-  }
-
-  if ((nowMs - button.pressedAtMs) < holdMs)
-  {
-    return false;
-  }
-
-  button.longPressHandled = true;
-  button.shortPressPending = false;
-  return true;
-}
-
 // Derived from the Alt_ bitmap exports with the source XBM bit order/background normalized.
 static const uint8_t AltFaceNose[] PROGMEM = {
     0xb0, 0xf8, 0x80, 0x80, 0x80, 0x80, 0x80, 0x80};
@@ -469,8 +390,6 @@ static const uint8_t AltFacePupil[] PROGMEM = {
 } // namespace
 
 // View switching
-volatile uint8_t currentView = VIEW_FLAME_EFFECT; // Current view (volatile so the display task sees updates)
-const int totalViews = TOTAL_VIEWS;               // Total number of views is now calculated automatically
 // int userBrightness = 20; // Default brightness level (0-255)
 
 // Plasma animation optimization
@@ -522,7 +441,7 @@ static volatile unsigned long gPendingLastViewChangedMs = 0;
 static uint8_t gLastPersistedView = 0;
 static unsigned long gLastButtonInteractionMs = 0;
 
-static void requestDisplayRefresh()
+void requestDisplayRefresh()
 {
   if (displayTaskHandle)
   {
@@ -530,17 +449,17 @@ static void requestDisplayRefresh()
   }
 }
 
-static void noteButtonInteraction(unsigned long nowMs)
+void noteButtonInteraction(unsigned long nowMs)
 {
   gLastButtonInteractionMs = nowMs;
 }
 
-static bool shakeSuppressedByRecentButton(unsigned long nowMs)
+bool shakeSuppressedByRecentButton(unsigned long nowMs)
 {
   return !hasElapsedSince(nowMs, gLastButtonInteractionMs, LF_SHAKE_SUPPRESS_AFTER_BUTTON_MS);
 }
 
-static void scheduleLastViewPersist(uint8_t view)
+void scheduleLastViewPersist(uint8_t view)
 {
   const unsigned long nowMs = millis();
   portENTER_CRITICAL(&gLastViewPersistMux);
@@ -628,13 +547,7 @@ static void presentDisplayFrame()
   }
 }
 
-struct StaticColorState
-{
-  CRGB color = CRGB::Black;
-  bool hasValue = false;
-};
 
-static StaticColorState gStaticColorState;
 
 static inline void drawPixelRgbFast(int x, int y, uint8_t r, uint8_t g, uint8_t b)
 {
@@ -693,110 +606,6 @@ static const CRGB *getScaledPlasmaPaletteLut(uint16_t brightnessScale)
   return selected->entries;
 }
 
-static CRGB toCRGB(const RgbColor &color)
-{
-  return CRGB(color.r, color.g, color.b);
-}
-
-static RgbColor toRgbColor(const CRGB &color)
-{
-  RgbColor result;
-  result.r = color.r;
-  result.g = color.g;
-  result.b = color.b;
-  return result;
-}
-
-static bool parseColorPayloadToCRGB(const uint8_t *data, size_t length, CRGB &colorOut, std::string &normalizedHex)
-{
-  RgbColor parsed;
-  if (!parseColorPayload(data, length, parsed, normalizedHex))
-  {
-    return false;
-  }
-  colorOut = toCRGB(parsed);
-  return true;
-}
-
-static void setStaticColor(const CRGB &color)
-{
-  gStaticColorState.color = color;
-  gStaticColorState.hasValue = true;
-  constantColor = color;
-  requestDisplayRefresh();
-}
-
-static void setStaticColorToDefault()
-{
-  setStaticColor(constantColor);
-}
-
-static bool applyStaticColorBytes(const uint8_t *data, size_t length, bool persistPreference, std::string *normalizedOut)
-{
-  std::string normalized;
-  CRGB parsedColor;
-  if (!parseColorPayloadToCRGB(data, length, parsedColor, normalized))
-  {
-    return false;
-  }
-
-  setStaticColor(parsedColor);
-  if (persistPreference)
-  {
-    saveSelectedColor(String(normalized.c_str()));
-  }
-  if (normalizedOut)
-  {
-    *normalizedOut = normalized;
-  }
-  return true;
-}
-
-static bool loadStaticColorFromPreferences()
-{
-  String stored = getSelectedColor();
-  if (stored.length() == 0)
-  {
-    setStaticColorToDefault();
-    return false;
-  }
-
-  std::string rawValue;
-  rawValue.reserve(stored.length());
-  for (unsigned int i = 0; i < stored.length(); ++i)
-  {
-    rawValue.push_back(static_cast<char>(stored[i]));
-  }
-
-  if (!applyStaticColorBytes(reinterpret_cast<const uint8_t *>(rawValue.data()), rawValue.size(), false, nullptr))
-  {
-    setStaticColorToDefault();
-    return false;
-  }
-  return true;
-}
-
-void ensureStaticColorLoaded()
-{
-  if (!gStaticColorState.hasValue)
-  {
-    loadStaticColorFromPreferences();
-  }
-}
-
-CRGB getStaticColorCached()
-{
-  ensureStaticColorLoaded();
-  return gStaticColorState.color;
-}
-
-static String getStaticColorHexString()
-{
-  ensureStaticColorLoaded();
-  const std::string hex = colorToHexString(toRgbColor(gStaticColorState.color));
-  return String(hex.c_str());
-}
-
 inline void setBlinkProgress(int newValue)
 {
   if (blinkProgress != newValue)
@@ -847,23 +656,8 @@ char txt[64];
 constexpr uint16_t SCROLL_BACKGROUND_INTERVAL_MS = 90;
 constexpr int16_t SCROLL_TEXT_GAP = 12;
 
-// Global constants for each sensitivity level
-const float SLEEP_THRESHOLD = 1.0; // for sleep mode detection
-const float SHAKE_THRESHOLD = 1.0; // for shake detection
-// Global flag to control which threshold to use
-bool useShakeSensitivity = true;
-
 // Blush effect variables
-const unsigned long fadeInDuration = 2000; // Duration for fade-in (2 seconds)
-const unsigned long fullDuration = 6000;   // Full brightness time after fade-in (6 seconds)
 // Total time from trigger to start fade-out is fadeInDuration + fullDuration = 8 seconds.
-const unsigned long fadeOutDuration = 2000; // Duration for fade-out (2 seconds)
-static unsigned long boopHits[16] = {};
-static uint8_t boopHitCount = 0;
-static uint8_t boopSavedView = 0;
-static uint8_t userSelectedView = 0; // only set by the user, never by blush/bounce/boop
-static unsigned long boopRevertAt = 0;
-static bool boopLoadingActive = false;
 // Non-blocking sensor read interval
 unsigned long lastSensorReadTime = 0;
 const unsigned long sensorInterval = 250; // sensor read throttled to reduce I2C pressure
@@ -880,23 +674,7 @@ static bool proximityBaselineValid = false;
 uint16_t time_counter = 0, cycles = 0, fps = 0;
 unsigned long fps_timer;
 
-// Sleep mode variables
-// Define both timeout values and select the appropriate one in setup()
-const unsigned long SLEEP_TIMEOUT_MS_DEBUG = 600000; // 15 seconds (15,000 ms)
-const unsigned long SLEEP_TIMEOUT_MS_NORMAL = 600000;  // 10 minutes (300,000 ms)
-unsigned long SLEEP_TIMEOUT_MS;                      // Will be set in setup() based on debugMode
-bool sleepModeActive = false;
-unsigned long lastActivityTime = 0;
-float prevAccelX = 0, prevAccelY = 0, prevAccelZ = 0;
-static float lastAccelDeltaX = 0, lastAccelDeltaY = 0, lastAccelDeltaZ = 0;
-static bool accelSampleValid = false;
-static bool lastMotionAboveShake = false;
-static bool lastMotionAboveSleep = false;
-uint8_t preSleepView = VIEW_NORMAL_FACE;   // Store the view before sleep
-uint8_t sleepBrightness = 15;              // Brightness level during sleep (0-255)
-uint8_t normalBrightness = userBrightness; // Normal brightness level
 volatile bool notifyPending = false;
-unsigned long sleepFrameInterval = 50; // Frame interval in ms (will be changed during sleep)
 unsigned long bluetoothStatusChangeMillis = 0;
 
 // FPS Calculation (moved out of drawing function)
@@ -925,102 +703,7 @@ const float LOG_SPIRAL_B_COEFF = 0.10f; // Controls how tightly wound the spiral
 const float SPIRAL_ARM_COLOR_FACTOR = 5.0f; // Could be based on 'r' now instead of 'theta_arm'
 const float SPIRAL_THICKNESS_RADIUS = 1.0f; // Start with 0 for performance, then increase
 
-static portMUX_TYPE gBleWorkQueueStatsMux = portMUX_INITIALIZER_UNLOCKED;
-static BleWorkQueueStats gBleWorkQueueStats;
-
-static void bleWorkerTask(void *param);
-static void handleBleCommandWork(const BleWorkItem &item);
-static void handleBleFaceWriteWork(const BleWorkItem &item);
-static void handleBleConfigWriteWork(const BleWorkItem &item);
-static void handleBleBrightnessWriteWork(const BleWorkItem &item);
-static void handleBleStaticColorWriteWork(const BleWorkItem &item);
-static void handleBleStrobeSettingsWriteWork(const BleWorkItem &item);
-
-static void bleRecordQueueDepth(UBaseType_t depth)
-{
-  portENTER_CRITICAL(&gBleWorkQueueStatsMux);
-  if (depth > gBleWorkQueueStats.highWaterDepth)
-  {
-    gBleWorkQueueStats.highWaterDepth = depth;
-  }
-  portEXIT_CRITICAL(&gBleWorkQueueStatsMux);
-}
-
-static void bleRecordQueueDrop()
-{
-  portENTER_CRITICAL(&gBleWorkQueueStatsMux);
-  ++gBleWorkQueueStats.drops;
-  portEXIT_CRITICAL(&gBleWorkQueueStatsMux);
-}
-
-static BleWorkQueueStats bleTakeQueueStats()
-{
-  BleWorkQueueStats snapshot{};
-  portENTER_CRITICAL(&gBleWorkQueueStatsMux);
-  snapshot = gBleWorkQueueStats;
-  gBleWorkQueueStats = {};
-  portEXIT_CRITICAL(&gBleWorkQueueStatsMux);
-  return snapshot;
-}
-
-static bool bleQueueWorkInternal(const BleWorkItem &item)
-{
-  if (bleWorkQueue == nullptr)
-  {
-    return false;
-  }
-
-  if (xQueueSend(bleWorkQueue, &item, 0) != pdPASS)
-  {
-    bleRecordQueueDrop();
-    return false;
-  }
-
-  bleRecordQueueDepth(uxQueueMessagesWaiting(bleWorkQueue));
-  return true;
-}
-
-bool bleQueuePayload(BleWorkType type, NimBLECharacteristic *characteristic, const uint8_t *data, size_t length)
-{
-  if ((length > 0 && data == nullptr) || length > LF_BLE_WORK_ITEM_PAYLOAD_MAX)
-  {
-    return false;
-  }
-
-  BleWorkItem item{};
-  item.type = type;
-  item.characteristic = characteristic;
-  item.length = static_cast<uint16_t>(length);
-  if (length > 0)
-  {
-    std::memcpy(item.data, data, length);
-  }
-  return bleQueueWorkInternal(item);
-}
-
-bool bleQueueString(BleWorkType type, NimBLECharacteristic *characteristic, const std::string &value)
-{
-  return bleQueuePayload(type, characteristic,
-                         reinterpret_cast<const uint8_t *>(value.data()),
-                         value.size());
-}
-
-bool bleQueueByte(BleWorkType type, NimBLECharacteristic *characteristic, uint8_t value)
-{
-  return bleQueuePayload(type, characteristic, &value, 1);
-}
-
-bool bleQueueEmpty(BleWorkType type, NimBLECharacteristic *characteristic)
-{
-  return bleQueuePayload(type, characteristic, nullptr, 0);
-}
-
-bool bleIsOtaBusy()
-{
-  return otaCallbacks.isActive();
-}
-
-inline void notifyBleTask()
+void notifyBleTask()
 {
   if (deviceConnected && bleNotifyTaskHandle)
   {
@@ -1048,26 +731,11 @@ void calculateFPS()
 
 void maybeUpdateTemperature()
 {
-  if (!deviceConnected)
-  {
-    return;
-  }
-
-  static unsigned long lastTempUpdate = 0;
-  const unsigned long tempUpdateInterval = 5000;       // 5 seconds
-  const unsigned long sleepTempUpdateInterval = 10000; // 10 seconds
-  const unsigned long now = millis();
-  const unsigned long targetInterval = sleepModeActive ? sleepTempUpdateInterval : tempUpdateInterval;
-
-  if (now - lastTempUpdate >= targetInterval)
-  {
-    updateTemperature();
-    lastTempUpdate = now;
-  }
+  updateTemperature();
 }
 
 void displayCurrentView(int view);
-static bool viewUsesMic(int view)
+bool viewUsesMic(int view)
 {
   switch (view)
   {
@@ -1148,666 +816,6 @@ static bool viewNeedsContinuousRefresh(int view)
   }
 }
 
-void wakeFromSleepMode()
-{
-  if (!sleepModeActive)
-    return; // Already awake
-
-  Serial.println(">>> Waking from sleep mode <<<");
-  sleepModeActive = false;
-  currentView = preSleepView; // Restore previous view
-  micSetEnabled(viewUsesMic(currentView));
-  requestDisplayRefresh();
-
-  // Restore normal CPU speed
-  restoreNormalCPUSpeed();
-
-  // Restore normal frame rate
-  sleepFrameInterval = 5; // Back to ~90 FPS
-
-  // Restore normal brightness
-  updateGlobalBrightnessScale(userBrightness);
-  syncBrightnessState(userBrightness);
-
-  lastActivityTime = millis(); // Reset activity timer
-
-  // Notify all clients if connected
-  if (deviceConnected)
-  {
-    // Also send current view back to the app
-    uint8_t bleViewValue = static_cast<uint8_t>(currentView);
-    pFaceCharacteristic->setValue(&bleViewValue, 1);
-    pFaceCharacteristic->notify();
-
-    // Send a temperature update
-    maybeUpdateTemperature();
-  }
-
-  // Restore normal BLE advertising if not connected
-  if (!deviceConnected)
-  {
-    NimBLEDevice::getAdvertising()->setMinInterval(160); // 100 ms (default)
-    NimBLEDevice::getAdvertising()->setMaxInterval(240); // 150 ms (default)
-    refreshBleAdvertising();
-  }
-}
-
-// Callback class for handling writes to the command characteristic
-class CommandCallbacks : public NimBLECharacteristicCallbacks
-{
-
-  // Override the onWrite method
-  void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override
-  {
-    (void)connInfo;
-    ScopedPerfTelemetryDuration perfScope(PerfDurationId::BleCallback);
-    // Get the value written by the client
-    const auto &rxValue = pCharacteristic->getValue();
-
-    if (rxValue.size() > 0)
-    {
-      const uint8_t commandCode = rxValue[0]; // Assuming single-byte commands
-
-      Serial.print("Command Characteristic received write, command code: 0x");
-      Serial.println(commandCode, HEX);
-      if (!bleQueueByte(BleWorkType::Command, pCharacteristic, commandCode))
-      {
-        Serial.println("BLE command queue full, dropping command.");
-      }
-    }
-    else
-    {
-      Serial.println("Command Characteristic received empty write.");
-    }
-  }
-} cmdCallbacks;
-
-// New Callback class for handling notifications related to Temperature Logs
-class TemperatureLogsCallbacks : public NimBLECharacteristicCallbacks
-{
-public:
-  // Optionally, implement onSubscribe to log when a client subscribes to notifications
-  void onSubscribe(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo, uint16_t subValue) override
-  {
-    std::string str = "Client subscribed to Temperature Logs notifications, Client ID: ";
-    str += connInfo.getConnHandle();
-    str += " Address: ";
-    str += connInfo.getAddress().toString();
-    Serial.printf("%s\n", str.c_str());
-  }
-};
-TemperatureLogsCallbacks logsCallbacks;
-
-// Class to handle characteristic callbacks
-class CharacteristicCallbacks : public NimBLECharacteristicCallbacks
-{
-  void onRead(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override
-  {
-    (void)connInfo;
-    uint8_t bleViewValue = static_cast<uint8_t>(currentView);
-    pCharacteristic->setValue(&bleViewValue, 1);
-    Serial.printf("Read request - returned view: %d\n", bleViewValue);
-  }
-
-  void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override
-  {
-    (void)connInfo;
-    ScopedPerfTelemetryDuration perfScope(PerfDurationId::BleCallback);
-    const auto &value = pCharacteristic->getValue();
-    if (value.size() < 1)
-    {
-      return;
-    }
-    const uint8_t newView = value[0];
-    if (!bleQueueByte(BleWorkType::FaceWrite, pCharacteristic, newView))
-    {
-      Serial.println("BLE face write queue full, dropping view update.");
-    }
-  }
-
-  void onStatus(NimBLECharacteristic *pCharacteristic, int code) override
-  {
-    Serial.printf("Notification/Indication return code: %d, %s\n", code, NimBLEUtils::returnCodeToString(code));
-  }
-
-  void onSubscribe(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo, uint16_t subValue) override
-  {
-    std::string str = "Client ID: ";
-    str += connInfo.getConnHandle();
-    str += " Address: ";
-    str += connInfo.getAddress().toString();
-    if (subValue == 0)
-    {
-      str += " Unsubscribed to ";
-    }
-    else if (subValue == 1)
-    {
-      str += " Subscribed to notifications for ";
-    }
-    else if (subValue == 2)
-    {
-      str += " Subscribed to indications for ";
-    }
-    else if (subValue == 3)
-    {
-      str += " Subscribed to notifications and indications for ";
-    }
-    str += std::string(pCharacteristic->getUUID());
-
-    Serial.printf("%s\n", str.c_str());
-  }
-} chrCallbacks;
-
-// Custom characteristic callback class.
-class ConfigCallbacks : public NimBLECharacteristicCallbacks
-{
-  void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override
-  {
-    (void)connInfo;
-    ScopedPerfTelemetryDuration perfScope(PerfDurationId::BleCallback);
-    const auto &value = pCharacteristic->getValue();
-    if (value.size() < 4)
-    {
-      Serial.println("Error: Config payload is not at least 4 bytes.");
-      return;
-    }
-    if (!bleQueuePayload(BleWorkType::ConfigWrite, pCharacteristic, value.data(), value.size()))
-    {
-      Serial.println("BLE config queue full, dropping configuration update.");
-    }
-  }
-};
-// Reuse one instance to avoid heap fragmentation
-static ConfigCallbacks configCallbacks;
-
-class BrightnessCallbacks : public NimBLECharacteristicCallbacks
-{
-  void onWrite(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
-  {
-    (void)connInfo;
-    ScopedPerfTelemetryDuration perfScope(PerfDurationId::BleCallback);
-    auto val = pChr->getValue();
-    if (val.size() >= 1)
-    {
-      if (!bleQueueByte(BleWorkType::BrightnessWrite, pChr, static_cast<uint8_t>(val[0])))
-      {
-        Serial.println("BLE brightness queue full, dropping brightness update.");
-      }
-    }
-  }
-};
-static BrightnessCallbacks brightnessCallbacks;
-
-
-class StaticColorCallbacks : public NimBLECharacteristicCallbacks
-{
-  void onWrite(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
-  {
-    (void)connInfo;
-    ScopedPerfTelemetryDuration perfScope(PerfDurationId::BleCallback);
-    const auto &val = pChr->getValue();
-    if (val.size() == 0)
-    {
-      return;
-    }
-
-    if (!bleQueuePayload(BleWorkType::StaticColorWrite, pChr, val.data(), val.size()))
-    {
-      Serial.println("BLE static color queue full, dropping payload.");
-    }
-  }
-
-  void onRead(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
-  {
-    String hexString = getStaticColorHexString();
-    std::string value(hexString.c_str());
-    pChr->setValue(value);
-  }
-};
-static StaticColorCallbacks staticColorCallbacks;
-
-class AutoBrightnessFloorCallbacks : public NimBLECharacteristicCallbacks
-{
-  void onWrite(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
-  {
-    (void)connInfo;
-    NimBLEAttValue val = pChr->getValue();
-    if (val.size() < 1)
-    {
-      return;
-    }
-    if (!bleQueueByte(BleWorkType::AutoBrightnessFloorWrite, pChr, static_cast<uint8_t>(val[0])))
-    {
-      Serial.println("BLE floor queue full, dropping floor update.");
-    }
-  }
-};
-static AutoBrightnessFloorCallbacks autoBrightnessFloorCallbacks;
-
-static std::string buildStrobeSettingsPayload()
-{
-  String hexString = getStrobeColorHexString();
-  return std::string("{") +
-         "\"color\":\"" + std::string(hexString.c_str()) + "\"," +
-         "\"speedMs\":" + std::to_string(static_cast<unsigned int>(getStrobeSpeedMs())) +
-         "}";
-}
-
-class StrobeSettingsCallbacks : public NimBLECharacteristicCallbacks
-{
-  void onWrite(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
-  {
-    (void)connInfo;
-    ScopedPerfTelemetryDuration perfScope(PerfDurationId::BleCallback);
-    const auto &val = pChr->getValue();
-    if (val.size() == 0)
-    {
-      return;
-    }
-    if (!bleQueuePayload(BleWorkType::StrobeSettingsWrite, pChr, val.data(), val.size()))
-    {
-      Serial.println("BLE strobe queue full, dropping payload.");
-    }
-  }
-
-  void onRead(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo) override
-  {
-    const std::string value = buildStrobeSettingsPayload();
-    pChr->setValue(value);
-  }
-};
-static StrobeSettingsCallbacks strobeSettingsCallbacks;
-
-static void handleBleCommandWork(const BleWorkItem &item)
-{
-  if (item.length < 1)
-  {
-    return;
-  }
-
-  const uint8_t commandCode = item.data[0];
-  switch (commandCode)
-  {
-  case 0x01:
-    Serial.println("-> Command: Get Temperature History");
-    triggerHistoryTransfer();
-    break;
-  case 0x02:
-    Serial.println("-> Command: Clear History Buffer");
-    clearHistoryBuffer();
-    break;
-  default:
-    Serial.print("-> Unknown command code received: 0x");
-    Serial.println(commandCode, HEX);
-    break;
-  }
-}
-
-static void handleBleFaceWriteWork(const BleWorkItem &item)
-{
-  if (item.length < 1)
-  {
-    return;
-  }
-
-  const uint8_t newView = item.data[0];
-  if (sleepModeActive)
-  {
-    Serial.println("BLE write received while sleeping, waking up...");
-    wakeFromSleepMode();
-  }
-
-  if (newView >= totalViews)
-  {
-#if defined(DEBUG_BLE)
-    Serial.printf("BLE Write ignored - invalid view number: %d (Total Views: %d)\n", newView, totalViews);
-#endif
-    return;
-  }
-
-  boopRevertAt = 0;
-  boopLoadingActive = false;
-  userSelectedView = newView;
-  scheduleLastViewPersist(newView);
-  lastActivityTime = millis();
-  if (newView == currentView)
-  {
-    return;
-  }
-
-  currentView = newView;
-  requestDisplayRefresh();
-#if defined(DEBUG_BLE)
-  Serial.printf("Write request - new view: %d\n", currentView);
-#endif
-  notifyBleTask();
-}
-
-static void handleBleConfigWriteWork(const BleWorkItem &item)
-{
-  if (item.length < 4)
-  {
-    Serial.println("Error: Config payload is not at least 4 bytes.");
-    return;
-  }
-
-#if defined(DEBUG_BLE)
-  Serial.println("Received configuration update:");
-#endif
-  const bool oldAutoBrightnessEnabled = autoBrightnessEnabled;
-  const bool oldAuroraMode = auroraModeEnabled;
-  const bool oldStaticColorMode = staticColorModeEnabled;
-  const bool oldMouthMicBrightnessOverride = mouthMicBrightnessOverrideEnabled;
-
-  autoBrightnessEnabled = (item.data[0] != 0);
-  accelerometerEnabled = (item.data[1] != 0);
-  sleepModeEnabled = (item.data[2] != 0);
-  auroraModeEnabled = (item.data[3] != 0);
-  if (item.length >= 5)
-  {
-    staticColorModeEnabled = (item.data[4] != 0);
-  }
-  else
-  {
-    staticColorModeEnabled = false;
-#if defined(DEBUG_BLE)
-    Serial.println("Static color flag not provided, defaulting to disabled.");
-#endif
-  }
-  if (item.length >= 6)
-  {
-    mouthMicBrightnessOverrideEnabled = (item.data[5] != 0);
-  }
-
-  const bool oldWaveshareBoost = waveshareBrightnessBoost;
-
-  // Bytes 6–8. A 6-byte write does not change these.
-  if (item.length >= 7)
-  {
-    disableBleIndicatorLight = (item.data[6] != 0);
-  }
-  if (item.length >= 8)
-  {
-    disableBleStatusIcon = (item.data[7] != 0);
-  }
-  if (item.length >= 9)
-  {
-    waveshareBrightnessBoost = (item.data[8] != 0);
-  }
-    // Byte 9. A short packet leaves the saved value alone.
-  if (item.length >= 10)
-  {
-    matrixRainInsteadOfPlasma = (item.data[9] != 0);
-  }
-  setMatrixRainInsteadOfPlasma(matrixRainInsteadOfPlasma);
-  if (item.length >= 11)
-  {
-    boopMode = item.data[10];
-    if (boopMode > 3)
-    {
-      boopMode = 0;
-    }
-  }
-  setBoopMode(boopMode);
-  if (staticColorModeEnabled)
-  {
-    auroraModeEnabled = false;
-  }
-
-  setAutoBrightness(autoBrightnessEnabled);
-  setAccelerometerEnabled(accelerometerEnabled);
-  setSleepMode(sleepModeEnabled);
-  setAuroraMode(auroraModeEnabled);
-  setStaticColorMode(staticColorModeEnabled);
-  setMouthMicBrightnessOverride(mouthMicBrightnessOverrideEnabled);
-  setDisableBleIndicatorLight(disableBleIndicatorLight);
-  setDisableBleStatusIcon(disableBleStatusIcon);
-  setWaveshareBrightnessBoost(waveshareBrightnessBoost);
-
-#if defined(DEBUG_BLE)
-  Serial.print("  Auto Brightness: ");
-  Serial.println(autoBrightnessEnabled ? "Enabled" : "Disabled");
-  Serial.print("  Accelerometer:   ");
-  Serial.println(accelerometerEnabled ? "Enabled" : "Disabled");
-  Serial.print("  Sleep Mode:      ");
-  Serial.println(sleepModeEnabled ? "Enabled" : "Disabled");
-  Serial.print("  Aurora Mode:     ");
-  Serial.println(auroraModeEnabled ? "Enabled" : "Disabled");
-  Serial.print("  Static Color:    ");
-  Serial.println(staticColorModeEnabled ? "Enabled" : "Disabled");
-  Serial.print("  Mouth Mic Max:   ");
-  Serial.println(mouthMicBrightnessOverrideEnabled ? "Enabled" : "Disabled");
-  Serial.print("  BLE indicator:   ");
-  Serial.println(disableBleIndicatorLight ? "Disabled" : "Enabled");
-  Serial.print("  BLE status icon: ");
-  Serial.println(disableBleStatusIcon ? "Hidden" : "Shown");
-  Serial.print("  Waveshare boost: ");
-  Serial.println(waveshareBrightnessBoost ? "Enabled" : "Disabled");
-  Serial.print("  Matrix fill:     ");
-  Serial.println(matrixRainInsteadOfPlasma ? "Matrix rain" : "Plasma");
-  Serial.print("  Boop mode:       ");
-  Serial.println(boopMode);
-#endif
-
-  if (item.characteristic != nullptr)
-  {
-           const uint8_t canonicalConfig[11] = {
-        static_cast<uint8_t>(autoBrightnessEnabled ? 1 : 0),
-        static_cast<uint8_t>(accelerometerEnabled ? 1 : 0),
-        static_cast<uint8_t>(sleepModeEnabled ? 1 : 0),
-        static_cast<uint8_t>(auroraModeEnabled ? 1 : 0),
-        static_cast<uint8_t>(staticColorModeEnabled ? 1 : 0),
-        static_cast<uint8_t>(mouthMicBrightnessOverrideEnabled ? 1 : 0),
-        static_cast<uint8_t>(disableBleIndicatorLight ? 1 : 0),
-        static_cast<uint8_t>(disableBleStatusIcon ? 1 : 0),
-        static_cast<uint8_t>(waveshareBrightnessBoost ? 1 : 0),
-        static_cast<uint8_t>(matrixRainInsteadOfPlasma ? 1 : 0),
-        static_cast<uint8_t>(boopMode)};
-    item.characteristic->setValue(canonicalConfig, sizeof(canonicalConfig));                                 // 10 boop mode                                                      // 10
-    item.characteristic->setValue(canonicalConfig, sizeof(canonicalConfig));
-  }
-
-  applyConfigOptions();
-  if (oldAutoBrightnessEnabled != autoBrightnessEnabled)
-  {
-    if (autoBrightnessEnabled)
-    {
-#if defined(DEBUG_BLE)
-      Serial.println("Auto brightness has been ENABLED. Adaptive logic will take over.");
-#endif
-    }
-    else
-    {
-#if defined(DEBUG_BLE)
-      Serial.println("Auto brightness has been DISABLED. Applying user-set brightness.");
-      Serial.printf("Applied manual brightness: %u\n", userBrightness);
-#endif
-      updateGlobalBrightnessScale(userBrightness);
-      syncBrightnessState(userBrightness);
-    }
-  }
-
-  if (oldAuroraMode != auroraModeEnabled || oldStaticColorMode != staticColorModeEnabled)
-  {
-    facePlasmaDirty = true;
-    requestDisplayRefresh();
-  }
-    if (oldMouthMicBrightnessOverride != mouthMicBrightnessOverrideEnabled)
-  {
-    requestDisplayRefresh();
-    notifyBleTask();
-  }
-
-  // Software gain changes apply through the rendering task without rebooting.
-  if (oldWaveshareBoost != waveshareBrightnessBoost)
-  {
-    updateGlobalBrightnessScale(static_cast<uint8_t>(constrain(getLastAppliedBrightness(), 0, 255)));
-  }
-}
-
-// One byte, 0–255. Higher value raises the auto-brightness floor.
-static void handleBleAutoBrightnessFloorWriteWork(const BleWorkItem &item)
-{
-  if (item.length < 1)
-  {
-    return;
-  }
-  autoBrightnessFloor = item.data[0];
-  setAutoBrightnessFloor(autoBrightnessFloor);
-  Serial.printf("Auto brightness floor set to %u\n", autoBrightnessFloor);
-  if (item.characteristic != nullptr)
-  {
-    item.characteristic->setValue(&autoBrightnessFloor, 1);
-  }
-}
-
-static void handleBleBrightnessWriteWork(const BleWorkItem &item)
-{
-  if (item.length < 1)
-  {
-    return;
-  }
-
-  userBrightness = item.data[0];
-  setUserBrightness(userBrightness);
-#if DEBUG_BRIGHTNESS
-  Serial.printf("Brightness target set to %u\n", userBrightness);
-#endif
-}
-
-static void handleBleStaticColorWriteWork(const BleWorkItem &item)
-{
-  if (item.characteristic == nullptr || item.length == 0)
-  {
-    return;
-  }
-
-  std::string normalized;
-  if (!applyStaticColorBytes(item.data, item.length, true, &normalized))
-  {
-    Serial.println("Invalid static color payload received over BLE.");
-    return;
-  }
-
-  item.characteristic->setValue(normalized);
-  item.characteristic->notify();
-#if DEBUG_MODE
-  Serial.printf("Static color updated to #%s\n", normalized.c_str());
-#endif
-}
-
-static void handleBleStrobeSettingsWriteWork(const BleWorkItem &item)
-{
-  if (item.characteristic == nullptr || item.length < 2)
-  {
-    return;
-  }
-
-  constexpr uint8_t kOpcodeColor = 0x01;
-  constexpr uint8_t kOpcodeSpeed = 0x02;
-
-  const uint8_t opcode = item.data[0];
-  const uint8_t *payload = item.data + 1;
-  const size_t payloadLength = item.length - 1;
-
-  if (opcode == kOpcodeColor)
-  {
-    std::string normalized;
-    if (!applyStrobeColorBytes(payload, payloadLength, true, &normalized))
-    {
-      Serial.println("Invalid strobe color payload received over BLE.");
-      return;
-    }
-#if DEBUG_MODE
-    Serial.printf("Strobe color updated to #%s\n", normalized.c_str());
-#endif
-  }
-  else if (opcode == kOpcodeSpeed)
-  {
-    uint16_t speedMs = 0;
-    if (!applyStrobeSpeedBytes(payload, payloadLength, true, &speedMs))
-    {
-      Serial.println("Invalid strobe speed payload received over BLE.");
-      return;
-    }
-#if DEBUG_MODE
-    Serial.printf("Strobe speed updated to %u ms\n", static_cast<unsigned int>(speedMs));
-#endif
-  }
-  else
-  {
-    Serial.printf("Invalid strobe settings opcode received over BLE: 0x%02X\n", opcode);
-    return;
-  }
-
-  const std::string response = buildStrobeSettingsPayload();
-  item.characteristic->setValue(response);
-  item.characteristic->notify();
-}
-
-static void bleWorkerTask(void *param)
-{
-  (void)param;
-  BleWorkItem item{};
-
-  for (;;)
-  {
-    if (xQueueReceive(bleWorkQueue, &item, portMAX_DELAY) != pdPASS)
-    {
-      continue;
-    }
-
-    const uint32_t workStartMicros = micros();
-    PERF_SCOPE(PerfBucket::Ble);
-    switch (item.type)
-    {
-    case BleWorkType::Command:
-      handleBleCommandWork(item);
-      break;
-    case BleWorkType::FaceWrite:
-      handleBleFaceWriteWork(item);
-      break;
-    case BleWorkType::ConfigWrite:
-      handleBleConfigWriteWork(item);
-      break;
-    case BleWorkType::BrightnessWrite:
-      handleBleBrightnessWriteWork(item);
-      break;
-    case BleWorkType::AutoBrightnessFloorWrite:
-      handleBleAutoBrightnessFloorWriteWork(item);
-      break;
-    case BleWorkType::StaticColorWrite:
-      handleBleStaticColorWriteWork(item);
-      break;
-    case BleWorkType::StrobeSettingsWrite:
-      handleBleStrobeSettingsWriteWork(item);
-      break;
-    case BleWorkType::ScrollWrite:
-      handleScrollWritePayload(item.characteristic, item.data, item.length);
-      break;
-    case BleWorkType::OtaPacket:
-      otaCallbacks.processPacket(item.characteristic, item.data, item.length);
-      break;
-    default:
-      break;
-    }
-    perfTelemetryRecordDuration(PerfDurationId::BleWorkerTaskBusy, micros() - workStartMicros);
-  }
-}
-
-class DescriptorCallbacks : public NimBLEDescriptorCallbacks
-{
-  void onWrite(NimBLEDescriptor *pDescriptor, NimBLEConnInfo &connInfo) override
-  {
-    std::string dscVal = pDescriptor->getValue();
-    Serial.printf("Descriptor written value: %s\n", dscVal.c_str());
-  }
-  void onRead(NimBLEDescriptor *pDescriptor, NimBLEConnInfo &connInfo) override
-  {
-    Serial.printf("%s Descriptor read\n", pDescriptor->getUUID().toString().c_str());
-  }
-} dscCallbacks;
-
 void handleBLEStatusLED()
 {
   const PairingSnapshot pairingSnapshot = getPairingSnapshot();
@@ -1864,7 +872,7 @@ if (disableBleIndicatorLight)
   }
 }
 
-static void resetBlePairing()
+void resetBlePairing()
 {
   if (!pServer)
   {
@@ -2372,7 +1380,7 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
   if (useStaticColorMode)
   {
     ensureStaticColorLoaded();
-    staticColorRgb = gStaticColorState.color;
+    staticColorRgb = getStaticColorCached();
     staticColorRgb.r = static_cast<uint8_t>((static_cast<uint16_t>(staticColorRgb.r) * combinedBrightnessScale + 128) >> 8);
     staticColorRgb.g = static_cast<uint8_t>((static_cast<uint16_t>(staticColorRgb.g) * combinedBrightnessScale + 128) >> 8);
     staticColorRgb.b = static_cast<uint8_t>((static_cast<uint16_t>(staticColorRgb.b) * combinedBrightnessScale + 128) >> 8);
@@ -2585,7 +1593,7 @@ void drawBitmapAdvanced(int x, int y, int width, int height, const uint8_t *bitm
   if (staticColorModeEnabled)
   {
     ensureStaticColorLoaded();
-    staticColorValue = gStaticColorState.color;
+    staticColorValue = getStaticColorCached();
   }
   else
   {
@@ -3161,7 +2169,7 @@ void blinkingEyes()
       if (staticColorModeEnabled)
       {
         ensureStaticColorLoaded();
-        eye = dma_display->color565(gStaticColorState.color.r, gStaticColorState.color.g, gStaticColorState.color.b);
+        eye = dma_display->color565(getStaticColorCached().r, getStaticColorCached().g, getStaticColorCached().b);
       }
       const uint16_t brow = dma_display->color565(255, 40, 0);
       const uint16_t fang = dma_display->color565(230, 255, 230);
@@ -3453,7 +2461,7 @@ void baseFace()
 void staticColor()
 {
   ensureStaticColorLoaded();
-  const CRGB color = gStaticColorState.color;
+  const CRGB color = getStaticColorCached();
   const uint16_t encodedColor = dma_display->color565(color.r, color.g, color.b);
   dma_display->fillScreen(encodedColor);
 }
@@ -3682,7 +2690,8 @@ void bleNotifyTask(void *param)
 #endif
     if (deviceConnected)
     {
-      uint8_t bleViewValue = static_cast<uint8_t>(currentView);
+      uint8_t bleViewValue;
+      { AppStateLock stateLock; bleViewValue = static_cast<uint8_t>(currentView); }
       pFaceCharacteristic->setValue(&bleViewValue, 1);
       pFaceCharacteristic->notify();
       pConfigCharacteristic->notify();
@@ -3734,6 +2743,7 @@ static void displayTask(void *pvParameters)
   for (;;)
   {
     const uint32_t taskLoopStartMicros = micros();
+    AppStateLock stateLock;
     // Consume once between frames, never while another task is drawing pixels.
     // Coalescing prevents stale fade steps from building up if rendering is busy.
     const int pendingBrightness = gPendingPanelBrightness.exchange(-1, std::memory_order_relaxed);
@@ -3751,6 +2761,7 @@ static void displayTask(void *pvParameters)
       pendingView = requestedView;
       displayCurrentView(requestedView);
       perfTelemetryRecordDuration(PerfDurationId::DisplayTaskBusy, micros() - taskLoopStartMicros);
+      stateLock.unlock();
       vTaskDelay(display_timing::nextFrameDelay(xTaskGetTickCount(), lastWake, millisToTicksCeil(sleepFrameInterval)));
       continue;
     }
@@ -3849,6 +2860,7 @@ static void displayTask(void *pvParameters)
         !bluetoothOverlayNeedsContinuousRefresh(nowMs))
     {
       perfTelemetryRecordDuration(PerfDurationId::DisplayTaskBusy, micros() - taskLoopStartMicros);
+      stateLock.unlock();
       ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
       lastWake = xTaskGetTickCount();
       continue;
@@ -3859,6 +2871,7 @@ static void displayTask(void *pvParameters)
       frameIntervalMs = LF_OTA_ACTIVE_FRAME_INTERVAL_MS;
     }
     perfTelemetryRecordDuration(PerfDurationId::DisplayTaskBusy, micros() - taskLoopStartMicros);
+    stateLock.unlock();
     vTaskDelay(display_timing::nextFrameDelay(xTaskGetTickCount(), lastWake, millisToTicksCeil(frameIntervalMs)));
   }
 }
@@ -4043,6 +3056,7 @@ void updateAndDrawFullScreenSpiral(SpiralColorMode colorMode)
 
 void setup()
 {
+  initializeAppStateSync();
   Serial.begin(BAUD_RATE);
 
   // Native USB CDC on the ESP32-S3 can take a moment to attach after reset.
@@ -4161,282 +3175,7 @@ void setup()
     textY = (dma_display->height() - h) / 2 + h; // Center vertically
   */
 
-  ///////////////////// Setup BLE ////////////////////////
-  Serial.println("Initializing BLE...");
-  // NimBLEDevice::init("LumiFur_Controller");
-  NimBLEDevice::init("LF-052618");
-  // NimBLEDevice::setPower(ESP_PWR_LVL_P9); // Power level 9 (highest) for best range
-  // NimBLEDevice::setPower(ESP_PWR_LVL_P21, NimBLETxPowerType::All); // Power level 21 (highest) for best range
-  NimBLEDevice::setPower(ESP_PWR_LVL_P9, NimBLETxPowerType::All); // Power level 21 (highest) for best range
-  // NimBLEDevice::setSecurityAuth(BLE_SM_PAIR_AUTHREQ_BOND | BLE_SM_PAIR_AUTHREQ_SC);
-  NimBLEDevice::setSecurityAuth(true, true, true);
-  // Keep default passkey so onPassKeyDisplay supplies a dynamic code.
-  NimBLEDevice::setSecurityPasskey(123456);
-  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_DISPLAY_ONLY);
-  pServer = NimBLEDevice::createServer();
-  pServer->setCallbacks(&serverCallbacks);
-  pServer->advertiseOnDisconnect(false);
-
-  NimBLEService *pService = pServer->createService(SERVICE_UUID);
-
-  NimBLECharacteristic *pDeviceInfoCharacteristic = pService->createCharacteristic(
-      INFO_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ |
-      NIMBLE_PROPERTY::NOTIFY
-    );
-
-  // Construct JSON string
-  std::string jsonInfo = std::string("{") +
-                         "\"fw\":\"" + std::string(FIRMWARE_VERSION) + "\"," +
-                         "\"commit\":\"" + std::string(GIT_COMMIT) + "\"," +
-                         "\"branch\":\"" + std::string(GIT_BRANCH) + "\"," +
-                         "\"build\":\"" + std::string(BUILD_DATE) + " " + BUILD_TIME + "\"," +
-                         "\"model\":\"" + std::string(DEVICE_MODEL) + "\"," +
-                         "\"compat\":\"" + std::string(APP_COMPAT_VERSION) + "\"," +
-                         "\"id\":\"" + NimBLEDevice::getAddress().toString() + "\"" +
-                         "}";
-
-  pDeviceInfoCharacteristic->setValue(jsonInfo.c_str());
-  Serial.println("Device Info Service started");
-  Serial.println(jsonInfo.c_str());
-
-  // Face control characteristic with encryption
-  pFaceCharacteristic = pService->createCharacteristic(
-      CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ |
-          NIMBLE_PROPERTY::WRITE |
-          NIMBLE_PROPERTY::WRITE_ENC |
-          NIMBLE_PROPERTY::NOTIFY
-      // NIMBLE_PROPERTY::READ_ENC  // only allow reading if paired / encrypted
-      // NIMBLE_PROPERTY::WRITE_ENC  // only allow writing if paired / encrypted
-  );
-
-  // Set initial view value
-  uint8_t bleViewValue = static_cast<uint8_t>(currentView);
-  pFaceCharacteristic->setValue(&bleViewValue, 1);
-  pFaceCharacteristic->setCallbacks(&chrCallbacks);
-
-  pCommandCharacteristic = pService->createCharacteristic(
-      COMMAND_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::WRITE |
-      NIMBLE_PROPERTY::WRITE_ENC |
-      NIMBLE_PROPERTY::NOTIFY
-    );
-  pCommandCharacteristic->setCallbacks(&cmdCallbacks);
-  Serial.print("Command Characteristic created, UUID: ");
-  Serial.println(pCommandCharacteristic->getUUID().toString().c_str());
-  Serial.print("Properties: ");
-  Serial.println(pCommandCharacteristic->getProperties()); // Print properties as integer
-
-  // Temperature characteristic with encryption
-  pTemperatureCharacteristic =
-      pService->createCharacteristic(
-          TEMPERATURE_CHARACTERISTIC_UUID,
-          NIMBLE_PROPERTY::WRITE |
-          NIMBLE_PROPERTY::NOTIFY
-          //NIMBLE_PROPERTY::READ_ENC
-      );
-
-  // Create a characteristic for configuration.
-  pConfigCharacteristic = pService->createCharacteristic(
-      CONFIG_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ |
-      NIMBLE_PROPERTY::WRITE |
-      NIMBLE_PROPERTY::WRITE_ENC |
-      //NIMBLE_PROPERTY::WRITE_NR |
-      NIMBLE_PROPERTY::NOTIFY
-    );
-
-  // Set the callback to handle writes.
-  pConfigCharacteristic->setCallbacks(&configCallbacks);
-
-  // Optionally, set an initial value.
-  uint8_t initValue[11] = {
-      static_cast<uint8_t>(autoBrightnessEnabled ? 1 : 0),             // 0
-      static_cast<uint8_t>(accelerometerEnabled ? 1 : 0),              // 1
-      static_cast<uint8_t>(sleepModeEnabled ? 1 : 0),                  // 2
-      static_cast<uint8_t>(auroraModeEnabled ? 1 : 0),                 // 3
-      static_cast<uint8_t>(staticColorModeEnabled ? 1 : 0),            // 4
-      static_cast<uint8_t>(mouthMicBrightnessOverrideEnabled ? 1 : 0), // 5
-      static_cast<uint8_t>(disableBleIndicatorLight ? 1 : 0),          // 6
-      static_cast<uint8_t>(disableBleStatusIcon ? 1 : 0),              // 7
-      static_cast<uint8_t>(waveshareBrightnessBoost ? 1 : 0),          // 8
-      static_cast<uint8_t>(matrixRainInsteadOfPlasma ? 1 : 0),         // 9
-      static_cast<uint8_t>(boopMode)};                                 // 10
-
-  pConfigCharacteristic->setValue(initValue, sizeof(initValue));
-  if (pConfigCharacteristic != nullptr)
-  {
-    Serial.println("Config Characteristic created");
-  }
-  else
-  {
-    Serial.println("Error: Failed to create config characteristic.");
-  }
-
-  //
-  pTemperatureLogsCharacteristic = pService->createCharacteristic(
-      TEMPERATURE_LOGS_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::NOTIFY);
-  // pTemperatureLogsCharacteristic->setCallbacks(&chrCallbacks);
-  Serial.println("Command Characteristic created");
-  pTemperatureLogsCharacteristic->setCallbacks(&logsCallbacks); // If using new logsCallbacks
-  Serial.print("Temperature Logs Characteristic created, UUID: ");
-  Serial.println(pTemperatureLogsCharacteristic->getUUID().toString().c_str());
-  Serial.print("Properties: ");
-  Serial.println(pTemperatureLogsCharacteristic->getProperties()); // Print properties as integer
-
-  // Set up descriptors
-  NimBLE2904 *faceDesc = pFaceCharacteristic->create2904();
-  faceDesc->setFormat(NimBLE2904::FORMAT_UINT8);
-  faceDesc->setUnit(0x2700); // Unit-less number
-  faceDesc->setCallbacks(&dscCallbacks);
-  // Add user description descriptor
-  NimBLEDescriptor *pDesc =
-      pFaceCharacteristic->createDescriptor(
-          "2901",
-          NIMBLE_PROPERTY::READ,
-          20);
-  pDesc->setValue("Face Control");
-
-  // Assuming pTemperatureCharacteristic is already created:
-  NimBLEDescriptor *tempDesc =
-      pTemperatureCharacteristic->createDescriptor(
-          "2901", // Standard UUID for the Characteristic User Description
-          NIMBLE_PROPERTY::READ,
-          20 // Maximum length for the descriptor's value
-      );
-  tempDesc->setValue("Temperature Sensor");
-  NimBLE2904 *tempFormat = pTemperatureCharacteristic->create2904();
-  tempFormat->setFormat(NimBLE2904::FORMAT_UINT8);
-  tempFormat->setUnit(0x272F); // For example, 0x272F might represent degrees Celsius per specific BLE specifications
-
-  pBrightnessCharacteristic = pService->createCharacteristic(
-      BRIGHTNESS_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ |
-          // NIMBLE_PROPERTY::NOTIFY |
-          NIMBLE_PROPERTY::WRITE |
-          NIMBLE_PROPERTY::WRITE_ENC |
-          NIMBLE_PROPERTY::WRITE_NR);
-  pBrightnessCharacteristic->setCallbacks(&brightnessCallbacks);
-  // initialize with current brightness
-
-  
-  NimBLECharacteristic *pAutoBrightnessFloorCharacteristic = nullptr;
-  pAutoBrightnessFloorCharacteristic = pService->createCharacteristic(
-    AUTO_BRIGHTNESS_FLOOR_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ | NIMBLE_PROPERTY::WRITE | NIMBLE_PROPERTY::WRITE_NR);
-  pAutoBrightnessFloorCharacteristic->setCallbacks(&autoBrightnessFloorCallbacks);
-
-  pOtaCharacteristic = pService->createCharacteristic(
-      OTA_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ |
-          NIMBLE_PROPERTY::WRITE_ENC |
-        NIMBLE_PROPERTY::WRITE_NR |
-          NIMBLE_PROPERTY::NOTIFY);
-  pOtaCharacteristic->setCallbacks(&otaCallbacks);
-  NimBLEDescriptor *otaDesc = pOtaCharacteristic->createDescriptor(
-      "2901",
-      NIMBLE_PROPERTY::READ,
-      20);
-  otaDesc->setValue("OTA Control");
-  pBrightnessCharacteristic->setValue(&userBrightness, 1);
-  pAutoBrightnessFloorCharacteristic->setValue(&autoBrightnessFloor, 1);
-
-  setupAdaptiveBrightness();
-
-  // Create lux characteristic (read-only with notifications)
-  pLuxCharacteristic = pService->createCharacteristic(
-      LUX_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ |
-          NIMBLE_PROPERTY::NOTIFY);
-
-  // Initialize with current lux value
-  uint16_t initialLux = getAmbientLuxU16();
-  uint8_t luxBytes[2] = {
-      static_cast<uint8_t>(initialLux & 0xFF),
-      static_cast<uint8_t>((initialLux >> 8) & 0xFF)};
-  pLuxCharacteristic->setValue(luxBytes, 2);
-  // Add descriptor for lux characteristic
-  NimBLEDescriptor *luxDesc = pLuxCharacteristic->createDescriptor(
-      "2901", // Standard UUID for Characteristic User Description
-      NIMBLE_PROPERTY::READ,
-      20 // Maximum length for the descriptor's value
-  );
-  luxDesc->setValue("Ambient Light Sensor");
-  NimBLE2904 *luxFormat = pLuxCharacteristic->create2904();
-  luxFormat->setFormat(NimBLE2904::FORMAT_UINT16);
-  luxFormat->setUnit(0x2731); // 0x2731 is the standard unit for Illuminance (lux)
-
-  pScrollTextCharacteristic = pService->createCharacteristic(
-      SCROLL_TEXT_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ |
-          NIMBLE_PROPERTY::WRITE |
-          NIMBLE_PROPERTY::WRITE_ENC | // Require encryption for writes.
-          NIMBLE_PROPERTY::NOTIFY);
-  pScrollTextCharacteristic->setCallbacks(&scrollTextCallbacks);
-
-  // Set initial value (current text)
-  pScrollTextCharacteristic->setValue(txt);
-
-  // Add descriptor
-  NimBLEDescriptor *scrollTextDesc = pScrollTextCharacteristic->createDescriptor(
-      "2901",
-      NIMBLE_PROPERTY::READ,
-      20);
-  scrollTextDesc->setValue("Scrolling Text");
-
-  Serial.println("Scroll Text Characteristic created");
-
-  pStaticColorCharacteristic = pService->createCharacteristic(
-      STATIC_COLOR_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ |
-          NIMBLE_PROPERTY::READ_ENC |
-          NIMBLE_PROPERTY::WRITE |
-          NIMBLE_PROPERTY::WRITE_ENC |
-          NIMBLE_PROPERTY::WRITE_NR |
-          NIMBLE_PROPERTY::NOTIFY);
-  pStaticColorCharacteristic->setCallbacks(&staticColorCallbacks);
-  String initialColorHex = getStaticColorHexString();
-  pStaticColorCharacteristic->setValue(initialColorHex.c_str());
-  NimBLEDescriptor *staticColorDesc = pStaticColorCharacteristic->createDescriptor(
-      "2901",
-      NIMBLE_PROPERTY::READ,
-      20);
-  staticColorDesc->setValue("Static Color");
-  Serial.println("Static Color Characteristic created");
-
-  pStrobeSettingsCharacteristic = pService->createCharacteristic(
-      STROBE_SETTINGS_CHARACTERISTIC_UUID,
-      NIMBLE_PROPERTY::READ |
-          NIMBLE_PROPERTY::READ_ENC |
-          NIMBLE_PROPERTY::WRITE |
-          NIMBLE_PROPERTY::WRITE_ENC |
-          NIMBLE_PROPERTY::WRITE_NR |
-          NIMBLE_PROPERTY::NOTIFY);
-  pStrobeSettingsCharacteristic->setCallbacks(&strobeSettingsCallbacks);
-  const std::string initialStrobeSettings = buildStrobeSettingsPayload();
-  pStrobeSettingsCharacteristic->setValue(initialStrobeSettings);
-  NimBLEDescriptor *strobeSettingsDesc = pStrobeSettingsCharacteristic->createDescriptor(
-      "2901",
-      NIMBLE_PROPERTY::READ,
-      20);
-  strobeSettingsDesc->setValue("Strobe Settings");
-  Serial.println("Strobe Settings Characteristic created");
-
-  // nimBLEService* pBaadService = pServer->createService("BAAD");
-  // Services are started when the GATT server starts during advertising.
-
-  /** Create an advertising instance and add the services to the advertised data */
-  NimBLEAdvertising *pAdvertising = NimBLEDevice::getAdvertising();
-  pAdvertising->setName("LumiFur_Controller");
-  // pAdvertising->setAppearance(0);         // Appearance value (0 is generic)
-  pAdvertising->enableScanResponse(true); // Enable scan response to include more data
-  pAdvertising->addServiceUUID(pService->getUUID());
-  refreshBleAdvertising();
-
-  Serial.println(shouldBleAdvertise() ? "BLE setup complete - advertising started"
-                                      : "BLE setup complete - waiting for pairing mode");
+  setupBleControl();
 
   // Redefine pins if required
   // HUB75_I2S_CFG::i2s_pins _pins={R1, G1, BL1, R2, G2, BL2, CH_A, CH_B, CH_C, CH_D, CH_E, LAT, OE, CLK};
@@ -4627,10 +3366,9 @@ void setup()
   // #endif
 
   // Spawn BLE notify task (you already have):
-  bleWorkQueue = xQueueCreate(LF_BLE_WORKER_QUEUE_LENGTH, sizeof(BleWorkItem));
-  if (bleWorkQueue == nullptr)
+  if (!startBleWorker())
   {
-    Serial.println("Failed to create BLE worker queue");
+    Serial.println("Failed to start BLE worker");
     err(125);
   }
 
@@ -4641,15 +3379,6 @@ void setup()
       NULL,
       1,
       &bleNotifyTaskHandle,
-      CONFIG_BT_NIMBLE_PINNED_TO_CORE);
-
-  xTaskCreatePinnedToCore(
-      bleWorkerTask,
-      "BLE Worker",
-      LF_BLE_WORKER_STACK_SIZE,
-      NULL,
-      LF_BLE_WORKER_PRIORITY,
-      &bleWorkerTaskHandle,
       CONFIG_BT_NIMBLE_PINNED_TO_CORE);
 
   // Core 0 owns rendering. Arduino loop, BLE and microphone work stay on core 1.
@@ -5297,249 +4026,10 @@ void displayCurrentView(int view)
 }
 
 // Helper function to get the current threshold value
-float getCurrentThreshold()
-{
-  return useShakeSensitivity ? SHAKE_THRESHOLD : SLEEP_THRESHOLD;
-}
-
-// Add with your other utility functions
-// constexpr unsigned long MOTION_SAMPLE_INTERVAL_FAST = 15;  // ms between accel reads when looking for shakes
-constexpr unsigned long MOTION_SAMPLE_INTERVAL_SLOW = 120; // ms between reads for sleep detection
-
-static unsigned long lastAccelSampleTime = 0;
-
-static bool refreshAccelSampleIfStale(const unsigned long sampleInterval)
-{
-  if (!accelerometerEnabled || !g_accelerometer_initialized)
-  {
-    return false;
-  }
-
-  const unsigned long now = millis();
-  if (!accelSampleValid || (now - lastAccelSampleTime) >= sampleInterval)
-  {
-    PROFILE_SECTION("AccelRead");
-    accel.read();
-
-    const float x = accel.x_g;
-    const float y = accel.y_g;
-    const float z = accel.z_g;
-
-    // Calculate the movement delta from last reading
-    lastAccelDeltaX = fabs(x - prevAccelX);
-    lastAccelDeltaY = fabs(y - prevAccelY);
-    lastAccelDeltaZ = fabs(z - prevAccelZ);
-
-    // Store current values for next comparison and reuse across effects
-    prevAccelX = x;
-    prevAccelY = y;
-    prevAccelZ = z;
-    lastAccelSampleTime = now;
-    accelSampleValid = true;
-
-    // Update cached comparisons for both thresholds so other checks can reuse this sample
-    lastMotionAboveShake = (lastAccelDeltaX > SHAKE_THRESHOLD) || (lastAccelDeltaY > SHAKE_THRESHOLD) || (lastAccelDeltaZ > SHAKE_THRESHOLD);
-    lastMotionAboveSleep = (lastAccelDeltaX > SLEEP_THRESHOLD) || (lastAccelDeltaY > SLEEP_THRESHOLD) || (lastAccelDeltaZ > SLEEP_THRESHOLD);
-  }
-
-  return accelSampleValid;
-}
-
-bool getLatestAcceleration(float &x, float &y, float &z, const unsigned long sampleInterval)
-{
-  if (!refreshAccelSampleIfStale(sampleInterval))
-  {
-    return false;
-  }
-
-  x = prevAccelX;
-  y = prevAccelY;
-  z = prevAccelZ;
-  return true;
-}
-
-bool detectMotion()
-{
-  if (!accelerometerEnabled || !g_accelerometer_initialized)
-  {
-    return false; // Guard against uninitialised accelerometer
-  }
-
-  const unsigned long sampleInterval = useShakeSensitivity ? MOTION_SAMPLE_INTERVAL_FAST : MOTION_SAMPLE_INTERVAL_SLOW;
-  refreshAccelSampleIfStale(sampleInterval);
-
-  if (currentView == VIEW_PIXEL_DUST)
-  {
-    useShakeSensitivity = false; // Disable shake-to-spiral while sand is active.
-    return false;
-  }
-
-  // Return the cached comparison for the desired threshold without re-reading.
-  return useShakeSensitivity ? lastMotionAboveShake : lastMotionAboveSleep;
-}
-
-void enterSleepMode()
-{
-  if (sleepModeActive)
-    return; // Already sleeping
-  #if DEBUG_MODE
-  Serial.println("Entering sleep mode");
-  #endif
-  sleepModeActive = true;
-  micSetEnabled(false);
-  applyMouthMicBrightnessPolicy(false);
-  preSleepView = currentView;                   // Save current view
-  updateGlobalBrightnessScale(sleepBrightness);
-  requestDisplayRefresh();
-
-  reduceCPUSpeed(); // Reduce CPU speed for power saving
-
-  sleepFrameInterval = 100; // 10 FPS during sleep to save power
-
-  /// Reduce BLE activity
-  if (!deviceConnected)
-  {
-    NimBLEDevice::getAdvertising()->stop();               // Stop normal advertising
-    vTaskDelay(pdMS_TO_TICKS(10));                        // Short delay
-    NimBLEDevice::getAdvertising()->setMinInterval(2400); // 1500 ms
-    NimBLEDevice::getAdvertising()->setMaxInterval(4800); // 3000 ms
-    refreshBleAdvertising();
-    #if DEBUG_MODE
-    Serial.println("Reduced BLE Adv interval for sleep.");
-    #endif
-  }
-  else
-  {
-    // Maybe send a sleep notification?
-    if (pTemperatureCharacteristic != nullptr)
-    { // Check if characteristic exists
-      char sleepMsg[] = "Sleep";
-      pTemperatureCharacteristic->setValue(sleepMsg);
-      notifyBleTask();
-      // pTemperatureCharacteristic->notify(); // Consider notifyPending
-    }
-  }
-  // No need to change sleepFrameInterval here, main loop timing controls frame rate
-}
-
-void checkSleepMode()
-{
-  const unsigned long now = millis();
-  // Ensure we use the correct sensitivity for wake-up/sleep checks
-  useShakeSensitivity = false; // Use SLEEP_THRESHOLD when checking general activity/wake conditions
-  bool motionDetectedByAccel = false;
-  if (accelerometerEnabled && g_accelerometer_initialized)
-  { // Only check accel if enabled and initialized
-    const bool sampleFresh = accelSampleValid && (now - lastAccelSampleTime) < MOTION_SAMPLE_INTERVAL_SLOW;
-    if (!sampleFresh)
-    {
-      detectMotion(); // Updates cached deltas for both thresholds
-    }
-    motionDetectedByAccel = lastMotionAboveSleep;
-  }
-
-  if (sleepModeActive)
-  {
-    // --- Currently Sleeping ---
-    if (motionDetectedByAccel)
-    {
-      #if DEBUG_MODE
-      Serial.println("Motion detected while sleeping, waking up..."); // DEBUG
-      #endif
-      wakeFromSleepMode();                                            // Call the wake function
-                                                                      // wakeFromSleepMode already sets sleepModeActive = false and resets lastActivityTime
-    }
-    // No need to check timeout when already sleeping
-  }
-  else
-  {
-    // --- Currently Awake ---
-    if (motionDetectedByAccel)
-    {
-      // Any motion resets the activity timer when awake
-      lastActivityTime = now;
-      // Serial.println("Motion detected while awake, activity timer reset."); // DEBUG Optional
-    }
-    else
-    {
-      // No motion detected while awake, check timeout for sleep entry
-      // Ensure sleepModeEnabled config flag is checked
-      const unsigned long inactivityMs = (now >= lastActivityTime) ? (now - lastActivityTime) : 0;
-      if (sleepModeEnabled && (inactivityMs > SLEEP_TIMEOUT_MS))
-      {
-        #if DEBUG_MODE
-        Serial.println("Inactivity timeout reached, entering sleep..."); // DEBUG
-        #endif
-        enterSleepMode();
-      }
-    }
-  }
-}
-
 // Count a proximity boop. Higher thresholds win on the same hit.
-static void handleBoop(unsigned long now)
-{
-  uint8_t kept = 0;
-  for (uint8_t i = 0; i < boopHitCount; ++i)
-  {
-    if (now - boopHits[i] <= 15000UL)
-      boopHits[kept++] = boopHits[i];
-  }
-  boopHitCount = kept;
-  if (boopHitCount == 16)
-  {
-    for (uint8_t i = 1; i < boopHitCount; ++i)
-      boopHits[i - 1] = boopHits[i];
-    --boopHitCount;
-  }
-  boopHits[boopHitCount++] = now;
-
-  uint8_t hits10s = 0;
-  const uint8_t hits15s = boopHitCount;
-  for (uint8_t i = 0; i < boopHitCount; ++i)
-  {
-    if (now - boopHits[i] <= 10000UL)
-      ++hits10s;
-  }
-  Serial.printf("Boop mode=%u hits10=%u hits15=%u\n", boopMode, hits10s, hits15s);
-  const unsigned long blushSpan = fadeInDuration + fullDuration + fadeOutDuration;
-
-  int specialView = -1;
-  if (boopMode >= 3 && hits15s >= 15)
-  {
-    specialView = VIEW_LOADING_BAR;
-  }
-  else if (boopMode >= 2 && hits15s >= 10)
-  {
-    specialView = VIEW_ANGRY_FACE;
-  }
-  else if (boopMode >= 1 && hits10s >= 5)
-  {
-    specialView = VIEW_SPIRAL_EYES;
-  }
-
-  if (specialView >= 0)
-  {
-    blushState = BlushState::Inactive;
-    wasBlushOverlay = false;
-    boopSavedView = userSelectedView;
-    currentView = static_cast<uint8_t>(specialView);
-    boopRevertAt = now + (specialView == VIEW_LOADING_BAR ? 3000UL : blushSpan);
-    notifyBleTask();
-    requestDisplayRefresh();
-    return;
-  }
-
-  if (blushState == BlushState::Inactive)
-  {
-    blushState = BlushState::FadeIn;
-    blushStateStartTime = now;
-    originalViewBeforeBlush = userSelectedView;
-    wasBlushOverlay = true;
-  }
-}
 void loop()
 {
+  AppStateLock stateLock;
   const uint32_t loopStartMicros = micros();
 
   // Serial.println(apds.readProximity());
@@ -5559,6 +4049,8 @@ void loop()
 
   // Check for motion and handle sleep/wake state
   // checkSleepMode(); // Handles motion detection, wake, and sleep entry
+
+  handleButtonInputs(loopNow);
 
   // Only process inputs/updates if NOT in sleep mode
   if (!sleepModeActive)
@@ -5620,155 +4112,6 @@ void loop()
                      useShakeSensitivity = false; // Switch back to low threshold for general sleep/wake checks
                    }
                  });
-
-// --- Handle button inputs for view changes and BLE pairing ---
-#if defined(BUTTON_UP) || defined(BUTTON_DOWN)
-    PERF_SCOPE(PerfBucket::Io);
-#ifdef BUTTON_UP
-    static ButtonState upButtonState;
-#endif
-#ifdef BUTTON_DOWN
-    static ButtonState downButtonState;
-#endif
-#if defined(BUTTON_UP) && defined(BUTTON_DOWN)
-    static bool pairingHoldActive = false;
-    static bool pairingHoldTriggered = false;
-    static unsigned long pairingHoldStartMs = 0;
-#endif
-
-#ifdef BUTTON_UP
-    updateButtonState(upButtonState, digitalRead(BUTTON_UP) == LOW, loopNow, BUTTON_DEBOUNCE_MS);
-#endif
-#ifdef BUTTON_DOWN
-    updateButtonState(downButtonState, digitalRead(BUTTON_DOWN) == LOW, loopNow, BUTTON_DEBOUNCE_MS);
-#endif
-
-#ifdef BUTTON_UP
-    const bool upPressed = upButtonState.stablePressed;
-#endif
-#ifdef BUTTON_DOWN
-    const bool downPressed = downButtonState.stablePressed;
-#endif
-#if defined(BUTTON_UP) && defined(BUTTON_DOWN)
-    const bool pairingResetHoldPressed = upPressed && downPressed;
-#else
-    const bool pairingResetHoldPressed = false;
-#endif
-
-#if defined(BUTTON_UP) && defined(BUTTON_DOWN)
-    if (pairingResetHoldPressed)
-    {
-      suppressButtonPress(upButtonState);
-      suppressButtonPress(downButtonState);
-      noteButtonInteraction(loopNow);
-      lastActivityTime = loopNow;
-      if (!pairingHoldActive)
-      {
-        pairingHoldActive = true;
-        pairingHoldStartMs = loopNow;
-      }
-      else if (!pairingHoldTriggered && (loopNow - pairingHoldStartMs >= PAIRING_RESET_HOLD_MS))
-      {
-        pairingHoldTriggered = true;
-        resetBlePairing();
-      }
-    }
-    else
-    {
-      pairingHoldActive = false;
-      pairingHoldTriggered = false;
-    }
-#endif
-
-    bool viewChangedByButton = false;
-    bool pairingModeTriggered = false;
-
-    auto enablePairingModeFromHeldButton = [&]()
-    {
-      noteButtonInteraction(loopNow);
-      startPairingMode(PAIRING_MODE_WINDOW_MS);
-      refreshBleAdvertising();
-      lastActivityTime = loopNow;
-      pairingModeTriggered = true;
-      requestDisplayRefresh();
-    };
-
-#ifdef BUTTON_UP
-    if (!pairingResetHoldPressed && upPressed &&
-        consumeButtonLongPress(upButtonState, loopNow, PAIRING_MODE_HOLD_MS))
-    {
-      enablePairingModeFromHeldButton();
-    }
-#endif
-
-#ifdef BUTTON_DOWN
-    if (!pairingResetHoldPressed && downPressed &&
-        consumeButtonLongPress(downButtonState, loopNow, PAIRING_MODE_HOLD_MS))
-    {
-      enablePairingModeFromHeldButton();
-    }
-#endif
-
-#ifdef BUTTON_UP
-    if (!pairingResetHoldPressed && consumeButtonShortPress(upButtonState))
-    {
-      noteButtonInteraction(loopNow);
-      currentView = (currentView + 1);
-      if (currentView >= totalViews)
-        currentView = 0;
-      userSelectedView = currentView;
-      viewChangedByButton = true;
-      scheduleLastViewPersist(currentView);
-      lastActivityTime = loopNow;
-      requestDisplayRefresh();
-    }
-#endif
-
-#ifdef BUTTON_DOWN
-    if (!pairingResetHoldPressed && consumeButtonShortPress(downButtonState))
-    {
-      PROFILE_SECTION("ButtonInputs");
-      noteButtonInteraction(loopNow);
-      if (currentView == 0)
-      {
-        currentView = static_cast<uint8_t>(totalViews - 1);
-      }
-      else
-      {
-        --currentView;
-      }
-      userSelectedView = currentView;
-      viewChangedByButton = true;
-      scheduleLastViewPersist(currentView);
-      lastActivityTime = loopNow;
-      requestDisplayRefresh();
-    }
-#endif
-
-    if (pairingModeTriggered)
-    {
-      LOG_DEBUG_LN("BLE pairing mode enabled by long button press.");
-    }
-
-    if (viewChangedByButton)
-    {
-      boopRevertAt = 0;
-      boopLoadingActive = false;
-      LOG_DEBUG("View changed by button: %d\n", currentView);
-      notifyBleTask();
-      // Reset specific view states if necessary when changing views
-      if (currentView != VIEW_BLUSH_FACE)
-      { // If leaving blush view
-        blushState = BlushState::Inactive;
-        blushBrightness = 0;
-        // disableBlush(); // Clears pixels, but displayCurrentView will clear anyway
-      }
-      if (currentView != VIEW_SPIRAL_EYES)
-      { // Reset spiral timer
-        spiralStartMillis = 0;
-      }
-    }
-#endif
 
     // --- Proximity Sensor Logic: Blush Trigger AND Eye Bounce Trigger ---
     // static unsigned long lastSensorReadTime = 0; // Already global
@@ -5943,14 +4286,7 @@ void loop()
       notifyBleTask();
     }
 
-    if (boopRevertAt != 0 && (long)(loopNow - boopRevertAt) >= 0)
-    {
-      boopRevertAt = 0;
-      boopLoadingActive = false;
-      currentView = boopSavedView;
-      notifyBleTask();
-      requestDisplayRefresh();
-    }
+    updateTemporaryView(loopNow);
 
     // --- Update Adaptive Brightness ---
     // Brightness smoothing runs continuously; lux sampling cadence is enforced inside updateAdaptiveBrightness().
@@ -5971,18 +4307,10 @@ void loop()
                    });
     }
 
-    // --- Update Temperature Sensor Periodically ---
-    static unsigned long lastTempUpdateLocal = 0;       // Renamed to avoid conflict
-    const unsigned long tempUpdateIntervalLocal = 5000; // 5 seconds
-    runIfElapsed(loopNow, lastTempUpdateLocal, tempUpdateIntervalLocal, [&]()
-                 {
-                   PERF_SCOPE(PerfBucket::Sensors);
-#if DEBUG_MODE
-                   PROFILE_SECTION("TemperatureUpdate");
-#endif
-                   maybeUpdateTemperature(); });
-
   } // End of (!sleepModeActive) block
+
+  // Sampling continues while disconnected or asleep.
+  maybeUpdateTemperature();
 
   // --- Check sleep again AFTER processing inputs ---
   // This allows inputs like button presses or BLE commands to reset the activity timer *before* checking for sleep timeout
@@ -6011,6 +4339,7 @@ void loop()
   perfMaybeReport(loopNow);
 
   const TickType_t idleDelayTicks = sleepModeActive ? pdMS_TO_TICKS(5) : pdMS_TO_TICKS(1);
+  stateLock.unlock();
   vTaskDelay(idleDelayTicks);
 
   // vTaskDelay(pdMS_TO_TICKS(5)); // yield to the display & BLE tasks

@@ -64,19 +64,19 @@ Additional PlatformIO environments are defined in `platformio.ini`, including a 
 The PlatformIO helper scripts used by these environments now live under `tools/platformio/`, and the firmware artifact workflow is documented in `docs/build/FIRMWARE_BUILD.md`.
 
 ## Configuration
-- **Persistent preferences:** `src/config/userPreferences.h` manages stored defaults for brightness, auto-blink, accelerometer usage, sleep mode, and other controller behaviors.
+- **Persistent preferences:** `src/config/userPreferences.h` stores preferences and `src/config/RuntimeSettings.*` manages live settings and defaults for brightness, auto-blink, accelerometer usage, sleep mode, and other controller behaviors.
 - **Hardware mapping:** Modify `src/hardware/deviceConfig.h` to adjust HUB75 pinouts, panel chains, button inputs, or to enable the virtual panel simulator (`VIRTUAL_PANE`).
 - **Effects & assets:** Custom scenes live in `src/effects/`, bitmap assets in `src/assets/bitmaps.h`, and optional font assets in `src/assets/fonts/`; add new animations or alter existing ones there.
 - **Video assets:** Put `bad_apple.gif` or another supported source file in `video_sources/` or `data/videos/` for automatic conversion during `buildfs`/`uploadfs`; generated assets are written as lowercase `.lfv` files such as `data/videos/bad_apple.lfv`, using a `64x32` per-panel `cover` layout by default so each panel is filled without distorting aspect ratio.
-- **Build metadata:** `platformio.ini` sets `FIRMWARE_VERSION`, device model tags, and compiler flags shared across environments.
+- **Build metadata:** `platformio.ini` sets `FIRMWARE_VERSION`, model tags and pinned dependencies; the build helper injects the actual Git commit and branch. Set `SOURCE_DATE_EPOCH` for a reproducible UTC timestamp.
 
 ## BLE Control
 - The controller advertises as `LumiFur_Controller` and exposes a GATT service (`01931c44-3867-7740-9867-c822cb7df308`).
 - **Face characteristic:** write a view ID (0…`TOTAL_VIEWS`‑1) to switch expressions; read returns the current value.
-- **Config characteristic:** six boolean bytes toggle auto-brightness, accelerometer features, sleep mode, aurora overlays, static-color mode, and the mouth-microphone maximum-brightness override. Older four- or five-byte writes remain supported; byte 5 (zero-based) enables the new override. While enabled on a microphone face, the HUB75 hardware ceiling stays at 255 and normal face pixels retain the selected/automatic brightness through software scaling. The mouth uses that live brightness as its idle floor, then rises with microphone activity to an uncapped maximum of 255.
+- **Config characteristic:** six boolean bytes toggle auto-brightness, accelerometer features, sleep mode, aurora overlays, static-color mode, and the mouth-microphone maximum-brightness override. Optional bytes 6–10 control the BLE indicator, BLE status icon, Waveshare brightness boost, matrix-rain face fill and boop mode respectively. Older writes remain supported; byte 5 (zero-based) enables the new override. While enabled on a microphone face, the HUB75 hardware ceiling stays at 255 and normal face pixels retain the selected/automatic brightness through software scaling. The mouth uses that live brightness as its idle floor, then rises with microphone activity to an uncapped maximum of 255.
 - **Brightness characteristic:** write 0–255 to set manual brightness or subscribe for updates when auto-brightness adjusts.
-- **Temperature & logs:** subscribe for live temperature readings and request buffered history through the command characteristic (0x01 to stream, 0x02 to clear).
-- **OTA characteristic:** supports start/data packets for BLE firmware updates with status acknowledgements; pairing is recommended for production use.
+- **Temperature & logs:** temperature history is sampled every second, including while disconnected or asleep. Subscribe for live readings and request a consistent history snapshot through the command characteristic (0x01 to stream, 0x02 to clear).
+- **OTA characteristic:** encrypted writes support START/DATA/END/ABORT commands. Clients may request acknowledgements after each completed flash write. Disconnected or idle sessions are aborted, and queued packets are tied to their original connection. See [the OTA protocol](docs/firmware-updater/PROTOCOL.md).
 - A JSON metadata characteristic exposes firmware version, git commit, build timestamp, and device ID for companion applications.
 - The onboard NeoPixel pulses blue while advertising and turns green when a BLE client connects.
 
@@ -84,7 +84,7 @@ The PlatformIO helper scripts used by these environments now live under `tools/p
 
 [![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=main)](https://coveralls.io/github/stef1949/LumiFur_Controller?branch=main)
 
-- **80+ Unity tests** covering core functionality: Run with `pio test -e native2`
+- **Production core tests:** run `pio test -e native2` (`native2_windows` on Windows); see [test/TESTING.md](test/TESTING.md) for the host controller and browser transport checks.
 - **Code coverage** tracked via [Coveralls](https://coveralls.io/github/stef1949/LumiFur_Controller) - see [docs/COVERAGE.md](docs/COVERAGE.md) for details
 - Run the GoogleTest suite with coverage via `pio test -e codeql`
 - Coverage reports and additional tooling scripts are located under `test/`

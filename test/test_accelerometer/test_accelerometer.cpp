@@ -1,245 +1,73 @@
 #include <unity.h>
-#include <cmath>
-#include <cstdint>
 
-// Constants from main.cpp
-const float SLEEP_THRESHOLD = 1.0f;
-const float SHAKE_THRESHOLD = 1.0f;
+#include "core/MotionState.h"
+using namespace motion;
 
-// Test globals
-bool useShakeSensitivity = false;
-float lastAccelDeltaX = 0.0f;
-float lastAccelDeltaY = 0.0f;
-float lastAccelDeltaZ = 0.0f;
-bool lastMotionAboveShake = false;
-bool lastMotionAboveSleep = false;
 
-// Functions under test
-float getCurrentThreshold()
+
+void setUp() {}
+
+void tearDown() {}
+
+void test_production_thresholds()
 {
-    return useShakeSensitivity ? SHAKE_THRESHOLD : SLEEP_THRESHOLD;
+  TEST_ASSERT_EQUAL_FLOAT(1.0f,threshold(true)); TEST_ASSERT_EQUAL_FLOAT(1.0f,threshold(false));
 }
 
-bool checkMotionAboveThreshold(float deltaX, float deltaY, float deltaZ, float threshold)
+void test_first_sample_establishes_baseline()
 {
-    return (deltaX > threshold) || (deltaY > threshold) || (deltaZ > threshold);
+  Sample s; s.update(5,6,7); TEST_ASSERT_TRUE(s.valid); TEST_ASSERT_FALSE(s.shake); TEST_ASSERT_FALSE(s.activity);
 }
 
-void updateMotionFlags(float deltaX, float deltaY, float deltaZ)
+void test_motion_detected_on_each_axis()
 {
-    lastAccelDeltaX = deltaX;
-    lastAccelDeltaY = deltaY;
-    lastAccelDeltaZ = deltaZ;
-    
-    lastMotionAboveShake = checkMotionAboveThreshold(deltaX, deltaY, deltaZ, SHAKE_THRESHOLD);
-    lastMotionAboveSleep = checkMotionAboveThreshold(deltaX, deltaY, deltaZ, SLEEP_THRESHOLD);
+  for(int axis=0;axis<3;++axis){Sample s;s.update(0,0,0);s.update(axis==0?2:0,axis==1?2:0,axis==2?2:0);TEST_ASSERT_TRUE(s.shake);TEST_ASSERT_TRUE(s.activity);}
 }
 
-float calculateAccelDelta(float current, float previous)
+void test_negative_motion_is_detected()
 {
-    return fabs(current - previous);
+  Sample s;s.update(0,0,0);s.update(-2,-3,-4);TEST_ASSERT_TRUE(s.shake);TEST_ASSERT_EQUAL_FLOAT(3,s.deltaY);
 }
 
-void setUp(void)
+void test_exact_threshold_is_not_motion()
 {
-    // Reset state before each test
-    useShakeSensitivity = false;
-    lastAccelDeltaX = 0.0f;
-    lastAccelDeltaY = 0.0f;
-    lastAccelDeltaZ = 0.0f;
-    lastMotionAboveShake = false;
-    lastMotionAboveSleep = false;
+  Sample s;s.update(0,0,0);s.update(1,1,1);TEST_ASSERT_FALSE(s.shake);
 }
 
-void tearDown(void)
+void test_stable_sample_clears_motion()
 {
-    // Clean up after each test
+  Sample s;s.update(0,0,0);s.update(3,0,0);s.update(3,0,0);TEST_ASSERT_FALSE(s.activity);TEST_ASSERT_EQUAL_FLOAT(0,s.deltaX);
 }
 
-void test_threshold_constants(void)
+void test_small_movements_stay_below_threshold()
 {
-    // Verify threshold constants are defined correctly
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, SLEEP_THRESHOLD);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.0f, SHAKE_THRESHOLD);
+  Sample s;s.update(0,0,0);s.update(.2f,.3f,.4f);TEST_ASSERT_FALSE(s.shake);
 }
 
-void test_getCurrentThreshold_shake_mode(void)
+void test_delta_is_absolute()
 {
-    useShakeSensitivity = true;
-    float threshold = getCurrentThreshold();
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, SHAKE_THRESHOLD, threshold);
-}
-
-void test_getCurrentThreshold_sleep_mode(void)
-{
-    useShakeSensitivity = false;
-    float threshold = getCurrentThreshold();
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, SLEEP_THRESHOLD, threshold);
-}
-
-void test_calculateAccelDelta_positive_difference(void)
-{
-    float delta = calculateAccelDelta(5.0f, 2.0f);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.0f, delta);
-}
-
-void test_calculateAccelDelta_negative_difference(void)
-{
-    float delta = calculateAccelDelta(2.0f, 5.0f);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 3.0f, delta);
-}
-
-void test_calculateAccelDelta_zero_difference(void)
-{
-    float delta = calculateAccelDelta(5.0f, 5.0f);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, delta);
-}
-
-void test_checkMotionAboveThreshold_all_below(void)
-{
-    bool result = checkMotionAboveThreshold(0.5f, 0.5f, 0.5f, 1.0f);
-    TEST_ASSERT_FALSE(result);
-}
-
-void test_checkMotionAboveThreshold_x_above(void)
-{
-    bool result = checkMotionAboveThreshold(1.5f, 0.5f, 0.5f, 1.0f);
-    TEST_ASSERT_TRUE(result);
-}
-
-void test_checkMotionAboveThreshold_y_above(void)
-{
-    bool result = checkMotionAboveThreshold(0.5f, 1.5f, 0.5f, 1.0f);
-    TEST_ASSERT_TRUE(result);
-}
-
-void test_checkMotionAboveThreshold_z_above(void)
-{
-    bool result = checkMotionAboveThreshold(0.5f, 0.5f, 1.5f, 1.0f);
-    TEST_ASSERT_TRUE(result);
-}
-
-void test_checkMotionAboveThreshold_all_above(void)
-{
-    bool result = checkMotionAboveThreshold(1.5f, 1.5f, 1.5f, 1.0f);
-    TEST_ASSERT_TRUE(result);
-}
-
-void test_checkMotionAboveThreshold_exactly_at_threshold(void)
-{
-    // At threshold should be false (need to be ABOVE)
-    bool result = checkMotionAboveThreshold(1.0f, 1.0f, 1.0f, 1.0f);
-    TEST_ASSERT_FALSE(result);
-}
-
-void test_updateMotionFlags_no_motion(void)
-{
-    updateMotionFlags(0.5f, 0.5f, 0.5f);
-    
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, lastAccelDeltaX);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, lastAccelDeltaY);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.5f, lastAccelDeltaZ);
-    TEST_ASSERT_FALSE(lastMotionAboveShake);
-    TEST_ASSERT_FALSE(lastMotionAboveSleep);
-}
-
-void test_updateMotionFlags_shake_detected(void)
-{
-    updateMotionFlags(2.0f, 0.5f, 0.5f);
-    
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 2.0f, lastAccelDeltaX);
-    TEST_ASSERT_TRUE(lastMotionAboveShake);
-    TEST_ASSERT_TRUE(lastMotionAboveSleep);
-}
-
-void test_updateMotionFlags_sleep_threshold_motion(void)
-{
-    // Motion that's above sleep threshold but not above shake (since they're equal)
-    // This tests the boundary case
-    updateMotionFlags(1.1f, 0.5f, 0.5f);
-    
-    TEST_ASSERT_TRUE(lastMotionAboveShake);
-    TEST_ASSERT_TRUE(lastMotionAboveSleep);
-}
-
-void test_motion_detection_multiple_axes(void)
-{
-    // Test motion on multiple axes
-    updateMotionFlags(1.5f, 1.2f, 0.8f);
-    
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.5f, lastAccelDeltaX);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 1.2f, lastAccelDeltaY);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.8f, lastAccelDeltaZ);
-    TEST_ASSERT_TRUE(lastMotionAboveShake);
-}
-
-void test_motion_detection_precision(void)
-{
-    // Test with very small values near threshold
-    updateMotionFlags(1.01f, 0.99f, 0.5f);
-    
-    TEST_ASSERT_TRUE(lastMotionAboveShake);  // 1.01 > 1.0
-    TEST_ASSERT_TRUE(lastMotionAboveSleep);
-}
-
-void test_motion_detection_zero_values(void)
-{
-    updateMotionFlags(0.0f, 0.0f, 0.0f);
-    
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, lastAccelDeltaX);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, lastAccelDeltaY);
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, 0.0f, lastAccelDeltaZ);
-    TEST_ASSERT_FALSE(lastMotionAboveShake);
-    TEST_ASSERT_FALSE(lastMotionAboveSleep);
-}
-
-void test_threshold_switching(void)
-{
-    // Test switching between shake and sleep thresholds
-    useShakeSensitivity = true;
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, SHAKE_THRESHOLD, getCurrentThreshold());
-    
-    useShakeSensitivity = false;
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, SLEEP_THRESHOLD, getCurrentThreshold());
-    
-    useShakeSensitivity = true;
-    TEST_ASSERT_FLOAT_WITHIN(0.001f, SHAKE_THRESHOLD, getCurrentThreshold());
-}
-
-void setup()
-{
-    UNITY_BEGIN();
-    
-    RUN_TEST(test_threshold_constants);
-    RUN_TEST(test_getCurrentThreshold_shake_mode);
-    RUN_TEST(test_getCurrentThreshold_sleep_mode);
-    RUN_TEST(test_calculateAccelDelta_positive_difference);
-    RUN_TEST(test_calculateAccelDelta_negative_difference);
-    RUN_TEST(test_calculateAccelDelta_zero_difference);
-    RUN_TEST(test_checkMotionAboveThreshold_all_below);
-    RUN_TEST(test_checkMotionAboveThreshold_x_above);
-    RUN_TEST(test_checkMotionAboveThreshold_y_above);
-    RUN_TEST(test_checkMotionAboveThreshold_z_above);
-    RUN_TEST(test_checkMotionAboveThreshold_all_above);
-    RUN_TEST(test_checkMotionAboveThreshold_exactly_at_threshold);
-    RUN_TEST(test_updateMotionFlags_no_motion);
-    RUN_TEST(test_updateMotionFlags_shake_detected);
-    RUN_TEST(test_updateMotionFlags_sleep_threshold_motion);
-    RUN_TEST(test_motion_detection_multiple_axes);
-    RUN_TEST(test_motion_detection_precision);
-    RUN_TEST(test_motion_detection_zero_values);
-    RUN_TEST(test_threshold_switching);
-    
-    UNITY_END();
+  TEST_ASSERT_EQUAL_FLOAT(3,delta(2,5));TEST_ASSERT_EQUAL_FLOAT(3,delta(5,2));
 }
 
 int main()
 {
-    setup();
-    return 0;
-}
+  UNITY_BEGIN();
 
-void loop()
-{
-    // Unity tests run once
+  RUN_TEST(test_production_thresholds);
+
+  RUN_TEST(test_first_sample_establishes_baseline);
+
+  RUN_TEST(test_motion_detected_on_each_axis);
+
+  RUN_TEST(test_negative_motion_is_detected);
+
+  RUN_TEST(test_exact_threshold_is_not_motion);
+
+  RUN_TEST(test_stable_sample_clears_motion);
+
+  RUN_TEST(test_small_movements_stay_below_threshold);
+
+  RUN_TEST(test_delta_is_absolute);
+
+  return UNITY_END();
 }

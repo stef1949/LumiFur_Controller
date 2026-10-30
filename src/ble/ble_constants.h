@@ -28,13 +28,12 @@
 #define FIRMWARE_VERSION "4.2.7" // Version if not defined
 #endif
 
-#define GIT_COMMIT GIT_BRANCH
 #ifndef GIT_COMMIT
 #define GIT_COMMIT "unknown"
 #endif
 
 #ifndef GIT_BRANCH
-#ifdef DEBUG_MODE
+#if defined(DEBUG_MODE) && DEBUG_MODE
 #define GIT_BRANCH "dev"
 #else
 #define GIT_BRANCH "main"

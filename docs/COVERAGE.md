@@ -1,156 +1,29 @@
-# Code Coverage with Coveralls
+# Code coverage
 
-This project uses [Coveralls](https://coveralls.io/) to track code coverage for Unity framework tests.
+`pio test -e native2` (or `native2_windows`) instruments the production modules
+listed in `platformio.ini` with GCC coverage. The Coveralls workflow captures
+those results. Coverage is a measure of the code actually compiled by those
+tests, and does not imply that the entire ESP32 application or BLE stack ran.
 
-## Coverage Badge
+Native tests cover the production animation/scroll state, color parsing, motion,
+input debouncing, sleep policy, easing, fixed10 temperature history encoding,
+monochrome video codec, microphone math and mouth morphing. History uses the same
+ring buffer and packet encoder as the firmware; tests no longer maintain a
+separate float-based BLE protocol or historical microphone implementation.
 
-The coverage status is displayed in the main README:
+The separate host regression workflow compiles production OTA, worker, power,
+input, view and telemetry controllers with deterministic hardware fakes, and runs
+the browser updater transport under Node. Those regression runs do not currently
+contribute to the Coveralls percentage. They test integration behaviour rather
+than physical peripheral timing.
 
-[![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=main)](https://coveralls.io/github/stef1949/LumiFur_Controller?branch=main)
+To generate a local HTML report after running the native suites:
 
-## How Coverage Works
-
-### Test Environment
-
-The `native2` environment in `platformio.ini` is configured for code coverage:
-
-```ini
-[env:native2]
-platform = native
-test_framework = unity
-build_flags = 
-    -lgcov
-    --coverage
-    -DUNITY_CONFIG_DIR=./unity
-extra_scripts = tools/platformio/test_coverage.py
+```sh
+gcovr --root . --filter 'src/.*' --exclude 'test/.*' --exclude '.pio/.*' \
+  --html-details coverage_report/index.html
 ```
 
-Key flags:
-- `-lgcov`: Links against the gcov library
-- `--coverage`: Enables both compilation and linking flags for coverage
-- `extra_scripts`: Runs `tools/platformio/test_coverage.py` after tests to generate reports
-
-### GitHub Actions Workflow
-
-The `.github/workflows/coveralls.yaml` workflow:
-
-1. **Runs Unity tests** on the `native2` environment
-2. **Collects coverage data** using `lcov` and `gcovr`
-3. **Filters coverage** to only include `src/` files
-4. **Uploads to Coveralls** using the official GitHub Action
-
-### Local Coverage Generation
-
-To generate coverage reports locally:
-
-```bash
-# Install coverage tools
-sudo apt-get install lcov gcovr  # Linux
-brew install lcov gcovr          # macOS
-
-# Run tests with coverage
-pio test -e native2
-
-# Generate HTML report
-gcovr --root . \
-      --filter 'src/.*' \
-      --exclude 'test/.*' \
-      --exclude '.pio/.*' \
-      --html-details coverage_report/index.html
-
-# View report
-open coverage_report/index.html  # macOS
-xdg-open coverage_report/index.html  # Linux
-```
-
-### What Gets Covered
-
-The coverage tracks:
-- ✅ All source files in `src/` directory
-- ✅ Core modules: AnimationState, ScrollState, ColorParser
-- ✅ BLE functionality
-- ✅ Easing functions
-
-Excluded from coverage:
-- ❌ Test files (`test/`)
-- ❌ Build artifacts (`.pio/`)
-- ❌ Library dependencies (`lib/`)
-- ❌ Header-only template code
-
-## Coverage Reports
-
-### Coveralls Dashboard
-
-Visit the [Coveralls dashboard](https://coveralls.io/github/stef1949/LumiFur_Controller) to see:
-- Overall coverage percentage
-- Line-by-line coverage
-- Coverage trends over time
-- Per-file coverage breakdown
-
-### Local HTML Reports
-
-After running tests locally, view the detailed HTML report at:
-- `coverage_report/index.html` - Overview and file listing
-- Individual file reports with line-by-line coverage highlighting
-
-## Improving Coverage
-
-To improve test coverage:
-
-1. **Identify uncovered code** in the Coveralls dashboard
-2. **Write new Unity tests** for uncovered functions
-3. **Run tests locally** to verify coverage increases
-4. **Push changes** - GitHub Actions will update Coveralls automatically
-
-## Test Suites with Coverage
-
-Current test suites contributing to coverage:
-
-- **test_animation_state** (6 tests) - `src/core/AnimationState.cpp`
-- **test_scroll_state** (6 tests) - `src/core/ScrollState.cpp`
-- **test_easing_functions** (7 tests) - Easing functions in `src/app/main.h`
-- **test_ble** (13 tests) - BLE helper functions
-- **test_accelerometer** (19 tests) - Motion detection logic
-- **test_mic**, **test_mic_math** - Production microphone math in `src/core/mic/mic_math.cpp`
-- **test_mouth_morph** - `src/core/mouth/MouthMorph.cpp`
-
-Use the test runner and coverage reports for current counts. The legacy `test_microphone` suite tests a copied implementation and does not cover the current production microphone path.
-
-## Troubleshooting
-
-### Coverage not updating on Coveralls
-
-1. Check that the workflow ran successfully in GitHub Actions
-2. Verify the `GITHUB_TOKEN` has proper permissions
-3. Check that coverage data was generated (`coverage_filtered.info`)
-4. Ensure the repository is linked to Coveralls account
-
-### Low coverage percentage
-
-This is expected for embedded projects because:
-- Hardware-dependent code can't be tested in native environment
-- Some code requires ESP32-specific libraries
-- Integration tests run on hardware, not in CI
-
-Focus on testing:
-- Pure logic functions (calculations, state management)
-- Data processing algorithms
-- Helper functions and utilities
-
-### Coverage data not generated locally
-
-Ensure gcov is properly linked:
-```bash
-# Check for .gcda files after test run
-find .pio/build/native2 -name "*.gcda"
-
-# If no files found, ensure coverage flags are in platformio.ini
-pio test -e native2 -v
-```
-
-## References
-
-- [Coveralls Documentation](https://docs.coveralls.io/)
-- [gcov Documentation](https://gcc.gnu.org/onlinedocs/gcc/Gcov.html)
-- [lcov Documentation](http://ltp.sourceforge.net/coverage/lcov.php)
-- [PlatformIO Unit Testing](https://docs.platformio.org/en/latest/advanced/unit-testing/)
+Install `gcovr` first if needed. Use the test output for current suite counts.
+A release also requires the firmware build matrix and hardware verification;
+passing native coverage cannot establish Bluetooth, sensor or panel behaviour.

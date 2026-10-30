@@ -1,5 +1,6 @@
 #include "ble/ble_scroll.h"
 #include "ble/ble_worker.h"
+#include "app/AppStateSync.h"
 
 #include "core/ScrollState.h"
 #include "core/PerfTelemetry.h"
@@ -105,6 +106,7 @@ void ScrollTextCallbacks::onWrite(NimBLECharacteristic *pChr, NimBLEConnInfo &co
 
 void ScrollTextCallbacks::onRead(NimBLECharacteristic *pChr, NimBLEConnInfo &connInfo)
 {
+    AppStateLock stateLock;
     extern char txt[64]; // ADD THIS LINE - Declare extern to access the global txt buffer
                          // Return current text when app reads
     pChr->setValue(txt);

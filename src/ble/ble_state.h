@@ -3,13 +3,14 @@
 
 #include <NimBLEDevice.h>
 #include <cstdint>
+#include <atomic>
 #include <string>
 
 #include "ble/ble_ota.h"
 #include "ble/ble_server.h"
 #include "ble/ble_scroll.h"
 
-extern bool deviceConnected;
+extern std::atomic<bool> deviceConnected;
 extern bool oldDeviceConnected;
 extern bool devicePairing;
 extern uint32_t pairingPasskey;

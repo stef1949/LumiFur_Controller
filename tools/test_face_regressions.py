@@ -5,7 +5,7 @@ import tempfile
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-main = (ROOT / "src/app/main.cpp").read_text()
+main = (ROOT / "src/app/main.cpp").read_text(encoding="utf-8")
 
 
 def function(source, signature):
@@ -52,6 +52,7 @@ const CRGB CRGB::Black{};
 struct { CRGB color{255,0,0}; } gStaticColorState;
 bool staticColorModeEnabled=false, matrixRainInsteadOfPlasma=true;
 void ensureStaticColorLoaded() {}
+CRGB getStaticColorCached() { return gStaticColorState.color; }
 uint16_t getNormalFaceSoftwareBrightnessScale() { return faceScale; }
 int time_counter=0, currentPalette=0;
 uint8_t sin8(float) { return 100; } uint8_t cos8(float) { return 100; }
@@ -64,13 +65,19 @@ void matrixRainAdvanceColumns();
 unsigned long boopHits[16]={}, boopRevertAt=0, lastActivityTime=0, blushStateStartTime=0;
 uint8_t boopHitCount=0,boopSavedView=0,userSelectedView=2,currentView=2,boopMode=3,originalViewBeforeBlush=0;
 bool boopLoadingActive=false,wasBlushOverlay=false,sleepModeActive=false;
-enum class BlushState { Inactive, FadeIn }; BlushState blushState=BlushState::Inactive;
+#include "core/AnimationState.h"
+using animation::BlushState;
+BlushState &blushState=animation::state().blushState;
+struct AppStateLock {};
 constexpr unsigned long fadeInDuration=2000,fullDuration=6000,fadeOutDuration=2000;
-constexpr uint8_t VIEW_SPIRAL_EYES=10,VIEW_ANGRY_FACE=11,VIEW_LOADING_BAR=12,totalViews=30;
+#include "app/Views.h"
 void notifyBleTask() {} void requestDisplayRefresh() {} void wakeFromSleepMode() {}
 uint8_t persisted=0; void scheduleLastViewPersist(uint8_t v) { persisted=v; }
 struct BleWorkItem { unsigned length; uint8_t data[1]; };
-constexpr unsigned long PAIRING_MODE_HOLD_MS=3000,PAIRING_MODE_WINDOW_MS=60000;
+constexpr unsigned long PAIRING_MODE_HOLD_MS=3000,PAIRING_MODE_WINDOW_MS=60000,BUTTON_DEBOUNCE_MS=50,PAIRING_RESET_HOLD_MS=3000;
+#define LOW 0
+bool keyPressed[3]={}; int digitalRead(int pin){return keyPressed[pin]?0:1;}
+void resetBlePairing() {}
 int pairingCount=0;
 void noteButtonInteraction(unsigned long) {} void refreshBleAdvertising() {}
 void startPairingMode(unsigned long) { ++pairingCount; }
@@ -78,23 +85,22 @@ void startPairingMode(unsigned long) { ++pairingCount; }
 
 assert "matrixRainAdvance();" in function(main, "static void renderMatrixFaceView()")
 
-effect = (ROOT / "src/effects/matrixRainEffect.cpp").read_text()
+effect = (ROOT / "src/effects/matrixRainEffect.cpp").read_text(encoding="utf-8")
 effect = "\n".join(line for line in effect.splitlines() if not line.startswith("#include"))
-buttons = main[main.index("struct ButtonState"):main.index("// Derived from the Alt_")]
-button_logic = main[main.index("    bool viewChangedByButton = false;"):main.index("    if (pairingModeTriggered)")]
-button_logic += "if(viewChangedByButton) { boopRevertAt=0; boopLoadingActive=false; }"
-# Use the production cancellation block rather than duplicating its assignments.
-cancel = main[main.index("    if (viewChangedByButton)\n    {"):]
-button_logic = button_logic[:button_logic.rindex("if(viewChangedByButton)")] + cancel[:cancel.index('      LOG_DEBUG')]+"}\n"
+buttons = '#include "core/InputState.h"\nusing namespace input;\n'
+view_state = (ROOT / "src/app/ViewState.cpp").read_text(encoding="utf-8")
+inputs = (ROOT / "src/app/InputController.cpp").read_text(encoding="utf-8")
+controls = (ROOT / "src/ble/ble_control.cpp").read_text(encoding="utf-8")
 angry = main[main.index("    case VIEW_ANGRY_FACE:", main.index("void blinkingEyes()")):]
 angry = angry[angry.index("{")+1:angry.index("      return;")]
-font_header = (ROOT / "src/assets/fonts/matrixCodeFont.h").read_text().replace("#include <Arduino.h>", "")
-font_data = (ROOT / "src/assets/fonts/matrixCodeFont.cpp").read_text().replace('#include "assets/fonts/matrixCodeFont.h"', "")
-eye = re.search(r"static uint8_t Eye\[\] = \{.*?\};", (ROOT / "src/assets/bitmaps.h").read_text(), re.S).group()
+font_header = (ROOT / "src/assets/fonts/matrixCodeFont.h").read_text(encoding="utf-8").replace("#include <Arduino.h>", "")
+font_data = (ROOT / "src/assets/fonts/matrixCodeFont.cpp").read_text(encoding="utf-8").replace('#include "assets/fonts/matrixCodeFont.h"', "")
+eye = re.search(r"static uint8_t Eye\[\] = \{.*?\};", (ROOT / "src/assets/bitmaps.h").read_text(encoding="utf-8"), re.S).group()
 parts = [stub, "#define PROGMEM\n#define memcpy_P memcpy\n", font_header, font_data, effect, buttons, eye]
-parts += [function(main, name) for name in ["void drawPlasmaXbm(", "void drawBitmapAdvanced(", "static void handleBoop(", "static void handleBleFaceWriteWork("]]
-parts += ["void angryEyes() {"+angry+"}", "void buttonTick(unsigned long loopNow) { const bool pairingResetHoldPressed=false; const bool upPressed=upButtonState.stablePressed, downPressed=downButtonState.stablePressed;"+button_logic+"}"]
-parts.insert(parts.index(buttons)+1, "ButtonState upButtonState,downButtonState;")
+parts += [function(view_state, "void selectUserView("), function(view_state, "void handleBoop("), function(inputs,"void handleButtonInputs(")]
+parts += [function(main, name) for name in ["void drawPlasmaXbm(", "void drawBitmapAdvanced("]]
+parts += [function(controls, "static void handleBleFaceWriteWork(")]
+parts += ["void angryEyes() {"+angry+"}"]
 parts.append(r'''
 int main() {
   for(int hit=1;hit<=40;++hit) {
@@ -111,14 +117,19 @@ int main() {
   boopRevertAt=50000;
   handleBleFaceWriteWork({1,{7}}); assert(boopRevertAt==0 && persisted==7);
   boopRevertAt=50000; handleBleFaceWriteWork({1,{255}}); assert(boopRevertAt==50000);
-  downButtonState.stablePressed=true; downButtonState.pressedAtMs=100;
-  buttonTick(3099); assert(pairingCount==0);
-  buttonTick(3100); assert(pairingCount==1);
-  buttonTick(3200); assert(pairingCount==1);
-  downButtonState={}; downButtonState.shortPressPending=true;
-  currentView=7; buttonTick(3300); assert(currentView==6 && userSelectedView==6 && boopRevertAt==0);
-  boopRevertAt=50000; upButtonState.shortPressPending=true;
-  buttonTick(3400); assert(currentView==7 && userSelectedView==7 && boopRevertAt==0);
+  keyPressed[BUTTON_DOWN]=true;
+  handleButtonInputs(100); handleButtonInputs(150); handleButtonInputs(3149); assert(pairingCount==0);
+  handleButtonInputs(3150); assert(pairingCount==1);
+  handleButtonInputs(3160); assert(pairingCount==1);
+  keyPressed[BUTTON_DOWN]=false; handleButtonInputs(3200); handleButtonInputs(3250);
+  currentView=7; boopRevertAt=50000;
+  keyPressed[BUTTON_DOWN]=true; handleButtonInputs(3300); handleButtonInputs(3350);
+  keyPressed[BUTTON_DOWN]=false; handleButtonInputs(3400); handleButtonInputs(3450);
+  assert(currentView==6 && userSelectedView==6 && boopRevertAt==0);
+  boopRevertAt=50000;
+  keyPressed[BUTTON_UP]=true; handleButtonInputs(3500); handleButtonInputs(3550);
+  keyPressed[BUTTON_UP]=false; handleButtonInputs(3600); handleButtonInputs(3650);
+  assert(currentView==7 && userSelectedView==7 && boopRevertAt==0);
   angryEyes(); assert(display.pixels[6*128+4]!=0);
   staticColorModeEnabled=true; angryEyes(); assert(display.pixels[6*128+4]==display.color565(255,0,0));
   staticColorModeEnabled=false;
@@ -157,7 +168,7 @@ int main() {
 with tempfile.TemporaryDirectory(prefix="lumifur-regressions-", dir=ROOT / ".pio") as directory:
     source = Path(directory) / "regressions.cpp"
     executable = Path(directory) / "regressions.exe"
-    source.write_text("\n".join(parts))
-    subprocess.run(["g++", "-std=c++17", "-include", "initializer_list", "-I"+str(ROOT/"src"), "-I"+str(ROOT/"include"), str(source), str(ROOT/"src/core/mic/mic_math.cpp"), "-include", str(ROOT/"src/core/mic/mic_math.h"), "-o", str(executable)], check=True)
+    source.write_text("\n".join(parts), encoding="utf-8")
+    subprocess.run(["g++", "-std=c++17", "-include", "initializer_list", "-I"+str(ROOT/"src"), "-I"+str(ROOT/"include"), str(source), str(ROOT/"src/core/mic/mic_math.cpp"), str(ROOT/"src/core/AnimationState.cpp"), "-include", str(ROOT/"src/core/mic/mic_math.h"), "-o", str(executable)], check=True)
     subprocess.run([str(executable)], check=True)
 

@@ -17,7 +17,6 @@ void otaRebootTask(void *param)
 {
     (void)param;
     vTaskDelay(kOtaRebootDelayTicks);
-    vTaskDelete(nullptr);
     esp_restart();
 }
 
@@ -56,7 +55,7 @@ void OTACallbacks::onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo
         Serial.println("OTA: Rejecting write from unencrypted connection.");
         uint8_t response[] = {0xFF, 0x0F};
         pCharacteristic->setValue(response, sizeof(response));
-        pCharacteristic->notify();
+        pCharacteristic->notify(response, sizeof(response), connInfo.getConnHandle());
         return;
     }
 
@@ -67,21 +66,52 @@ void OTACallbacks::onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo
                       static_cast<unsigned int>(LF_BLE_WORK_ITEM_PAYLOAD_MAX));
         uint8_t response[] = {0xFF, 0x0B};
         pCharacteristic->setValue(response, sizeof(response));
-        pCharacteristic->notify();
+        pCharacteristic->notify(response, sizeof(response), connInfo.getConnHandle());
         return;
     }
 
-    if (!bleQueuePayload(BleWorkType::OtaPacket, pCharacteristic,
-                         reinterpret_cast<const uint8_t *>(value.data()), value.length()))
+    if (!bleQueueOtaPacket(pCharacteristic, reinterpret_cast<const uint8_t *>(value.data()),
+                           value.length(), connInfo.getConnHandle()))
     {
         Serial.println("OTA: Worker queue unavailable/full, dropping packet.");
         uint8_t response[] = {0xFF, 0x0A};
         pCharacteristic->setValue(response, sizeof(response));
-        pCharacteristic->notify();
+        pCharacteristic->notify(response, sizeof(response), connInfo.getConnHandle());
     }
 }
 
-bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const uint8_t *data, size_t len)
+void OTACallbacks::resetSession()
+{
+    ota_started.store(false, std::memory_order_relaxed);
+    ota_handle = 0;
+    update_partition = nullptr;
+    bytes_received = total_size = 0;
+    ownerHandle = BLE_HS_CONN_HANDLE_NONE;
+    ownerGeneration = 0;
+    acknowledgeData = false;
+    sessionCharacteristic = nullptr;
+}
+
+void OTACallbacks::poll(uint32_t nowMs)
+{
+    if (!isActive() || rebootPending) return;
+    const bool connected = bleConnectionIsCurrent({ownerHandle, ownerGeneration});
+    constexpr uint32_t timeoutMs = 15000;
+    if (!connected || nowMs - lastActivityMs >= timeoutMs)
+    {
+        esp_ota_abort(ota_handle);
+        if (connected && sessionCharacteristic)
+        {
+            const uint8_t response[] = {0xFF, 0x10};
+            sessionCharacteristic->setValue(response, sizeof(response));
+            sessionCharacteristic->notify(response, sizeof(response), ownerHandle);
+        }
+        Serial.println(connected ? "OTA: Session timed out." : "OTA: Owner disconnected; session aborted.");
+        resetSession();
+    }
+}
+
+bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const uint8_t *data, size_t len, uint16_t handle, uint32_t generation)
 {
     if (pCharacteristic == nullptr || data == nullptr || len == 0)
     {
@@ -93,17 +123,21 @@ bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const ui
     {
         const uint8_t response[] = {code, detail};
         pCharacteristic->setValue(response, sizeof(response));
-        pCharacteristic->notify();
+        pCharacteristic->notify(response, sizeof(response), handle);
     };
 
-    auto resetSession = [&]()
+    poll(millis());
+    if (!bleConnectionIsCurrent({handle, generation})) return false;
+    if (rebootPending)
     {
-        ota_started.store(false, std::memory_order_relaxed);
-        ota_handle = 0;
-        update_partition = nullptr;
-        bytes_received = 0;
-        total_size = 0;
-    };
+        sendResponse(0xFF, 0x11);
+        return false;
+    }
+    if (isActive() && (handle != ownerHandle || generation != ownerGeneration))
+    {
+        sendResponse(0xFF, 0x12);
+        return false;
+    }
 
     const uint8_t command = data[0];
 
@@ -163,10 +197,21 @@ bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const ui
             return false;
         }
 
+        ownerHandle = handle;
+        ownerGeneration = generation;
+        sessionCharacteristic = pCharacteristic;
+        acknowledgeData = len >= 6 && data[5] == 1;
+        lastActivityMs = millis();
         ota_started.store(true, std::memory_order_relaxed);
         bytes_received = 0;
         Serial.println("OTA: esp_ota_begin succeeded. Ready for data.");
-        sendResponse(0x01, 0x00); // ACK: OTA Started
+        if (acknowledgeData)
+        {
+            const uint8_t response[] = {0x01, 0x00, 0x01}; // DATA acknowledgement capability.
+            pCharacteristic->setValue(response, sizeof(response));
+            pCharacteristic->notify(response, sizeof(response), handle);
+        }
+        else sendResponse(0x01, 0x00); // Existing clients retain the original protocol.
         return true;
     }
     if (command == 0x02)
@@ -207,6 +252,15 @@ bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const ui
             return false;
         }
         bytes_received += payloadBytes;
+        lastActivityMs = millis();
+        if (acknowledgeData)
+        {
+            const uint8_t response[] = {0x02, 0x00,
+                static_cast<uint8_t>(bytes_received), static_cast<uint8_t>(bytes_received >> 8),
+                static_cast<uint8_t>(bytes_received >> 16), static_cast<uint8_t>(bytes_received >> 24)};
+            pCharacteristic->setValue(response, sizeof(response));
+            pCharacteristic->notify(response, sizeof(response), handle);
+        }
 
 #if DEBUG_MODE
         Serial.printf("OTA: Received %u / %u bytes\n",
@@ -260,7 +314,7 @@ bool OTACallbacks::processPacket(NimBLECharacteristic *pCharacteristic, const ui
 
         Serial.println("OTA: Update successful! Rebooting...");
         sendResponse(0x03, 0x00); // ACK: OTA Success
-        resetSession();
+        rebootPending = true;
         scheduleOtaReboot();
         return true;
     }

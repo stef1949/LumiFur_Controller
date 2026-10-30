@@ -1,5 +1,6 @@
 #include "ble/ble_server.h"
 #include "ble/ble_state.h"
+#include "ble/ble_worker.h"
 
 #include <Arduino.h>
 #include <array>
@@ -89,6 +90,7 @@ void ServerCallbacks::onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo)
         addPairingCandidate(connInfo.getConnHandle());
     }
 
+    bleRegisterConnection(connInfo.getConnHandle());
     deviceConnected = true;
 
     /**
@@ -108,6 +110,7 @@ void ServerCallbacks::onConnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo)
 
 void ServerCallbacks::onDisconnect(NimBLEServer *pServer, NimBLEConnInfo &connInfo, int reason)
 {
+    bleForgetConnection(connInfo.getConnHandle());
     removePairingCandidate(connInfo.getConnHandle());
     deviceConnected = pServer->getConnectedCount() > 0;
     setPairingState(false, false, 0, true);

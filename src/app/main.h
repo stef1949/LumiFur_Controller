@@ -30,73 +30,12 @@
 // #define CONFIG_BT_NIMBLE_PINNED_TO_CORE 1 // Pinning NimBLE to core 1
 
 // Enum for all available views. This allows for automatic counting.
-enum View
-{
-  VIEW_DEBUG_SQUARES,
-  VIEW_LOADING_BAR,
-  VIEW_PATTERN_PLASMA,
-  VIEW_TRANS_FLAG,
-  VIEW_LGBT_FLAG, // NOTE: Commented out as requires re-ordering
-  VIEW_NORMAL_FACE,
-  VIEW_BLUSH_FACE,
-  VIEW_SEMICIRCLE_EYES,
-  VIEW_X_EYES,
-  VIEW_SLANT_EYES,
-  VIEW_SPIRAL_EYES,
-  VIEW_PLASMA_FACE,
-  VIEW_UWU_EYES,
-  VIEW_STARFIELD,
-  VIEW_BSOD,
-  VIEW_DVD_LOGO,
-  VIEW_FLAME_EFFECT,
-  VIEW_FLUID_EFFECT,
-  VIEW_CIRCLE_EYES,
-  VIEW_FULLSCREEN_SPIRAL_PALETTE,
-  VIEW_FULLSCREEN_SPIRAL_WHITE,
-  VIEW_SCROLLING_TEXT,
-  VIEW_DINO_GAME,
-  VIEW_STROBE_EFFECT,
-  VIEW_PIXEL_DUST,
-  VIEW_STATIC_COLOR,
-  VIEW_RAINBOW_GRADIENT,
-  VIEW_RAINBOW_LINEAR_BAND,
-  VIEW_ALT_FACE,
-  VIEW_VIDEO_PLAYER,
-  VIEW_MATRIX_RAIN,
-  VIEW_MATRIX_FACE,
-  VIEW_ANGRY_FACE, // furrowed brows, narrowed eyes
-  //VIEW_LGBT_FLAG
+#include "app/Views.h"
 
-  TOTAL_VIEWS // Special entry will automatically hold the total number of views.
-};
-
-// Global variables to store the accessory settings.
-bool autoBrightnessEnabled = true;
-bool accelerometerEnabled = true;
-bool sleepModeEnabled = true;
-bool auroraModeEnabled = true;
-bool staticColorModeEnabled = false;
-bool mouthMicBrightnessOverrideEnabled = false;
-// BLE config bytes 6, 7, 8. Loaded in setup() after initPreferences().
-bool disableBleIndicatorLight = false; // byte 6, DEBUG_DISABLE_BLE_INDICATOR_LIGHT
-bool disableBleStatusIcon = false;     // byte 7, DEBUG_DISABLE_BLE_STATUS_ICON
-bool waveshareBrightnessBoost = false; // byte 8, DEBUG_ENABLE_BRIGTHNESS_BOOST_WAVESHARE
-bool constantColorConfig = false;
-CRGB constantColor = CRGB::Green; // Default color for constant color mode
-void ensureStaticColorLoaded();
-CRGB getStaticColorCached();
-// Config variables ------------------------------------------------
-bool configApplyAutoBrightness = true; // Variable to track auto brightness application
-bool configApplySleepMode = false;
-bool configApplyAuroraMode = false;
-bool configApplyAccelerometer = true;
-bool configApplyConstantColor = false; // Variable to track constant color application
-// BLE slider. Raises the auto-brightness minimum. 15 is the old floor.
-// Config byte 9. When true, face plasma masks render matrix rain instead of aurora.
-bool matrixRainInsteadOfPlasma = false;
-uint8_t autoBrightnessFloor = 15;
-// Config byte 10. 0 default, 1 advanced 1, 2 advanced 2, 3 advanced 4.
-uint8_t boopMode = 0;
+#include "config/RuntimeSettings.h"
+#include "app/Sensors.h"
+#include "app/PowerManagement.h"
+#include "core/Easing.h"
 
 /*------------------------------------------------------------------------------
   OTA instances & variables
@@ -123,30 +62,6 @@ bool downloadFlag = false;
 #endif
 ////////////////////////////////////////////////////////
 
-// Helper function for ease-in-out quadratic easing
-float easeInOutQuad(float t)
-{
-  return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
-}
-
-// Easing functions with bounds checking
-float easeInQuad(float t)
-{
-  if (t < 0.0f)
-    return 0.0f;
-  if (t > 1.0f)
-    return 1.0f;
-  return t * t;
-}
-
-float easeOutQuad(float t)
-{
-  if (t < 0.0f)
-    return 0.0f;
-  if (t > 1.0f)
-    return 1.0f;
-  return 1.0f - (1.0f - t) * (1.0f - t);
-}
 // non-blocking LED status functions (Neopixel)
 void fadeInAndOutLED(uint8_t r, uint8_t g, uint8_t b)
 {
@@ -192,26 +107,6 @@ void mxfill(CRGB *leds);
 uint16_t colorWheel(uint8_t pos);
 void drawText(int colorWheelOffset);
 
-// Power management scopes
-void reduceCPUSpeed()
-{
-  setCpuFrequencyMhz(80); // Set CPU frequency to lowest setting (80MHz vs 240MHz default)
-  #if DEBUG_MODE
-  Serial.println("CPU frequency reduced to 80MHz for power saving");
-  #endif
-}
-
-void restoreNormalCPUSpeed()
-{
-  setCpuFrequencyMhz(240); // Set CPU frequency back to default (240MHz)
-  #if DEBUG_MODE
-  Serial.println("CPU frequency restored to 240MHz");
-  #endif
-}
-
-// Accelerometer object declaration
-Adafruit_LIS3DH accel;
-
 // Sundry globals used for animation ---------------------------------------
 
 // Scrolling text sundries
@@ -240,7 +135,6 @@ void err(int x)
 }
 
 // Preferences are initialized in setup(), so defer loading persisted brightness until then.
-uint8_t userBrightness = 255;
 
 int sliderBrightness = map(userBrightness, 1, 255, 1, 100);
 
@@ -275,99 +169,6 @@ const int numSquares = 25;
 Square Squares[numSquares];
 
 // Add the new helper function after the ConfigCallbacks class definition:
-void applyConfigOptions()
-{
-  #if DEBUG_MODE
-  Serial.println("Applying configuration options...");
-#endif
-  if (autoBrightnessEnabled)
-  {
-    #if DEBUG_MODE
-    Serial.println("Auto Brightness enabled: adjusting brightness automatically.");
-    #endif
-    // Example: call a function to update auto brightness (if implemented)
-    // updateAutoBrightness();
-    configApplyAutoBrightness = true;
-  }
-  else
-  {
-    #if DEBUG_MODE
-    Serial.println("Auto brightness disabled. Applying user-set brightness.");
-    #endif
-    updateGlobalBrightnessScale(userBrightness);
-    syncBrightnessState(userBrightness);
-    #if DEBUG_MODE
-    Serial.printf("Applied manual brightness: %u\n", userBrightness);
-    #endif
-  }
-
-  if (accelerometerEnabled)
-  {
-    #if DEBUG_MODE
-    Serial.println("Accelerometer enabled.");
-    #endif
-    // Insert code to enable accelerometer-driven actions here.
-    configApplyAccelerometer = true;
-  }
-  else
-  {
-    #if DEBUG_MODE
-    Serial.println("Accelerometer disabled.");
-    #endif
-    // Optionally disable or ignore accelerometer actions.
-    configApplyAccelerometer = false;
-  }
-
-  if (sleepModeEnabled)
-  {
-    #if DEBUG_MODE
-    Serial.println("Sleep mode enabled: device can enter sleep mode.");
-    #endif
-    // Update sleep-related thresholds or enable sleep mode triggers.
-    configApplySleepMode = true;
-  }
-  else
-  {
-    #if DEBUG_MODE
-    Serial.println("Sleep mode disabled: forcing device to remain awake.");
-    #endif
-    configApplySleepMode = false; // Ensure the device remains awake when sleep mode is disabled.
-  }
-
-  if (staticColorModeEnabled)
-  {
-    #if DEBUG_MODE
-    Serial.println("Static color mode enabled: using user-selected color.");
-    #endif
-    constantColor = getStaticColorCached();
-    constantColorConfig = true;
-    configApplyConstantColor = true;
-    configApplyAuroraMode = false;
-  }
-  else
-  {
-    constantColorConfig = false;
-    configApplyConstantColor = false;
-    if (auroraModeEnabled)
-    {
-      #if DEBUG_MODE
-      Serial.println("Aurora mode enabled: switching to aurora palette.");
-      #endif
-      // Assume auroraPalette and defaultPalette are defined globally.
-      // currentPalette = auroraPalette;
-      configApplyAuroraMode = true;
-    }
-    else
-    {
-      #if DEBUG_MODE
-      Serial.println("Aurora mode disabled: using default palette.");
-      #endif
-      // currentPalette = defaultPalette;
-      configApplyAuroraMode = false;
-    }
-  }
-}
-
 // Startfield Animation -----------------------------------------------
 struct Star
 {

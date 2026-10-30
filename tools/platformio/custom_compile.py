@@ -1,44 +1,39 @@
-# customCompile.py
+"""Inject Git identity without overriding the configured firmware version.
+
+SOURCE_DATE_EPOCH can supply a reproducible UTC build timestamp in release jobs.
+"""
+from datetime import datetime, timezone
+from pathlib import Path
+import os
 import subprocess
-from datetime import datetime
 
-def get_git_tag():
+
+def git_value(project_dir, *arguments):
     try:
-        return subprocess.check_output(["git", "describe", "--tags", "--always"]).decode().strip()
-    except:
+        return subprocess.check_output(
+            ["git", "-C", str(project_dir), *arguments],
+            stderr=subprocess.DEVNULL, text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
         return "unknown"
 
-def get_git_commit():
-    try:
-        return subprocess.check_output(["git", "rev-parse", "--short", "HEAD"]).decode().strip()
-    except:
-        return "unknown"
-
-def get_git_branch():
-    try:
-        return subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"]).decode().strip()
-    except:
-        return "unknown"
 
 def inject_git_info(env):
-    fw_tag = get_git_tag()
-    commit = get_git_commit()
-    branch = get_git_branch()
-    date_str = datetime.now().strftime("%Y-%m-%d")
-    time_str = datetime.now().strftime("%H:%M:%S")
+    project_dir = Path(env["PROJECT_DIR"])
+    commit = git_value(project_dir, "rev-parse", "--short=12", "HEAD")
+    branch = git_value(project_dir, "rev-parse", "--abbrev-ref", "HEAD")
+    definitions = [("GIT_COMMIT", env.StringifyMacro(commit)),
+                   ("GIT_BRANCH", env.StringifyMacro(branch))]
+    if "SOURCE_DATE_EPOCH" in os.environ:
+        timestamp = datetime.fromtimestamp(int(os.environ["SOURCE_DATE_EPOCH"]), timezone.utc)
+        # Pre-scripts run before PlatformIO parses build_flags. Remove its
+        # defaults during the later unflag pass, after they have been parsed.
+        env.Append(BUILD_UNFLAGS=["-DBUILD_DATE=__DATE__", "-DBUILD_TIME=__TIME__"])
+        definitions += [("BUILD_DATE", env.StringifyMacro(timestamp.strftime("%Y-%m-%d"))),
+                        ("BUILD_TIME", env.StringifyMacro(timestamp.strftime("%H:%M:%S UTC")))]
+    env.Append(CPPDEFINES=definitions)
 
-    env.Append(
-        BUILD_FLAGS=[
-            f'-DFIRMWARE_VERSION="{fw_tag}"',
-            f'-DGIT_COMMIT="{commit}"',
-            f'-DGIT_BRANCH="{branch}"',
-            f'-DBUILD_DATE="{date_str}"',
-            f'-DBUILD_TIME="{time_str}"'
-        ]
-    )
 
-def before_build(env):
+if "Import" in globals():
+    Import("env")
     inject_git_info(env)
-
-Import("env")
-before_build(env)

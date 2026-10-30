@@ -1,189 +1,44 @@
-# Unity Tests for LumiFur Controller
+# Testing LumiFur Controller
 
-[![Coverage Status](https://coveralls.io/repos/github/stef1949/LumiFur_Controller/badge.svg?branch=main)](https://coveralls.io/github/stef1949/LumiFur_Controller?branch=main)
+Run the production core suites with PlatformIO:
 
-## Overview
-This directory contains comprehensive Unity framework tests for the LumiFur Controller firmware.
-
-**Code Coverage**: See [docs/COVERAGE.md](../docs/COVERAGE.md) for detailed information about code coverage tracking with Coveralls.
-
-## Test Suites
-
-### Display timing and DMA ownership
-
-Run `pio test -e native2_windows -f test_display_timing` for frame deadlines,
-overruns and tick rollover. The display skips missed deadlines and yields rather
-than issuing a burst of catch-up frames.
-
-Run `python tools/test_hub75_sync.py` for the project-owned HUB75 driver patch,
-startup swaps, stale EOF rejection and brightness writes to the inactive buffer.
-Run `python tools/test_face_regressions.py` for face rendering, boop handling and
-the rule that all Matrix stencil draws share one simulation step per frame.
-These two scripts require `g++` on PATH and use mocked hardware.
-
-Firmware builds apply `tools/platformio/prepare_hub75_driver.py` after dependency
-installation. It adds a GDMA completion handshake on ESP32-S3 and a back-buffer
-brightness API. Unsupported dependency layouts fail the build explicitly.
-
-Panel configuration stays at 16 MHz, at least 120 Hz requested refresh, and
-double buffering regardless of the saved Waveshare boost flag. That flag now
-controls software gain only and no longer reboots the device when changed.
-Core assignment remains display on core 0; Arduino loop, BLE and microphone on
-core 1. Keep colour depth, latch blanking and clock phase at their configured
-values while checking these fixes on hardware.
-
-After flashing, check a normal face and Matrix fill at low/high brightness,
-automatic brightness changes, view fades, and connected/disconnected BLE.
-Native tests cannot validate the electrical panel timing or physical flicker.
-
-### test_animation_state
-Tests for the `AnimationState` module (`src/core/AnimationState.cpp`)
-- **6 tests** covering initialization, reset, blink timings, blush state, eye bounce, and idle hover offsets
-
-### Current mouth and microphone tests
-- `test_mic`: slot selection, continuous mouth thresholds, speech gating, and peak release.
-- `test_mic_config`: microphone configuration bounds.
-- `test_mic_math`: production filtering, openness, and brightness functions in `src/core/mic/mic_math.cpp`.
-- `test_mouth_morph`: frame quantization, interpolation, and mirrored dithering.
-
-Run these with the animation-state tests after changing mouth control:
-
-```bash
-pio test -e native2_windows -f test_animation_state -f test_mic -f test_mic_config -f test_mic_math -f test_mouth_morph
+```sh
+pio test -e native2          # Linux/macOS
+pio test -e native2_windows  # Windows with GCC in PATH
 ```
 
-Use `native2` instead of `native2_windows` on Linux. This focused set contains 35 test cases; hardware response and appearance still require a device check.
+The native source filter builds AnimationState, ColorParser, ScrollState,
+TemperatureHistory, MonoVideoCodec, microphone math and MouthMorph. Header-based
+input debouncing, power policy, motion sampling and easing are tested directly.
+The former duplicated timer/threshold suites have been replaced by input and
+power-policy suites; BLE history tests encode the production fixed10 protocol.
+The microphone pipeline suite calls production microphone math.
 
-### test_scroll_state  
-Tests for the `ScrollState` module (`src/core/ScrollState.cpp`)
-- **6 tests** covering initialization, speed updates, timing reset, and boundary conditions
+Host controller checks require Python 3.10+, GCC with C++17 support, and Node 18+:
 
-### test_easing_functions
-Tests for easing functions (`src/app/main.h`)
-- **7 tests** covering `easeInQuad`, `easeOutQuad`, and `easeInOutQuad` functions
-- Includes boundary condition tests, mid-value tests, and monotonicity verification
-
-### test_ble
-Tests for BLE (Bluetooth Low Energy) module (`src/ble.h`)
-- **13 tests** covering temperature history management, scroll speed clamping, and packet structure
-- Tests circular buffer behavior, wraparound logic, and chunk calculation
-- Validates temperature precision and history capacity
-
-### test_accelerometer
-Tests for accelerometer motion detection (`src/app/main.cpp`)
-- **19 tests** covering threshold detection, motion flags, and delta calculations
-- Tests shake vs sleep threshold switching
-- Validates motion detection on multiple axes
-- Boundary condition testing for motion thresholds
-
-### test_microphone
-Legacy tests containing a copied microphone implementation. These do not validate the current production microphone path; use the suites above for that.
-- **25 tests** covering maw brightness calculation, mouth state detection, and signal processing
-- Tests trigger threshold calculations and signal-to-brightness mapping
-- Validates Arduino map/constrain helper functions
-- Boundary condition testing for audio levels
-
-### Existing Tests
-- `test_main/` - Main application tests
-- `test_timers/` - Timer threshold tests
-- `test_bitmaps/` - Bitmap validation tests
-- `color_parser/` - Color parsing tests (GoogleTest)
-- `test_mic/` - Microphone tests
-
-## Running Tests
-
-### Using PlatformIO
-```bash
-# Run all tests on native environment
-pio test -e native
-
-# Run all tests on native2 environment (with Unity)
-pio test -e native2
-
-# Run specific test
-pio test -e native2 -f test_animation_state
-
-# Run with verbose output
-pio test -e native2 -vv
+```sh
+python -m unittest discover -s tools -p 'test_*.py'
+python -m unittest discover -s docs/firmware-updater/tests
+node --test docs/firmware-updater/tests/ota-transfer.test.js
 ```
 
-### Manual Compilation (for development/debugging)
-If PlatformIO has issues, tests can be compiled manually using GCC:
+These compile production controller sources with hardware fakes. They exercise
+OTA reboot, encryption checks, flash errors, queue overflow, connection ownership,
+stale queued packets, disconnect cleanup, timeout rollover, sleep/button wake,
+configuration changes, offline temperature sampling, immutable history transfers,
+face rendering and HUB75 DMA synchronization. The JavaScript tests exercise the
+browser transport, including acknowledgement ordering, errors, write deadlines,
+offset validation, disconnection and legacy firmware.
 
-```bash
-# Clone Unity framework
-git clone https://github.com/ThrowTheSwitch/Unity.git /tmp/unity-framework
+`test/run_unity_tests.sh` is a GCC fallback when PlatformIO is unavailable. Set
+`UNITY_DIR` to an existing Unity checkout to avoid downloading one.
 
-# Compile AnimationState tests
-g++ -std=c++11 \
-  -I/tmp/unity-framework/src \
-  -Isrc \
-  -o test_animation_state \
-  /tmp/unity-framework/src/unity.c \
-  src/core/AnimationState.cpp \
-  test/test_animation_state/test_animation_state.cpp \
-  test_runner.cpp
+Build the supported MatrixPortal configurations before release:
 
-# Run the test
-./test_animation_state
+```sh
+pio run -e adafruit_matrixportal_esp32s3 -e adafruit_matrixportal_esp32s3_waveshare -e dev
 ```
 
-## Historical Test Results (Before Mouth-Control Cleanup)
-
-The earlier recorded run reported **77 tests passing**. The counts below are historical, not the current suite inventory.
-
-- AnimationState: 7/7 ✅
-- ScrollState: 6/6 ✅  
-- Easing Functions: 7/7 ✅
-- BLE Module: 13/13 ✅
-- Accelerometer: 19/19 ✅
-- Microphone: 25/25 ✅
-
-## Adding New Tests
-
-1. Create a new test directory: `test/test_<module_name>/`
-2. Create test file: `test_<module_name>.cpp`
-3. Follow Unity framework conventions:
-   - Include `<unity.h>`
-   - Implement `setUp()` and `tearDown()` functions
-   - Create test functions with `void test_*()` signature
-   - Call tests in `setup()` using `RUN_TEST(test_name)`
-   - Implement empty `loop()` function
-
-Example test structure:
-```cpp
-#include <unity.h>
-#include "module_to_test.h"
-
-void setUp(void) {
-  // Setup before each test
-}
-
-void tearDown(void) {
-  // Cleanup after each test
-}
-
-void test_example(void) {
-  TEST_ASSERT_EQUAL(1, 1);
-}
-
-void setup() {
-  UNITY_BEGIN();
-  RUN_TEST(test_example);
-  UNITY_END();
-}
-
-void loop() {}
-```
-
-## Unity Assertions Reference
-
-Common assertions used in these tests:
-- `TEST_ASSERT_EQUAL(expected, actual)`
-- `TEST_ASSERT_TRUE(condition)`
-- `TEST_ASSERT_FALSE(condition)`
-- `TEST_ASSERT_FLOAT_WITHIN(delta, expected, actual)`
-- `TEST_ASSERT_GREATER_THAN_FLOAT(threshold, actual)` - actual > threshold
-- `TEST_ASSERT_LESS_THAN_FLOAT(threshold, actual)` - actual < threshold
-
-For more assertions, see: https://github.com/ThrowTheSwitch/Unity/blob/master/docs/UnityAssertionsReference.md
+Host fakes cannot validate physical DMA timing, I2C behaviour, Bluetooth throughput,
+or the reboot on the controller. Check those on hardware before distributing a
+release. No test command flashes a connected device.

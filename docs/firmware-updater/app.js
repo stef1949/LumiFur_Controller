@@ -1,6 +1,5 @@
 const SERVICE_UUID = "01931c44-3867-7740-9867-c822cb7df308";
 const OTA_CHARACTERISTIC_UUID = "01931c44-3867-7427-96ab-8d7ac0ae09ee";
-const CHUNK_SIZE = 180; // Conservative payload per BLE packet
 
 const connectBtn = document.getElementById("connect-btn");
 const uploadBtn = document.getElementById("upload-btn");
@@ -17,6 +16,8 @@ let bluetoothDevice;
 let otaCharacteristic;
 let firmwareFile;
 let isUploading = false;
+let activeTransfer;
+let uploadCompleted = false;
 
 function log(message, type = "info") {
   const entry = document.createElement("p");
@@ -36,7 +37,7 @@ function setConnectedState(name) {
   connectionStatus.classList.remove("error");
   connectionStatus.classList.add("success");
   deviceName.textContent = name || "LumiFur Controller";
-  uploadBtn.disabled = !firmwareFile;
+  uploadBtn.disabled = isUploading || !firmwareFile;
   connectBtn.textContent = "Reconnect";
 }
 
@@ -46,36 +47,15 @@ function setDisconnectedState(reason = "Disconnected") {
   connectionStatus.classList.add("error");
   deviceName.textContent = "—";
   uploadBtn.disabled = true;
-  isUploading = false;
+  activeTransfer?.cancel();
   connectBtn.textContent = "Connect";
   otaCharacteristic = undefined;
   bluetoothDevice = undefined;
-  setProgress(0, "Waiting to start…");
+  if (!uploadCompleted && !activeTransfer?.complete) setProgress(0, "Waiting to start…");
 }
 
 function handleNotifications(event) {
-  const value = event.target.value;
-  if (!value || value.byteLength < 1) return;
-
-  const view = new DataView(value.buffer);
-  const code = view.getUint8(0);
-
-  if (code === 0x01 && value.byteLength >= 2 && view.getUint8(1) === 0x00) {
-    log("OTA session started", "success");
-  } else if (code === 0x03 && value.byteLength >= 2 && view.getUint8(1) === 0x00) {
-    log("OTA complete. Device will reboot.", "success");
-    setProgress(100, "Upload complete");
-    uploadBtn.disabled = false;
-    isUploading = false;
-  } else if (code === 0x04 && value.byteLength >= 2 && view.getUint8(1) === 0x00) {
-    log("OTA aborted by device", "error");
-    isUploading = false;
-    uploadBtn.disabled = false;
-  } else if (code === 0xff && value.byteLength >= 2) {
-    log(`Device reported error 0x${view.getUint8(1).toString(16).padStart(2, "0")}`, "error");
-    isUploading = false;
-    uploadBtn.disabled = false;
-  }
+  activeTransfer?.handleNotification(event.target.value);
 }
 
 async function connect() {
@@ -102,8 +82,9 @@ async function connect() {
     });
 
     bluetoothDevice.addEventListener("gattserverdisconnected", () => {
-      log("Bluetooth connection lost.", "error");
-      setDisconnectedState("Disconnected");
+      const completed = uploadCompleted || activeTransfer?.complete;
+      log(completed ? "Device disconnected after the update." : "Bluetooth connection lost.", completed ? "success" : "error");
+      setDisconnectedState(completed ? "Restarting" : "Disconnected");
     });
 
     const server = await bluetoothDevice.gatt.connect();
@@ -125,14 +106,6 @@ async function connect() {
   }
 }
 
-function buildStartPacket(size) {
-  const buffer = new ArrayBuffer(5);
-  const view = new DataView(buffer);
-  view.setUint8(0, 0x01);
-  view.setUint32(1, size, true);
-  return buffer;
-}
-
 async function upload() {
   if (!otaCharacteristic || !bluetoothDevice?.gatt.connected) {
     log("Connect to the device before uploading.", "error");
@@ -145,37 +118,35 @@ async function upload() {
   if (isUploading) return;
 
   isUploading = true;
+  uploadCompleted = false;
   uploadBtn.disabled = true;
+  connectBtn.disabled = true;
+  fileInput.disabled = true;
   setProgress(0, "Sending start command…");
   log(`Beginning OTA upload (${firmwareFile.size} bytes).`);
-
+  const transfer = new OtaTransfer(otaCharacteristic, {
+    onProgress(percent) { setProgress(percent, `Sending firmware… ${percent}%`); },
+    onLegacy() { log("Using paced transfer for older firmware."); },
+  });
+  activeTransfer = transfer;
   try {
     const firmwareData = new Uint8Array(await firmwareFile.arrayBuffer());
-
-    await otaCharacteristic.writeValueWithResponse(buildStartPacket(firmwareData.byteLength));
-
-    for (let offset = 0; offset < firmwareData.length; offset += CHUNK_SIZE) {
-      const remaining = firmwareData.length - offset;
-      const chunkLength = Math.min(remaining, CHUNK_SIZE);
-      const packet = new Uint8Array(chunkLength + 1);
-      packet[0] = 0x02; // DATA
-      packet.set(firmwareData.subarray(offset, offset + chunkLength), 1);
-
-      await otaCharacteristic.writeValueWithResponse(packet);
-
-      const percent = Math.min(99, Math.round(((offset + chunkLength) / firmwareData.length) * 100));
-      setProgress(percent, `Sending firmware… ${percent}%`);
-    }
-
-    setProgress(99, "Finalizing update…");
-    await otaCharacteristic.writeValueWithResponse(Uint8Array.of(0x03)); // END
-    log("End command sent. Waiting for device to reboot…");
+    await transfer.run(firmwareData);
+    uploadCompleted = true;
+    log("OTA complete. Device will reboot.", "success");
+    setProgress(100, "Upload complete");
   } catch (error) {
     log(`Upload failed: ${error.message}`, "error");
+    setProgress(0, "Upload failed");
+  } finally {
+    if (activeTransfer === transfer) activeTransfer = undefined;
     isUploading = false;
-    uploadBtn.disabled = false;
+    fileInput.disabled = false;
+    connectBtn.disabled = false;
+    uploadBtn.disabled = transfer.complete || !otaCharacteristic || !bluetoothDevice?.gatt?.connected || !firmwareFile;
   }
 }
+
 
 fileInput.addEventListener("change", (event) => {
   const [file] = event.target.files;
@@ -184,7 +155,7 @@ fileInput.addEventListener("change", (event) => {
   if (file) {
     fileLabel.textContent = file.name;
     fileHelper.textContent = `${file.size.toLocaleString()} bytes selected`;
-    uploadBtn.disabled = !otaCharacteristic;
+    uploadBtn.disabled = isUploading || !otaCharacteristic;
   } else {
     fileLabel.textContent = "Choose .bin file";
     fileHelper.textContent = "No file selected";

@@ -6,7 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/portmacro.h"
 
-bool deviceConnected = false;
+std::atomic<bool> deviceConnected{false};
 bool oldDeviceConnected = false;
 bool devicePairing = false;
 uint32_t pairingPasskey = 0;

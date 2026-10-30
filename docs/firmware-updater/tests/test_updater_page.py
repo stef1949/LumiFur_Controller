@@ -21,7 +21,8 @@ class FirmwareUpdaterPageTest(unittest.TestCase):
           "Connected to device and ready for OTA.",
           "Connect to the device before uploading.",
           "Beginning OTA upload",
-          "End command sent. Waiting for device to reboot",
+          "OTA complete. Device will reboot.",
+          "Upload failed:",
         ]:
             with self.subTest(marker=marker):
                 self.assertIn(marker, self.app_js)

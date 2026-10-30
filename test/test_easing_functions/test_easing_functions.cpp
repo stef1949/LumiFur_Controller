@@ -1,28 +1,6 @@
 #include <unity.h>
 
-// Local easing implementations for the unit tests.
-static float easeInOutQuad(float t)
-{
-  return t < 0.5f ? 2.0f * t * t : -1.0f + (4.0f - 2.0f * t) * t;
-}
-
-static float easeInQuad(float t)
-{
-  if (t < 0.0f)
-    return 0.0f;
-  if (t > 1.0f)
-    return 1.0f;
-  return t * t;
-}
-
-static float easeOutQuad(float t)
-{
-  if (t < 0.0f)
-    return 0.0f;
-  if (t > 1.0f)
-    return 1.0f;
-  return 1.0f - (1.0f - t) * (1.0f - t);
-}
+#include "core/Easing.h"
 
 void setUp(void)
 {

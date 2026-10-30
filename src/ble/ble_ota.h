@@ -15,10 +15,18 @@ class OTACallbacks : public NimBLECharacteristicCallbacks
     uint32_t bytes_received = 0;
     uint32_t total_size = 0;
     std::atomic<bool> ota_started{false};
+    bool rebootPending = false;
+    bool acknowledgeData = false;
+    uint16_t ownerHandle = BLE_HS_CONN_HANDLE_NONE;
+    uint32_t ownerGeneration = 0;
+    uint32_t lastActivityMs = 0;
+    NimBLECharacteristic *sessionCharacteristic = nullptr;
+    void resetSession();
 
 public:
     void onWrite(NimBLECharacteristic *pCharacteristic, NimBLEConnInfo &connInfo) override;
-    bool processPacket(NimBLECharacteristic *pCharacteristic, const uint8_t *data, size_t len);
+    bool processPacket(NimBLECharacteristic *pCharacteristic, const uint8_t *data, size_t len, uint16_t handle, uint32_t generation);
+    void poll(uint32_t nowMs);
     bool isActive() const;
 };
 
