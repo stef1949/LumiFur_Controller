@@ -31,12 +31,13 @@ static constexpr int kMaxW = 128;
 static constexpr int kMaxH = 32;
 static uint16_t g_rainMap[kMaxW * kMaxH];
 static bool g_rainMapValid = false;
+static bool g_columnsAdvancedThisFrame = false;
+static unsigned long g_frameTimeMs = 0;
 
-static uint16_t matrixColor(uint8_t level) {
+static uint16_t matrixColor(uint8_t level, uint16_t s = 256) {
   if (!g_display) {
     return 0;
   }
-  const uint16_t s = globalBrightnessScaleFixed;
   uint8_t r, g, b;
   if (level >= 240) {
     r = 190;
@@ -64,9 +65,9 @@ static uint16_t matrixColor(uint8_t level) {
 static int pickGlyph(uint8_t seed, int index, bool isHead) {
   uint8_t n = (uint8_t)(seed * 31u + (uint8_t)index * 17u);
   if (isHead) {
-    n ^= (uint8_t)(millis() >> 3);
+    n ^= (uint8_t)(g_frameTimeMs >> 3);
   } else {
-    n ^= (uint8_t)(millis() >> 7);
+    n ^= (uint8_t)(g_frameTimeMs >> 7);
   }
   if (MATRIX_CODE_GLYPH_COUNT <= 0) {
     return 0;
@@ -210,7 +211,7 @@ void updateAndDrawMatrixRainEffect() {
     return;
   }
 
-  advanceColumnsOnly();
+  matrixRainAdvanceColumns();
   g_display->fillScreen(0);
 
   for (int col = 0; col < g_numCols; ++col) {
@@ -225,29 +226,31 @@ void updateAndDrawMatrixRainEffect() {
         continue;
       }
       stampGlyph(px, py, pickGlyph(c.seed, i, i == 0),
-                 matrixColor(trailLevel(i, c.length)), false);
+                 matrixColor(trailLevel(i, c.length), globalBrightnessScaleFixed), false);
     }
   }
 }
 
-void matrixRainAdvance() {
-  advanceColumnsOnly();
-  rebuildRainMap();
+void matrixRainBeginFrame() {
+  g_columnsAdvancedThisFrame = false;
+  g_frameTimeMs = millis();
 }
 
-// Face path. Column sampler only, once per frame.
+void matrixRainAdvance() {
+  matrixRainAdvanceColumns();
+  if (!g_rainMapValid) rebuildRainMap();
+}
+
+// Every shape in a frame samples the same column positions, even if drawing
+// crosses a millisecond boundary or the task is preempted between features.
 void matrixRainAdvanceColumns() {
-  static unsigned long lastMs = 0;
-  const unsigned long now = millis();
-  if (now == lastMs) {
-    return;
-  }
-  lastMs = now;
+  if (g_columnsAdvancedThisFrame) return;
+  g_columnsAdvancedThisFrame = true;
   advanceColumnsOnly();
   g_rainMapValid = false;
 }
 
-uint16_t matrixRainColorAt(int x, int y) {
+static uint16_t matrixRainRawColorAt(int x, int y) {
   if ((unsigned)x >= (unsigned)g_w || (unsigned)y >= (unsigned)g_h) {
     return 0;
   }
@@ -284,8 +287,19 @@ uint16_t matrixRainColorAt(int x, int y) {
   return matrixColor(level);
 }
 
+// Keep the cached glyph map unscaled so callers can apply their own face/mic curve.
+uint16_t matrixRainColorAt(int x, int y, uint16_t brightnessScale) {
+  const uint16_t c = matrixRainRawColorAt(x, y);
+  const uint16_t s = brightnessScale == UINT16_MAX ? globalBrightnessScaleFixed : brightnessScale;
+  if (s == 256) return c;
+  const uint8_t r = static_cast<uint8_t>((((c >> 11) & 31) * 255u / 31 * s + 128) >> 8);
+  const uint8_t g = static_cast<uint8_t>((((c >> 5) & 63) * 255u / 63 * s + 128) >> 8);
+  const uint8_t b = static_cast<uint8_t>(((c & 31) * 255u / 31 * s + 128) >> 8);
+  return g_display ? g_display->color565(r, g, b) : 0;
+}
+
 void drawMatrixRainThroughXbm(int x, int y, int width, int height,
-                              const uint8_t *xbm) {
+                              const uint8_t *xbm, uint16_t brightnessScale) {
   if (!g_display || !xbm || width <= 0 || height <= 0) {
     return;
   }
@@ -307,7 +321,7 @@ void drawMatrixRainThroughXbm(int x, int y, int width, int height,
       if ((unsigned)px >= (unsigned)g_w) {
         continue;
       }
-      const uint16_t c = matrixRainColorAt(px, py);
+      const uint16_t c = matrixRainColorAt(px, py, brightnessScale);
       if (c) {
         g_display->drawPixel(px, py, c);
       }

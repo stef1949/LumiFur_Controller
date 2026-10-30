@@ -1,7 +1,7 @@
 #pragma once
 
 #ifndef DEBUG_MODE
-#define DEBUG_MODE 1          // Set to 1 to enable debug outputs
+#define DEBUG_MODE 0          // Set to 1 to enable debug outputs
 #endif
 #ifndef DEBUG_MICROPHONE
 #define DEBUG_MICROPHONE 0    // Set to 1 to enable microphone debug outputs
@@ -40,7 +40,7 @@
 #define DEBUG_DISABLE_BLE_STATUS_ICON 1 // Set to 1 to hide the on-screen BLE status icon
 #endif
 #ifndef DEBUG_ENABLE_BRIGTHNESS_BOOST_WAVESHARE
-#define DEBUG_ENABLE_BRIGTHNESS_BOOST_WAVESHARE 1 // Set to 1 to enable brightness boost for Waveshare displays. This mayy introduce some flicker wth sme faces, particularly video player. 
+#define DEBUG_ENABLE_BRIGTHNESS_BOOST_WAVESHARE 0 // Set to 1 to default Waveshare software brightness gain on. Panel scan timing stays unchanged.
 #endif
 
 #if DEBUG_MODE

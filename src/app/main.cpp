@@ -33,6 +33,7 @@
 #include "effects/monoVideoPlayer.h"
 #include "effects/matrixRainEffect.h"
 #include "core/AnimationState.h"
+#include "core/DisplayTiming.h"
 #include "core/InternalTemperature.h"
 #include "core/ScrollState.h"
 #include "ble/ble_worker.h"
@@ -508,6 +509,7 @@ volatile uint8_t &blushBrightness = gAnimationState.blushBrightness;
 float globalBrightnessScale = 0.0f;
 uint16_t globalBrightnessScaleFixed = 256;
 static volatile uint8_t gRequestedPanelBrightness = 255;
+static uint8_t gRequestedHardwareBrightness = 255;
 // Other tasks publish only the latest request; the renderer owns DMA writes.
 static std::atomic<int> gPendingPanelBrightness{-1};
 // Mouth boost raises the panel ceiling and compensates non-mouth pixels together.
@@ -593,7 +595,7 @@ void updateGlobalBrightnessScale(uint8_t brightness)
   gRequestedPanelBrightness = brightness;
   globalBrightnessScale = brightness / 255.0f;
   globalBrightnessScaleFixed = static_cast<uint16_t>((static_cast<uint32_t>(brightness) * 256u + 127u) / 255u);
-    // Byte 8 software gain. Clock/refresh are applied on the reboot below.
+  // Boost changes software gain; scan timing stays on the stable configuration.
   if (waveshareBrightnessBoost && globalBrightnessScaleFixed < 256)
   {
     uint16_t boosted = globalBrightnessScaleFixed + (globalBrightnessScaleFixed >> 2);
@@ -603,30 +605,27 @@ void updateGlobalBrightnessScale(uint8_t brightness)
     }
     globalBrightnessScaleFixed = boosted;
   }
-  const uint8_t hardwareBrightness = micResolvePanelBrightness(
-      brightness,
-      gMouthMicBrightnessOverrideActive);
-  // With microphone headroom enabled the hardware stays at 255. Rewriting
-  // both DMA buffers for every software fade step adds work without changing OE.
-  static int lastHardwareBrightness = -1;
-  if (lastHardwareBrightness != hardwareBrightness)
-  {
-#ifdef VIRTUAL_PANE
-    if (chain != nullptr)
-    {
-      chain->setBrightness8(hardwareBrightness);
-      lastHardwareBrightness = hardwareBrightness;
-    }
-#else
-    if (dma_display != nullptr)
-    {
-      dma_display->setBrightness8(hardwareBrightness);
-      lastHardwareBrightness = hardwareBrightness;
-    }
-#endif
-  }
+  // Apply OE only to the completed back buffer immediately before presenting.
+  gRequestedHardwareBrightness = micResolvePanelBrightness(
+      brightness, gMouthMicBrightnessOverrideActive);
   facePlasmaDirty = true;
   requestDisplayRefresh();
+}
+
+// All runtime presentation goes through one owner. The patched S3 swap waits
+// for a descriptor completion in the new buffer before reusing the old one.
+static void presentDisplayFrame()
+{
+#ifdef VIRTUAL_PANE
+  MatrixPanel_I2S_DMA *output = chain;
+#else
+  MatrixPanel_I2S_DMA *output = dma_display;
+#endif
+  if (output != nullptr)
+  {
+    output->setBackBufferBrightness(gRequestedHardwareBrightness);
+    output->flipDMABuffer();
+  }
 }
 
 struct StaticColorState
@@ -1466,6 +1465,10 @@ static void handleBleFaceWriteWork(const BleWorkItem &item)
     return;
   }
 
+  boopRevertAt = 0;
+  boopLoadingActive = false;
+  userSelectedView = newView;
+  scheduleLastViewPersist(newView);
   lastActivityTime = millis();
   if (newView == currentView)
   {
@@ -1473,8 +1476,6 @@ static void handleBleFaceWriteWork(const BleWorkItem &item)
   }
 
   currentView = newView;
-  userSelectedView = currentView;
-  scheduleLastViewPersist(currentView);
   requestDisplayRefresh();
 #if defined(DEBUG_BLE)
   Serial.printf("Write request - new view: %d\n", currentView);
@@ -1637,11 +1638,10 @@ static void handleBleConfigWriteWork(const BleWorkItem &item)
     notifyBleTask();
   }
 
-  // Byte 8 changed. setup() rebuilds mxconfig only on boot.
+  // Software gain changes apply through the rendering task without rebooting.
   if (oldWaveshareBoost != waveshareBrightnessBoost)
   {
-    delay(100); // let the 9-byte notify flush
-    ESP.restart();
+    updateGlobalBrightnessScale(static_cast<uint8_t>(constrain(getLastAppliedBrightness(), 0, 255)));
   }
 }
 
@@ -2347,14 +2347,6 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
                    uint8_t brightnessScale = 255, bool bypassGlobalBrightness = false)
 {
 
-  // Global toggle: same mask, matrix rain instead of the plasma fill.
-  if (matrixRainInsteadOfPlasma)
-  {
-    matrixRainAdvanceColumns();
-    drawMatrixRainThroughXbm(x, y, width, height, xbm);
-    return;
-  }
-
   const int byteWidth = (width + 7) >> 3;
   if (byteWidth <= 0)
   {
@@ -2369,6 +2361,13 @@ void drawPlasmaXbm(int x, int y, int width, int height, const uint8_t *xbm,
                                                           micBrightnessToFixedScale(brightnessScale) +
                                                       128u) >>
                                                      8);
+  if (matrixRainInsteadOfPlasma)
+  {
+    matrixRainAdvanceColumns();
+    drawMatrixRainThroughXbm(x, y, width, height, xbm, combinedBrightnessScale);
+    return;
+  }
+
   CRGB staticColorRgb = CRGB::Black;
   if (useStaticColorMode)
   {
@@ -2570,13 +2569,10 @@ void drawBitmapAdvanced(int x, int y, int width, int height, const uint8_t *bitm
                         uint16_t color, int progress, bool usePlasma,
                         uint8_t time_offset = 0, float scale = 5.0, float animSpeed = 0.2f)
 {
-  // Byte 9. Eyes use this path, not drawPlasmaXbm.
-  // Byte 9. Eyes use this path, not drawPlasmaXbm.
-  if (matrixRainInsteadOfPlasma && usePlasma && bitmap != nullptr)
+  const bool enableMatrix = matrixRainInsteadOfPlasma && usePlasma;
+  if (enableMatrix)
   {
     matrixRainAdvanceColumns();
-    drawMatrixRainThroughXbm(x, y, width, height, bitmap);
-    return;
   }
   const int byteWidth = (width + 7) / 8;
   const float center_y = (height - 1) / 2.0f;
@@ -2584,7 +2580,7 @@ void drawBitmapAdvanced(int x, int y, int width, int height, const uint8_t *bitm
   // --- Blink Effect Calculation ---
   const float w = 0.005f + (1.0f - 0.005f) * (progress / 100.0f);
 
-  const bool enablePlasma = usePlasma && !staticColorModeEnabled;
+  const bool enablePlasma = usePlasma && !staticColorModeEnabled && !enableMatrix;
   CRGB staticColorValue;
   if (staticColorModeEnabled)
   {
@@ -2672,12 +2668,17 @@ void drawBitmapAdvanced(int x, int y, int width, int height, const uint8_t *bitm
         if (rowBits & static_cast<uint8_t>(0x80U >> bitIndex))
         {
           const int pixelX = x + pixelBase + bitIndex;
-        if (enablePlasma)
-        {
-          // --- Plasma Color Calculation ---
-          uint8_t sin_val = sin8(x_val_plasma + t);
-          uint8_t sin_val2 = sin8(temp_val_plasma + t3);
-          uint8_t v = sin_val + cos_val_plasma + sin_val2;
+          if (enableMatrix)
+          {
+            dma_display->drawPixel(pixelX, y + j,
+                                   matrixRainColorAt(pixelX, y + j, rowBrightnessScale));
+          }
+          else if (enablePlasma)
+          {
+            // --- Plasma Color Calculation ---
+            uint8_t sin_val = sin8(x_val_plasma + t);
+            uint8_t sin_val2 = sin8(temp_val_plasma + t3);
+            uint8_t v = sin_val + cos_val_plasma + sin_val2;
             CRGB final_color = ColorFromPalette(currentPalette, v + time_offset);
             final_color.r = static_cast<uint8_t>((static_cast<uint16_t>(final_color.r) * rowBrightnessScale + 128) >> 8);
             final_color.g = static_cast<uint8_t>((static_cast<uint16_t>(final_color.g) * rowBrightnessScale + 128) >> 8);
@@ -3156,11 +3157,12 @@ void blinkingEyes()
     case VIEW_ANGRY_FACE:
     {
       // Drawn face. Narrowed slash eyes, heavy furrowed brows, short snarl.
-      const uint16_t eye = usePlasma
-                               ? 0
-                               : (staticColorModeEnabled
-                                      ? solidColor
-                                      : dma_display->color565(40, 255, 70));
+      uint16_t eye = dma_display->color565(40, 255, 70);
+      if (staticColorModeEnabled)
+      {
+        ensureStaticColorLoaded();
+        eye = dma_display->color565(gStaticColorState.color.r, gStaticColorState.color.g, gStaticColorState.color.b);
+      }
       const uint16_t brow = dma_display->color565(255, 40, 0);
       const uint16_t fang = dma_display->color565(230, 255, 230);
 
@@ -3630,7 +3632,7 @@ void displaySleepMode()
   {
     drawPairingPasskeyOverlay(pairingSnapshot.passkey);
   }
-  dma_display->flipDMABuffer();
+  presentDisplayFrame();
 }
 
 void initStarfield()
@@ -3659,7 +3661,7 @@ void updateStarfield()
       stars[i].speed = random(1, 4);
     }
   }
-  // dma_display->flipDMABuffer();
+  // presentDisplayFrame();
 }
 
 void initDVDLogoAnimation()
@@ -3699,7 +3701,7 @@ void bleNotifyTask(void *param)
 static void displayTask(void *pvParameters)
 {
   (void)pvParameters;
-  TickType_t lastWake = xTaskGetTickCount();
+  uint32_t lastWake = xTaskGetTickCount();
   enum class ViewTransitionPhase : uint8_t
   {
     Idle,
@@ -3749,7 +3751,7 @@ static void displayTask(void *pvParameters)
       pendingView = requestedView;
       displayCurrentView(requestedView);
       perfTelemetryRecordDuration(PerfDurationId::DisplayTaskBusy, micros() - taskLoopStartMicros);
-      vTaskDelayUntil(&lastWake, millisToTicksCeil(sleepFrameInterval));
+      vTaskDelay(display_timing::nextFrameDelay(xTaskGetTickCount(), lastWake, millisToTicksCeil(sleepFrameInterval)));
       continue;
     }
 
@@ -3857,7 +3859,7 @@ static void displayTask(void *pvParameters)
       frameIntervalMs = LF_OTA_ACTIVE_FRAME_INTERVAL_MS;
     }
     perfTelemetryRecordDuration(PerfDurationId::DisplayTaskBusy, micros() - taskLoopStartMicros);
-    vTaskDelayUntil(&lastWake, millisToTicksCeil(frameIntervalMs));
+    vTaskDelay(display_timing::nextFrameDelay(xTaskGetTickCount(), lastWake, millisToTicksCeil(frameIntervalMs)));
   }
 }
 
@@ -4095,7 +4097,7 @@ void setup()
   mouthMicBrightnessOverrideEnabled = getMouthMicBrightnessOverride();
   disableBleIndicatorLight = getDisableBleIndicatorLight();
   disableBleStatusIcon = getDisableBleStatusIcon();
-  waveshareBrightnessBoost = getWaveshareBrightnessBoost(); // Must run before mxconfig is built. Reboot reapplies clock/refresh from this flag.
+  waveshareBrightnessBoost = getWaveshareBrightnessBoost(); // Software gain; scan timing is independent of the saved flag.
   syncBrightnessState(userBrightness);
   accelerometerEnabled = getAccelerometerEnabled();
   sleepModeEnabled = getSleepMode();
@@ -4453,18 +4455,10 @@ void setup()
 
   mxconfig.driver = HUB75_I2S_CFG::FM6126A; // Default for panels using FM6126A chips
   
-  // DEBUG_ENABLE_BRIGTHNESS_BOOST_WAVESHARE, now the saved BLE value.
-  // 40 Hz / 20 MHz is the bright path. Otherwise keep the stable clock.
-  if (waveshareBrightnessBoost)
-  {
-    mxconfig.min_refresh_rate = 40;
-    mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_20M;
-  }
-  else
-  {
-    mxconfig.min_refresh_rate = LF_HUB75_MIN_REFRESH_RATE_HZ;
-    mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_16M;
-  }
+  // A saved brightness boost must never reduce the visual scan rate. Keep
+  // the same stable bus timing for both settings; boost is software gain only.
+  mxconfig.min_refresh_rate = LF_HUB75_MIN_REFRESH_RATE_HZ;
+  mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_16M;
 
   mxconfig.latch_blanking = LF_HUB75_LATCH_BLANKING;        // Keep blanking explicit to avoid per-panel surprises.
   mxconfig.clkphase = LF_HUB75_CLKPHASE;                    // false selects the library's negative-edge clocking mode.
@@ -4489,7 +4483,7 @@ void setup()
 #endif
 
   dma_display->clearScreen();
-  dma_display->flipDMABuffer();
+  presentDisplayFrame();
 
 #if defined(ARDUINO_ADAFRUIT_MATRIXPORTAL_ESP32S3)
   // Initialize onboard components for MatrixPortal ESP32-S3
@@ -4626,7 +4620,7 @@ void setup()
     dma_display->setCursor(64, 20);
     dma_display->print("Booting...");
     displayLoadingBar();
-    dma_display->flipDMABuffer();
+    presentDisplayFrame();
     loadingProgress++;
     delay(15); // ~1.5 s total at loadingMax=100
   }
@@ -4658,7 +4652,7 @@ void setup()
       &bleWorkerTaskHandle,
       CONFIG_BT_NIMBLE_PINNED_TO_CORE);
 
-  // Now spawn the display task pinned to the other core so rendering never competes with loop():
+  // Core 0 owns rendering. Arduino loop, BLE and microphone work stay on core 1.
 
   xTaskCreatePinnedToCore(
       displayTask,
@@ -4807,7 +4801,7 @@ void updateDVDLogos()
 
     drawDVDLogo(logo.x, logo.y, logo.color);
   }
-  // dma_display->flipDMABuffer(); // Flip the buffer to show the updated logos
+  // presentDisplayFrame(); // Flip the buffer to show the updated logos
   // Rendering cadence is handled by displayTask; avoid delaying here.
 }
 
@@ -5006,7 +5000,7 @@ static void renderMatrixFaceView() {
   const int mouthH = 22;
   const int mouthY = 10;
 
-    matrixRainAdvanceColumns();
+  matrixRainAdvance();
 
   drawMatrixRainThroughXbm(rightEyeX, rightEyeY, eyeW, eyeH, (const uint8_t *)Eye);
   drawMatrixRainThroughXbm(leftEyeX, leftEyeY, eyeW, eyeH, (const uint8_t *)EyeL);
@@ -5162,6 +5156,7 @@ static bool viewNeedsPreClear(int view)
 
 void displayCurrentView(int view)
 {
+  matrixRainBeginFrame();
   static int previousViewLocal = -1; // Track the last active view
 
   // If we're in sleep mode, don't display the normal view
@@ -5178,7 +5173,7 @@ void displayCurrentView(int view)
     applyMouthMicBrightnessPolicy(false);
     dma_display->clearScreen();
     drawPairingPasskeyOverlay(pairingSnapshot.passkey);
-    dma_display->flipDMABuffer();
+    presentDisplayFrame();
     return;
   }
   applyMouthMicBrightnessPolicy(viewUsesMic(view));
@@ -5297,7 +5292,7 @@ void displayCurrentView(int view)
 
   if (!sleepModeActive || currentView == VIEW_TRANS_FLAG || currentView == VIEW_BSOD)
   {
-    dma_display->flipDMABuffer();
+    presentDisplayFrame();
   }
 }
 
@@ -5482,73 +5477,67 @@ void checkSleepMode()
 }
 
 // Count a proximity boop. Higher thresholds win on the same hit.
-    static void handleBoop(unsigned long now)
-    {
-         uint8_t hits10s = 0;
-  uint8_t hits15s = 0;
+static void handleBoop(unsigned long now)
+{
+  uint8_t kept = 0;
+  for (uint8_t i = 0; i < boopHitCount; ++i)
+  {
+    if (now - boopHits[i] <= 15000UL)
+      boopHits[kept++] = boopHits[i];
+  }
+  boopHitCount = kept;
+  if (boopHitCount == 16)
+  {
+    for (uint8_t i = 1; i < boopHitCount; ++i)
+      boopHits[i - 1] = boopHits[i];
+    --boopHitCount;
+  }
+  boopHits[boopHitCount++] = now;
+
+  uint8_t hits10s = 0;
+  const uint8_t hits15s = boopHitCount;
   for (uint8_t i = 0; i < boopHitCount; ++i)
   {
     if (now - boopHits[i] <= 10000UL)
-    {
       ++hits10s;
-    }
-    if (now - boopHits[i] <= 15000UL)
-    {
-      ++hits15s;
-    }
+  }
+  Serial.printf("Boop mode=%u hits10=%u hits15=%u\n", boopMode, hits10s, hits15s);
+  const unsigned long blushSpan = fadeInDuration + fullDuration + fadeOutDuration;
+
+  int specialView = -1;
+  if (boopMode >= 3 && hits15s >= 15)
+  {
+    specialView = VIEW_LOADING_BAR;
+  }
+  else if (boopMode >= 2 && hits15s >= 10)
+  {
+    specialView = VIEW_ANGRY_FACE;
+  }
+  else if (boopMode >= 1 && hits10s >= 5)
+  {
+    specialView = VIEW_SPIRAL_EYES;
   }
 
-  Serial.printf("Boop mode=%u hits10=%u hits15=%u\n", boopMode, hits10s, hits15s);
+  if (specialView >= 0)
+  {
+    blushState = BlushState::Inactive;
+    wasBlushOverlay = false;
+    boopSavedView = userSelectedView;
+    currentView = static_cast<uint8_t>(specialView);
+    boopRevertAt = now + (specialView == VIEW_LOADING_BAR ? 3000UL : blushSpan);
+    notifyBleTask();
+    requestDisplayRefresh();
+    return;
+  }
 
-  const unsigned long blushSpan = fadeInDuration + fullDuration + fadeOutDuration;
-      uint8_t kept = 0;
-      for (uint8_t i = 0; i < boopHitCount; ++i)
-      {
-        if (now - boopHits[i] <= 15000UL)
-        {
-          boopHits[kept++] = boopHits[i];
-        }
-      }
-      boopHitCount = kept;
-      if (boopHitCount < 16)
-      {
-        boopHits[boopHitCount++] = now;
-      }
-
-      int specialView = -1;
-      if (boopMode >= 3 && hits15s >= 15)
-      {
-        specialView = VIEW_LOADING_BAR;
-      }
-      else if (boopMode >= 2 && hits15s >= 10)
-      {
-        specialView = VIEW_ANGRY_FACE;
-      }
-      else if (boopMode >= 1 && hits10s >= 5)
-      {
-        specialView = VIEW_SPIRAL_EYES;
-      }
-
-      if (specialView >= 0)
-      {
-        blushState = BlushState::Inactive;
-        wasBlushOverlay = false;
-        boopSavedView = userSelectedView;
-        currentView = static_cast<uint8_t>(specialView);
-        boopRevertAt = now + (specialView == VIEW_LOADING_BAR ? 3000UL : blushSpan);
-        notifyBleTask();
-        requestDisplayRefresh();
-        return;
-      }
-
-      if (blushState == BlushState::Inactive)
-      {
-        blushState = BlushState::FadeIn;
-        blushStateStartTime = now;
-        originalViewBeforeBlush = userSelectedView;
-        wasBlushOverlay = true;
-      }
-    }
+  if (blushState == BlushState::Inactive)
+  {
+    blushState = BlushState::FadeIn;
+    blushStateStartTime = now;
+    originalViewBeforeBlush = userSelectedView;
+    wasBlushOverlay = true;
+  }
+}
 void loop()
 {
   const uint32_t loopStartMicros = micros();
@@ -5713,23 +5702,10 @@ void loop()
 #endif
 
 #ifdef BUTTON_DOWN
-    if (!pairingResetHoldPressed && consumeButtonShortPress(downButtonState))
+    if (!pairingResetHoldPressed && downPressed &&
+        consumeButtonLongPress(downButtonState, loopNow, PAIRING_MODE_HOLD_MS))
     {
-      PROFILE_SECTION("ButtonInputs");
-      noteButtonInteraction(loopNow);
-      if (currentView == 0)
-      {
-        currentView = static_cast<uint8_t>(totalViews - 1);
-      }
-      else
-      {
-        --currentView;
-      }
-      userSelectedView = currentView;
-      viewChangedByButton = true;
-      scheduleLastViewPersist(currentView);
-      lastActivityTime = loopNow;
-      requestDisplayRefresh();
+      enablePairingModeFromHeldButton();
     }
 #endif
 
@@ -5761,6 +5737,7 @@ void loop()
       {
         --currentView;
       }
+      userSelectedView = currentView;
       viewChangedByButton = true;
       scheduleLastViewPersist(currentView);
       lastActivityTime = loopNow;
@@ -5775,6 +5752,8 @@ void loop()
 
     if (viewChangedByButton)
     {
+      boopRevertAt = 0;
+      boopLoadingActive = false;
       LOG_DEBUG("View changed by button: %d\n", currentView);
       notifyBleTask();
       // Reset specific view states if necessary when changing views

@@ -9,6 +9,33 @@ This directory contains comprehensive Unity framework tests for the LumiFur Cont
 
 ## Test Suites
 
+### Display timing and DMA ownership
+
+Run `pio test -e native2_windows -f test_display_timing` for frame deadlines,
+overruns and tick rollover. The display skips missed deadlines and yields rather
+than issuing a burst of catch-up frames.
+
+Run `python tools/test_hub75_sync.py` for the project-owned HUB75 driver patch,
+startup swaps, stale EOF rejection and brightness writes to the inactive buffer.
+Run `python tools/test_face_regressions.py` for face rendering, boop handling and
+the rule that all Matrix stencil draws share one simulation step per frame.
+These two scripts require `g++` on PATH and use mocked hardware.
+
+Firmware builds apply `tools/platformio/prepare_hub75_driver.py` after dependency
+installation. It adds a GDMA completion handshake on ESP32-S3 and a back-buffer
+brightness API. Unsupported dependency layouts fail the build explicitly.
+
+Panel configuration stays at 16 MHz, at least 120 Hz requested refresh, and
+double buffering regardless of the saved Waveshare boost flag. That flag now
+controls software gain only and no longer reboots the device when changed.
+Core assignment remains display on core 0; Arduino loop, BLE and microphone on
+core 1. Keep colour depth, latch blanking and clock phase at their configured
+values while checking these fixes on hardware.
+
+After flashing, check a normal face and Matrix fill at low/high brightness,
+automatic brightness changes, view fades, and connected/disconnected BLE.
+Native tests cannot validate the electrical panel timing or physical flicker.
+
 ### test_animation_state
 Tests for the `AnimationState` module (`src/core/AnimationState.cpp`)
 - **6 tests** covering initialization, reset, blink timings, blush state, eye bounce, and idle hover offsets

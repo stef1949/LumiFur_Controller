@@ -2,7 +2,7 @@
 
 // HUB75 render tuning
 #ifndef LF_HUB75_COLOR_DEPTH_BITS
-#define LF_HUB75_COLOR_DEPTH_BITS 7
+#define LF_HUB75_COLOR_DEPTH_BITS 8
 #endif
 
 #ifndef LF_HUB75_MIN_REFRESH_RATE_HZ
