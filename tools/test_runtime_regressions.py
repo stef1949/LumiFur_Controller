@@ -15,6 +15,10 @@ STUB = r'''
 #include <cmath>
 #include <cstdlib>
 #include "app/Views.h"
+#include "app/AppRuntime.h"
+#include "app/Timing.h"
+#include "app/RuntimeTuning.h"
+#include "perf_tuning.h"
 #include "app/ViewState.h"
 #include "app/PowerManagement.h"
 #include "app/InputController.h"
@@ -23,6 +27,10 @@ STUB = r'''
 #include "core/TemperatureHistory.h"
 #include "core/AnimationState.h"
 #define DEBUG_MODE 0
+#define PERF_SCOPE(x) do {} while(0)
+#define PROFILE_SECTION(x) do {} while(0)
+#define LOG_DEBUG(...) do {} while(0)
+#define LOG_DEBUG_LN(...) do {} while(0)
 #define BUTTON_UP 1
 #define BUTTON_DOWN 2
 #define LOW 0
@@ -34,6 +42,10 @@ using portMUX_TYPE=int;
 uint32_t clockMs=0;
 unsigned frequency=240, refreshes=0, persisted=0, temperatureReads=0;
 bool keys[3]={}, activity=false, otaActive=false, deviceConnected=false;
+bool g_accelerometer_initialized=false, useShakeSensitivity=false;
+constexpr unsigned long MOTION_SAMPLE_INTERVAL_FAST=15;
+bool detectMotion(){return activity;}
+bool shouldDeferProximityRead(unsigned long,unsigned long){return false;}
 uint32_t millis(){return clockMs;}
 int digitalRead(int pin){return keys[pin]?0:1;}
 void vTaskDelay(uint32_t){}
@@ -64,7 +76,6 @@ void micSetEnabled(bool){}
 bool sleepMotionDetected(){return activity;}
 bool bleIsOtaBusy(){return otaActive;}
 CRGB getStaticColorCached(){return {};}
-void noteButtonInteraction(unsigned long){}
 void resetBlePairing(){}
 void startPairingMode(unsigned long){}
 void scheduleLastViewPersist(uint8_t view){persisted=view;}
@@ -128,7 +139,7 @@ class RuntimeRegressionTest(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="lumifur-runtime-") as directory:
             source, executable = Path(directory) / "test.cpp", Path(directory) / "test.exe"
             source.write_text("\n".join(parts), encoding="utf-8")
-            subprocess.run(["g++", "-std=c++17", f"-I{ROOT / 'src'}", str(source),
+            subprocess.run(["g++", "-std=c++17", f"-I{ROOT / 'src'}", f"-I{ROOT / 'include'}", str(source),
                             str(ROOT / "src/core/TemperatureHistory.cpp"), str(ROOT / "src/core/AnimationState.cpp"),
                             "-o", str(executable)], check=True)
             subprocess.run([str(executable)], check=True)

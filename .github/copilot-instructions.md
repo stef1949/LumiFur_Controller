@@ -14,8 +14,8 @@ LumiFur Controller is an embedded C++ project for ESP32 microcontrollers that co
 ## Architecture & Code Structure
 
 ### Main Components
-- `src/app/main.cpp` (~1500 lines): Core application logic, view management, animations
-- `src/app/main.h`: Function declarations, configuration constants, helper functions
+- `src/app/main.cpp`: Thin Arduino entry points and update scheduling; subsystem ownership is documented in `docs/ARCHITECTURE.md`
+- `src/app/main.h`: Arduino entry-point declarations only; use subsystem headers for subsystem APIs
 - `src/assets/bitmaps.h`: Bitmap data for facial expressions and graphics
 - `src/ble/ble.h`: Bluetooth Low Energy communication handling
 - `src/hardware/deviceConfig.h`: Hardware pin definitions and device-specific settings

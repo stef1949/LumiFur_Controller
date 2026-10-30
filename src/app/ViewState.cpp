@@ -1,4 +1,6 @@
 #include "app/ViewState.h"
+#include "app/Timing.h"
+#include "app/RuntimeDiagnostics.h"
 #include "app/AppRuntime.h"
 #include "app/AppStateSync.h"
 #include "app/PowerManagement.h"
@@ -111,4 +113,22 @@ void handleBoop(unsigned long now)
     animation::state().originalViewBeforeBlush = userSelectedView;
     animation::state().wasBlushOverlay = true;
   }
+}
+
+void updateViewTimers(unsigned long loopNow)
+{
+  // --- Revert from Spiral View Timer ---
+  // Use a local copy to avoid updating animation::state().spiralStartMillis inside hasElapsedSince
+  unsigned long spiralStartMillisCopy = animation::state().spiralStartMillis;
+  if (currentView == VIEW_SPIRAL_EYES && spiralStartMillisCopy > 0 && hasElapsedSince(loopNow, spiralStartMillisCopy, 5000))
+  {
+    LOG_DEBUG_LN("Spiral timeout, reverting view.");
+    currentView = animation::state().previousView;
+    animation::state().spiralStartMillis = 0;
+    requestDisplayRefresh();
+    notifyBleTask();
+  }
+
+  updateTemporaryView(loopNow);
+
 }

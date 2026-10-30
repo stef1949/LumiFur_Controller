@@ -13,3 +13,5 @@ constexpr unsigned long fadeOutDuration = 2000;
 void selectUserView(uint8_t view);
 void handleBoop(unsigned long now);
 void updateTemporaryView(unsigned long now);
+
+void updateViewTimers(unsigned long nowMs);

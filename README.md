@@ -37,7 +37,7 @@ A real-time firmware for animating a HUB75 LED matrix Protogen mask with sensor-
 - **Controller:** Adafruit MatrixPortal ESP32-S3 (default target) with built-in APDS9960, LIS3DH, status NeoPixel, and onboard microphone used by the firmware.
 - **Display:** Two chained 64×32 HUB75 RGB matrix panels (1/16 scan) plus appropriate ribbon cables and 5 V power delivery.
 - **Inputs & sensors:** Onboard buttons map to view navigation; alternate hardware can be remapped in `src/hardware/deviceConfig.h`.
-- **Optional:** Additional peripherals (e.g., alternative sensors or external microphones) can be integrated by adjusting the pin definitions and initialization blocks in `src/hardware/deviceConfig.h` / `src/app/main.cpp`.
+- **Optional:** Additional peripherals (e.g., alternative sensors or external microphones) can be integrated by adjusting the pin definitions and initialization blocks in `src/hardware/deviceConfig.h` / `src/app/AppSetup.cpp`.
 
 ## Build & Flash
 All dependencies are resolved by PlatformIO. You can work from the CLI or through the VS Code extension.
@@ -66,7 +66,8 @@ The PlatformIO helper scripts used by these environments now live under `tools/p
 ## Configuration
 - **Persistent preferences:** `src/config/userPreferences.h` stores preferences and `src/config/RuntimeSettings.*` manages live settings and defaults for brightness, auto-blink, accelerometer usage, sleep mode, and other controller behaviors.
 - **Hardware mapping:** Modify `src/hardware/deviceConfig.h` to adjust HUB75 pinouts, panel chains, button inputs, or to enable the virtual panel simulator (`VIRTUAL_PANE`).
-- **Effects & assets:** Custom scenes live in `src/effects/`, bitmap assets in `src/assets/bitmaps.h`, and optional font assets in `src/assets/fonts/`; add new animations or alter existing ones there.
+- **Application structure:** `src/app/main.cpp` coordinates startup and update cadence. View selection, rendering, inputs, power and BLE have separate modules; see [the architecture guide](docs/ARCHITECTURE.md).
+- **Effects & assets:** Custom scenes live in `src/effects/` and renderer adapters in `src/rendering/`, bitmap assets in `src/assets/bitmaps.h`, and optional font assets in `src/assets/fonts/`; add new animations or alter existing ones there.
 - **Video assets:** Put `bad_apple.gif` or another supported source file in `video_sources/` or `data/videos/` for automatic conversion during `buildfs`/`uploadfs`; generated assets are written as lowercase `.lfv` files such as `data/videos/bad_apple.lfv`, using a `64x32` per-panel `cover` layout by default so each panel is filled without distorting aspect ratio.
 - **Build metadata:** `platformio.ini` sets `FIRMWARE_VERSION`, model tags and pinned dependencies; the build helper injects the actual Git commit and branch. Set `SOURCE_DATE_EPOCH` for a reproducible UTC timestamp.
 

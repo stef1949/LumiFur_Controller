@@ -30,6 +30,11 @@ face rendering and HUB75 DMA synchronization. The JavaScript tests exercise the
 browser transport, including acknowledgement ordering, errors, write deadlines,
 offset validation, disconnection and legacy firmware.
 
+`tools/test_view_manager.py` checks the production dispatcher against the stable
+BLE view-ID contract for all 33 views, including view-entry resets, pairing/sleep
+overlays and frame budgets. Renderer fixtures read their owning source modules
+instead of assuming that those implementations live in `main.cpp`.
+
 `test/run_unity_tests.sh` is a GCC fallback when PlatformIO is unavailable. Set
 `UNITY_DIR` to an existing Unity checkout to avoid downloading one.
 

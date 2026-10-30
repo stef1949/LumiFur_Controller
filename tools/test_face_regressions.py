@@ -5,7 +5,7 @@ import tempfile
 import re
 
 ROOT = Path(__file__).resolve().parents[1]
-main = (ROOT / "src/app/main.cpp").read_text(encoding="utf-8")
+main = "\n".join((ROOT / "src/rendering" / name).read_text(encoding="utf-8") for name in ("RenderPrimitives.cpp", "FaceRenderer.cpp"))
 
 
 def function(source, signature):
@@ -66,6 +66,7 @@ unsigned long boopHits[16]={}, boopRevertAt=0, lastActivityTime=0, blushStateSta
 uint8_t boopHitCount=0,boopSavedView=0,userSelectedView=2,currentView=2,boopMode=3,originalViewBeforeBlush=0;
 bool boopLoadingActive=false,wasBlushOverlay=false,sleepModeActive=false;
 #include "core/AnimationState.h"
+#include "rendering/RenderPrimitives.h"
 using animation::BlushState;
 BlushState &blushState=animation::state().blushState;
 struct AppStateLock {};
@@ -83,7 +84,7 @@ void noteButtonInteraction(unsigned long) {} void refreshBleAdvertising() {}
 void startPairingMode(unsigned long) { ++pairingCount; }
 '''
 
-assert "matrixRainAdvance();" in function(main, "static void renderMatrixFaceView()")
+assert "matrixRainAdvance();" in function(main, "void renderMatrixFaceView()")
 
 effect = (ROOT / "src/effects/matrixRainEffect.cpp").read_text(encoding="utf-8")
 effect = "\n".join(line for line in effect.splitlines() if not line.startswith("#include"))
