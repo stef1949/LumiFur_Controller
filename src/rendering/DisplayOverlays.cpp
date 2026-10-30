@@ -194,15 +194,11 @@ void drawPairingPasskeyOverlay(uint32_t passkey)
   const int boxW = contentW + (padding * 2);
   const int boxH = labelH + keyH + gap + (padding * 2);
 
-  const int screenW = dma_display->width();
+  // Draw the same box centred on each panel half so the code reads from either side.
   const int screenH = dma_display->height();
-  int boxX = (screenW - boxW) / 2;
+  const int halfW = dma_display->width() / 2;
+  const int drawW = (boxW > halfW) ? halfW : boxW;
   int boxY = (screenH - boxH) / 2;
-
-  if (boxX < 0)
-  {
-    boxX = 0;
-  }
   if (boxY < 0)
   {
     boxY = 0;
@@ -211,29 +207,30 @@ void drawPairingPasskeyOverlay(uint32_t passkey)
   const uint16_t backgroundColor = dma_display->color565(0, 0, 0);
   const uint16_t borderColor = dma_display->color565(255, 255, 255);
 
-  dma_display->fillRect(boxX, boxY, boxW, boxH, backgroundColor);
-  dma_display->drawRect(boxX, boxY, boxW, boxH, borderColor);
+  for (int half = 0; half < 2; ++half)
+  {
+    const int boxX = (half * halfW) + (halfW - drawW) / 2;
 
-  const int labelLeft = boxX + (boxW - labelW) / 2;
-  const int labelTop = boxY + padding;
-  const int labelCursorX = labelLeft - labelX1;
-  const int labelCursorY = labelTop - labelY1;
+    dma_display->fillRect(boxX, boxY, drawW, boxH, backgroundColor);
+    dma_display->drawRect(boxX, boxY, drawW, boxH, borderColor);
 
-  dma_display->setFont(&TomThumb);
-  dma_display->setTextSize(1);
-  dma_display->setTextColor(borderColor);
-  dma_display->setCursor(labelCursorX, labelCursorY);
-  dma_display->print(label);
+    const int labelLeft = boxX + (drawW - labelW) / 2;
+    const int labelTop = boxY + padding;
 
-  const int keyLeft = boxX + (boxW - keyW) / 2;
-  const int keyTop = labelTop + labelH + gap;
-  const int keyCursorX = keyLeft - keyX1;
-  const int keyCursorY = keyTop - keyY1;
+    dma_display->setFont(&TomThumb);
+    dma_display->setTextSize(1);
+    dma_display->setTextColor(borderColor);
+    dma_display->setCursor(labelLeft - labelX1, labelTop - labelY1);
+    dma_display->print(label);
 
-  dma_display->setFont(&FreeSans9pt7b);
-  dma_display->setTextSize(1);
-  dma_display->setTextColor(borderColor);
-  dma_display->setCursor(keyCursorX, keyCursorY);
-  dma_display->print(passkeyStr);
+    const int keyLeft = boxX + (drawW - keyW) / 2;
+    const int keyTop = labelTop + labelH + gap;
+
+    dma_display->setFont(&FreeSans9pt7b);
+    dma_display->setTextSize(1);
+    dma_display->setTextColor(borderColor);
+    dma_display->setCursor(keyLeft - keyX1, keyTop - keyY1);
+    dma_display->print(passkeyStr);
+  }
 
 }

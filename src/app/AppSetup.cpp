@@ -285,9 +285,9 @@ void initializeApplication()
     dma_display->setCursor(0, 20);
     dma_display->setTextColor(dma_display->color565(255, 255, 255));
     dma_display->setFont(&TomThumb); // Set font
-    dma_display->print("Booting...");
+    dma_display->print("Booting v" FIRMWARE_VERSION);
     dma_display->setCursor(64, 20);
-    dma_display->print("Booting...");
+    dma_display->print("Booting v" FIRMWARE_VERSION);
     displayLoadingBar();
     presentDisplayFrame();
     loadingProgress++;
