@@ -548,7 +548,8 @@ bool readAmbientProximity(unsigned long now, uint8_t &proximityOut, uint32_t *tr
 
 bool shouldDeferProximityRead(unsigned long now, unsigned long guardMs)
 {
-  if (!autoBrightnessEnabled)
+  // Lux is also sampled for BLE when auto brightness is off, so guard on any real ALS read.
+  if (!apdsInitialized || apdsFaulted)
   {
     return false;
   }

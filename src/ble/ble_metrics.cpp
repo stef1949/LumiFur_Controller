@@ -1,5 +1,6 @@
 #include "ble/ble_metrics.h"
 #include "ble/ble_state.h"
+#include "ble/LuxNotifyPolicy.h"
 #include "core/AdaptiveBrightness.h"
 #include "core/InternalTemperature.h"
 #include "core/TemperatureHistory.h"
@@ -17,9 +18,8 @@ namespace
 unsigned long luxMillis = 0;
 constexpr unsigned long luxInterval = 500;
 uint16_t lastSentLuxValue = 0;
-constexpr uint16_t luxChangeThreshold = 10;
 // Set when a client (re)subscribes, so it gets the current reading even if lux
-// has not moved by luxChangeThreshold since the last notification.
+// has not changed enough to notify since the last notification.
 std::atomic<bool> luxResendRequested{true};
 uint32_t temperatureMillis = 0;
 uint32_t lastHistoryTransferMillis = 0;
@@ -108,38 +108,41 @@ void updateLux()
     {
         luxMillis = currentMillis;
 
-        // Verify that the device is connected and the lux characteristic pointer is valid.
-        if (deviceConnected && pLuxCharacteristic != nullptr)
+        if (pLuxCharacteristic == nullptr)
         {
-            // Get current lux value from the APDS9960 sensor (in lux)
-            uint16_t currentLux = getAmbientLuxU16();
-
-            // Keep the readable value current so a client read on connect is not stale.
-            uint8_t luxBytes[2];
-            luxBytes[0] = currentLux & 0xFF;        // Low byte
-            luxBytes[1] = (currentLux >> 8) & 0xFF; // High byte
-            pLuxCharacteristic->setValue(luxBytes, 2);
-
-            // Only notify if lux has changed significantly (or a client just subscribed) to avoid spam
-            const bool resend = luxResendRequested.exchange(false);
-            if (resend || abs(static_cast<int>(currentLux) - static_cast<int>(lastSentLuxValue)) >= luxChangeThreshold)
+            // Extra safeguard: log once rather than on every update.
+            static bool nullLogged = false;
+            if (!nullLogged)
             {
-                pLuxCharacteristic->notify();
+                Serial.println("Error: pLuxCharacteristic is null!");
+                nullLogged = true;
+            }
+            return;
+        }
 
-                lastSentLuxValue = currentLux;
+        // Get current lux value from the APDS9960 sensor (in lux)
+        uint16_t currentLux = getAmbientLuxU16();
+
+        // Keep the readable value current, connected or not, so a client read on connect is not stale.
+        uint8_t luxBytes[2];
+        luxBytes[0] = currentLux & 0xFF;        // Low byte
+        luxBytes[1] = (currentLux >> 8) & 0xFF; // High byte
+        pLuxCharacteristic->setValue(luxBytes, 2);
+
+        if (!deviceConnected) return;
+
+        // Notify on meaningful changes (or when a client just subscribed) to avoid spam
+        const bool resend = luxResendRequested.exchange(false);
+        if (resend || lux::shouldNotifyLux(currentLux, lastSentLuxValue))
+        {
+            pLuxCharacteristic->notify();
+
+            lastSentLuxValue = currentLux;
 
 #if DEBUG_MODE
-                Serial.printf("Lux level sent: %u\n", currentLux);
+            Serial.printf("Lux level sent: %u
+", currentLux);
 #endif
-            }
-        }
-        else
-        {
-            // Extra safeguard: log an error if pLuxCharacteristic is null or not connected
-            if (!deviceConnected)
-                Serial.println("Warning: updateLux called while not connected.");
-            if (pLuxCharacteristic == nullptr)
-                Serial.println("Error: pLuxCharacteristic is null!");
         }
     }
 }

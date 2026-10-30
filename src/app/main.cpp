@@ -45,11 +45,11 @@ void loop()
       PROFILE_SECTION("AutoBrightness");
       maybeUpdateBrightness();
     });
-    if (deviceConnected)
-      runIfElapsed(now, lastLux, runtime::kLuxIntervalMs, []() {
-        PERF_SCOPE(PerfBucket::Ble);
-        updateLux();
-      });
+    // Runs while disconnected too, so the readable value is current on connect.
+    runIfElapsed(now, lastLux, runtime::kLuxIntervalMs, []() {
+      PERF_SCOPE(PerfBucket::Ble);
+      updateLux();
+    });
   }
 
   updateTemperature(); // Collection continues while disconnected or asleep.
